@@ -1,0 +1,15 @@
+build/
+cmake-build-*/
+compile_commands.json
+.scala-build/
+.metals/
+.cache/
+.idea/
+.vscode/
+*.o
+*.a
+*.so
+*.dylib
+*.dll
+*.exe
+

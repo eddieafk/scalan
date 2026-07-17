@@ -1,0 +1,7 @@
+{
+  "schemaVersion": 1,
+  "source": "Hello.scala",
+  "action": "emit-nir",
+  "optimizationLevel": 0,
+  "debugInfo": true
+}

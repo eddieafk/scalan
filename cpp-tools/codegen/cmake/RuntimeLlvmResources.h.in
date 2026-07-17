@@ -1,0 +1,16 @@
+#ifndef SCALANATIVE_TOOLS_CODEGEN_RUNTIME_LLVM_RESOURCES_H
+#define SCALANATIVE_TOOLS_CODEGEN_RUNTIME_LLVM_RESOURCES_H
+
+#include <string_view>
+
+namespace scalanative::tools::codegen::runtime_resources {
+
+inline constexpr std::string_view Lifecycle = R"SN_LLVM(
+@CPP_SCALANATIVE_RUNTIME_LIFECYCLE_LLVM@)SN_LLVM";
+
+inline constexpr std::string_view Exceptions = R"SN_LLVM(
+@CPP_SCALANATIVE_RUNTIME_EXCEPTIONS_LLVM@)SN_LLVM";
+
+} // namespace scalanative::tools::codegen::runtime_resources
+
+#endif
