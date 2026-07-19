@@ -74,8 +74,75 @@ object ArrayLiterals {
       (narrowed(1) == null) + "|" + failure
   }
 
+  def fillBehavior(): String = {
+    var counter = 0
+    val values = Array.fill[Int](3)({
+      counter = counter + 1
+      counter
+    })
+    values(0) + "|" + values(1) + "|" + values(2) + "|" + counter
+  }
+
+  def multiFillBehavior(): String = {
+    var counter = 0
+    val matrix = Array.fill[Int](2, 3)({
+      counter = counter + 1
+      counter
+    })
+    matrix(0)(0) = 20
+    matrix.length + "|" + matrix(0).length + "|" + matrix(0)(0) + "|" +
+      matrix(0)(1) + "|" + matrix(1)(0) + "|" + counter + "|" +
+      (matrix(0) == matrix(1))
+  }
+
+  def rangeBehavior(): String = {
+    val ascending = Array.range(1, 8, 2)
+    val descending = Array.range(7, 0, 0 - 3)
+    val defaults = Array.range(2, 5)
+    ascending.length + "|" + ascending(0) + "|" + ascending(3) + "|" +
+      descending(0) + "|" + descending(2) + "|" + defaults(2)
+  }
+
+  def rejectZeroRangeStep(): String =
+    try {
+      println(Array.range(1, 5, 0).length)
+      "zero range step was accepted"
+    } catch {
+      case failure: IllegalArgumentException =>
+        "zero range step failure: " + failure.getMessage
+    }
+
+  def concatBehavior(): String = {
+    val values =
+      Array.concat[Int](Array(1, 2), Array.empty[Int], Array(3, 4))
+    val child = new ArrayChild(7)
+    val references = Array.concat[ArrayBase](
+      Array[ArrayBase](child),
+      Array[ArrayBase](new ArrayOther(8))
+    )
+    val first = Array(5)
+    val nested = Array.concat[Array[Int]](
+      Array[Array[Int]](first),
+      Array[Array[Int]](Array(6))
+    )
+    nested(0)(0) = 9
+    values.length + "|" + values(0) + "|" + values(3) + "|" +
+      references(0).value + "|" + first(0) + "|" + nested(1)(0)
+  }
+
+  def rejectNullConcat(): String = {
+    val missing: Array[Int] = null
+    try {
+      println(Array.concat[Int](Array(1), missing, Array(3)).length)
+      "null concat input was accepted"
+    } catch {
+      case failure: NullPointerException =>
+        "null concat failure: " + failure.getMessage
+    }
+  }
+
   def main = {
-    val empty = Array[String]()
+    val empty = Array.empty[String]
     val colors = Array("red", "blue")
     colors(1) = "green"
     println(empty.length)
@@ -88,6 +155,12 @@ object ArrayLiterals {
     println(cloneBehavior())
     println(copyBehavior())
     println(checkedReferenceCopy())
+    println(fillBehavior())
+    println(multiFillBehavior())
+    println(rangeBehavior())
+    println(rejectZeroRangeStep())
+    println(concatBehavior())
+    println(rejectNullConcat())
     println(rejectNegativeSize())
   }
 }

@@ -3627,6 +3627,9 @@ int smokeRuntimeTypeTestsMvp() {
                          "gcSetCollectionThreshold" &&
                      scalanative::support::StdNames::Zone == "Zone" &&
                      scalanative::support::StdNames::ZoneScoped == "scoped" &&
+                     scalanative::support::StdNames::ArrayEmpty == "empty" &&
+                     scalanative::support::StdNames::ArrayFill == "fill" &&
+                     scalanative::support::StdNames::ArrayRange == "range" &&
                      scalanative::support::StdNames::RuntimeGcCollect ==
                          "scala.scalanative.runtime.gcCollect" &&
                      scalanative::support::StdNames::RuntimeStringLength ==
@@ -3647,6 +3650,18 @@ int smokeRuntimeTypeTestsMvp() {
                          "scala.scalanative.runtime.intArrayApply" &&
                      scalanative::support::StdNames::RuntimeIntArrayUpdate ==
                          "scala.scalanative.runtime.intArrayUpdate" &&
+                     scalanative::support::StdNames::RuntimeByteArrayLength ==
+                         "scala.scalanative.runtime.byteArrayLength" &&
+                     scalanative::support::StdNames::RuntimeByteArrayApply ==
+                         "scala.scalanative.runtime.byteArrayApply" &&
+                     scalanative::support::StdNames::RuntimeByteArrayUpdate ==
+                         "scala.scalanative.runtime.byteArrayUpdate" &&
+                     scalanative::support::StdNames::RuntimeShortArrayLength ==
+                         "scala.scalanative.runtime.shortArrayLength" &&
+                     scalanative::support::StdNames::RuntimeShortArrayApply ==
+                         "scala.scalanative.runtime.shortArrayApply" &&
+                     scalanative::support::StdNames::RuntimeShortArrayUpdate ==
+                         "scala.scalanative.runtime.shortArrayUpdate" &&
                      scalanative::support::StdNames::RuntimeBooleanArrayLength ==
                          "scala.scalanative.runtime.booleanArrayLength" &&
                      scalanative::support::StdNames::RuntimeBooleanArrayApply ==
@@ -3685,8 +3700,16 @@ int smokeRuntimeTypeTestsMvp() {
                          "scala.scalanative.runtime.referenceArrayUpdate" &&
                      scalanative::support::StdNames::RuntimeReferenceArrayCopy ==
                          "scala.scalanative.runtime.referenceArrayCopy" &&
+                     scalanative::support::StdNames::RuntimeArrayFill ==
+                         "scala.scalanative.runtime.arrayFill" &&
+                     scalanative::support::StdNames::RuntimeArrayRange ==
+                         "scala.scalanative.runtime.arrayRange" &&
                      scalanative::support::StdNames::RuntimeBooleanToString ==
                          "scala.scalanative.runtime.booleanToString" &&
+                     scalanative::support::StdNames::RuntimeByteToString ==
+                         "scala.scalanative.runtime.byteToString" &&
+                     scalanative::support::StdNames::RuntimeShortToString ==
+                         "scala.scalanative.runtime.shortToString" &&
                      scalanative::support::StdNames::RuntimeIntToString ==
                          "scala.scalanative.runtime.intToString" &&
                      scalanative::support::StdNames::RuntimeLongToString ==
@@ -3705,6 +3728,18 @@ int smokeRuntimeTypeTestsMvp() {
                          "scala.scalanative.runtime.anyEquals" &&
                      scalanative::support::StdNames::RuntimeAnyReceiverEquals ==
                          "scala.scalanative.runtime.anyReceiverEquals" &&
+                     scalanative::support::StdNames::RuntimeIntToByte ==
+                         "scala.scalanative.runtime.intToByte" &&
+                     scalanative::support::StdNames::RuntimeIntToShort ==
+                         "scala.scalanative.runtime.intToShort" &&
+                     scalanative::support::StdNames::RuntimeByteToInt ==
+                         "scala.scalanative.runtime.byteToInt" &&
+                     scalanative::support::StdNames::RuntimeShortToInt ==
+                         "scala.scalanative.runtime.shortToInt" &&
+                     scalanative::support::StdNames::RuntimeByteHashCode ==
+                         "scala.scalanative.runtime.byteHashCode" &&
+                     scalanative::support::StdNames::RuntimeShortHashCode ==
+                         "scala.scalanative.runtime.shortHashCode" &&
                      scalanative::support::StdNames::RuntimeBooleanHashCode ==
                          "scala.scalanative.runtime.booleanHashCode" &&
                      scalanative::support::StdNames::RuntimeLongHashCode ==
@@ -6980,6 +7015,10 @@ int smokeBoxedDependentScalarsMvp() {
       scalanative::runtime::boxedPrimitiveDescriptor(BoxedPrimitiveKind::Unit);
   const scalanative::runtime::BoxedPrimitiveDescriptor booleanDescriptor =
       scalanative::runtime::boxedPrimitiveDescriptor(BoxedPrimitiveKind::Boolean);
+  const scalanative::runtime::BoxedPrimitiveDescriptor byteDescriptor =
+      scalanative::runtime::boxedPrimitiveDescriptor(BoxedPrimitiveKind::Byte);
+  const scalanative::runtime::BoxedPrimitiveDescriptor shortDescriptor =
+      scalanative::runtime::boxedPrimitiveDescriptor(BoxedPrimitiveKind::Short);
   const scalanative::runtime::BoxedPrimitiveDescriptor longDescriptor =
       scalanative::runtime::boxedPrimitiveDescriptor(BoxedPrimitiveKind::Long);
   const scalanative::runtime::BoxedPrimitiveDescriptor symbolDescriptor =
@@ -6988,6 +7027,10 @@ int smokeBoxedDependentScalarsMvp() {
       scalanative::runtime::boxedPrimitiveDescriptor(BoxedPrimitiveKind::String);
   const scalanative::runtime::RuntimeTypeLayout unitLayout =
       scalanative::runtime::boxedPrimitiveTypeLayout(BoxedPrimitiveKind::Unit);
+  const scalanative::runtime::RuntimeTypeLayout byteLayout =
+      scalanative::runtime::boxedPrimitiveTypeLayout(BoxedPrimitiveKind::Byte);
+  const scalanative::runtime::RuntimeTypeLayout shortLayout =
+      scalanative::runtime::boxedPrimitiveTypeLayout(BoxedPrimitiveKind::Short);
   const scalanative::runtime::RuntimeTypeLayout longLayout =
       scalanative::runtime::boxedPrimitiveTypeLayout(BoxedPrimitiveKind::Long);
   const scalanative::runtime::RuntimeTypeLayout stringLayout =
@@ -6997,6 +7040,10 @@ int smokeBoxedDependentScalarsMvp() {
                   BoxedPrimitiveKind::Unit &&
               scalanative::runtime::boxedPrimitiveKind("Boolean") ==
                   BoxedPrimitiveKind::Boolean &&
+              scalanative::runtime::boxedPrimitiveKind("Byte") ==
+                  BoxedPrimitiveKind::Byte &&
+              scalanative::runtime::boxedPrimitiveKind("Short") ==
+                  BoxedPrimitiveKind::Short &&
               scalanative::runtime::boxedPrimitiveKind("Long") ==
                   BoxedPrimitiveKind::Long &&
               scalanative::runtime::boxedPrimitiveKind("Symbol") ==
@@ -7006,7 +7053,10 @@ int smokeBoxedDependentScalarsMvp() {
               unitDescriptor.kind == 7 && unitDescriptor.payloadSize == 0 &&
               unitDescriptor.payloadAlignment == 1 && booleanDescriptor.kind == 1 &&
               booleanDescriptor.payloadSize == 1 &&
-              booleanDescriptor.payloadAlignment == 1 && longDescriptor.kind == 3 &&
+              booleanDescriptor.payloadAlignment == 1 && byteDescriptor.kind == 10 &&
+              byteDescriptor.payloadSize == 1 && byteDescriptor.payloadAlignment == 1 &&
+              shortDescriptor.kind == 11 && shortDescriptor.payloadSize == 2 &&
+              shortDescriptor.payloadAlignment == 2 && longDescriptor.kind == 3 &&
               longDescriptor.payloadSize == 8 && longDescriptor.payloadAlignment == 8 &&
               symbolDescriptor.kind == 8 && symbolDescriptor.payloadSize == 8 &&
               symbolDescriptor.payloadAlignment == 8 && stringDescriptor.kind == 9 &&
@@ -7017,6 +7067,12 @@ int smokeBoxedDependentScalarsMvp() {
               unitLayout.typeId == 7 && unitLayout.instanceSize == 8 &&
               unitLayout.instanceAlignment == 8 && unitLayout.payloadOffset == 8 &&
               unitLayout.payloadSize == 0 && unitLayout.payloadAlignment == 1 &&
+              byteLayout.typeId == 10 && byteLayout.instanceSize == 9 &&
+              byteLayout.instanceAlignment == 8 && byteLayout.payloadOffset == 8 &&
+              byteLayout.payloadSize == 1 && byteLayout.payloadAlignment == 1 &&
+              shortLayout.typeId == 11 && shortLayout.instanceSize == 10 &&
+              shortLayout.instanceAlignment == 8 && shortLayout.payloadOffset == 8 &&
+              shortLayout.payloadSize == 2 && shortLayout.payloadAlignment == 2 &&
               longLayout.kind ==
                   scalanative::runtime::RuntimeTypeKind::BoxedPrimitive &&
               longLayout.typeId == 3 && longLayout.instanceSize == 16 &&
@@ -7039,7 +7095,7 @@ int smokeBoxedDependentScalarsMvp() {
                   scalanative::runtime::ObjectOwnership::Arena) == 1 &&
               std::string_view(scalanative::runtime::objectOwnershipName(
                   scalanative::runtime::ObjectOwnership::Immortal)) == "immortal" &&
-              scalanative::runtime::runtimeAbiName() == "cpp-scalanative-runtime-47",
+              scalanative::runtime::runtimeAbiName() == "cpp-scalanative-runtime-52",
           "boxed primitive runtime metadata is not stable")) {
     return code;
   }
@@ -7122,7 +7178,7 @@ object Main {
     return code;
   }
   if (int code = expect(
-          contains(result.llvmIr, "Runtime ABI = 'cpp-scalanative-runtime-47'") &&
+          contains(result.llvmIr, "Runtime ABI = 'cpp-scalanative-runtime-52'") &&
               contains(result.llvmIr,
                        "@__scalanative_boxed_Unit = private constant "
                        "%scalanative.type_descriptor { i32 2, i32 7, i64 8, i32 8, "

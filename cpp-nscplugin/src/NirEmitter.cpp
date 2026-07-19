@@ -134,8 +134,9 @@ bool isArrayTypeName(const std::string& typeName) {
 
 bool isReferenceArrayElementTypeName(const std::string& typeName) {
   return !typeName.empty() && typeName != "String" && typeName != "java.lang.String" &&
-         typeName != "Int" && typeName != "Boolean" && typeName != "Long" &&
-         typeName != "Double" && typeName != "Float" && typeName != "Char";
+         typeName != "Byte" && typeName != "Short" && typeName != "Int" &&
+         typeName != "Boolean" && typeName != "Long" && typeName != "Double" &&
+         typeName != "Float" && typeName != "Char";
 }
 
 std::string referenceArrayRuntimeName(std::string_view runtimeBase,
@@ -184,6 +185,55 @@ std::string arrayCopyRuntimeName(std::string_view elementType) {
   return referenceArrayRuntimeName(support::StdNames::RuntimeArrayCopy, elementType);
 }
 
+std::string arrayFillRuntimeName(std::string_view elementType,
+                                 std::size_t dimensions = 1) {
+  std::string runtime =
+      referenceArrayRuntimeName(support::StdNames::RuntimeArrayFill, elementType);
+  if (dimensions > 1) {
+    runtime += "." + std::to_string(dimensions);
+  }
+  return runtime;
+}
+
+std::string arrayFillSignature(std::string_view elementType, std::size_t dimensions = 1,
+                               std::string_view resultType = {}) {
+  std::string signature = "(";
+  for (std::size_t i = 0; i < dimensions; ++i) {
+    if (i != 0) {
+      signature.push_back(',');
+    }
+    signature += "Int";
+  }
+  signature += ",";
+  signature += elementType;
+  signature += ")";
+  if (resultType.empty()) {
+    signature += "Array [ " + std::string(elementType) + " ]";
+  } else {
+    signature += resultType;
+  }
+  return signature;
+}
+
+std::string arrayConcatRuntimeName(std::string_view elementType,
+                                   std::size_t arrayCount) {
+  return referenceArrayRuntimeName(support::StdNames::RuntimeArrayConcat, elementType) +
+         "." + std::to_string(arrayCount);
+}
+
+std::string arrayConcatSignature(std::string_view arrayType, std::size_t arrayCount) {
+  std::string signature = "(";
+  for (std::size_t i = 0; i < arrayCount; ++i) {
+    if (i != 0) {
+      signature.push_back(',');
+    }
+    signature += arrayType;
+  }
+  signature += ")";
+  signature += arrayType;
+  return signature;
+}
+
 std::string arrayCopyRuntimeName(std::string_view sourceElementType,
                                  std::string_view destinationElementType) {
   if (sourceElementType == destinationElementType) {
@@ -222,6 +272,12 @@ std::string arrayAllocRuntimeName(const std::string& elementType,
   if (elementType == "Int") {
     return std::string(support::StdNames::RuntimeIntArrayAlloc);
   }
+  if (elementType == "Byte") {
+    return std::string(support::StdNames::RuntimeByteArrayAlloc);
+  }
+  if (elementType == "Short") {
+    return std::string(support::StdNames::RuntimeShortArrayAlloc);
+  }
   if (elementType == "Boolean") {
     return std::string(support::StdNames::RuntimeBooleanArrayAlloc);
   }
@@ -249,6 +305,12 @@ std::string arrayLengthRuntimeName(const std::string& elementType,
   }
   if (elementType == "Int") {
     return std::string(support::StdNames::RuntimeIntArrayLength);
+  }
+  if (elementType == "Byte") {
+    return std::string(support::StdNames::RuntimeByteArrayLength);
+  }
+  if (elementType == "Short") {
+    return std::string(support::StdNames::RuntimeShortArrayLength);
   }
   if (elementType == "Boolean") {
     return std::string(support::StdNames::RuntimeBooleanArrayLength);
@@ -278,6 +340,12 @@ std::string arrayApplyRuntimeName(const std::string& elementType,
   if (elementType == "Int") {
     return std::string(support::StdNames::RuntimeIntArrayApply);
   }
+  if (elementType == "Byte") {
+    return std::string(support::StdNames::RuntimeByteArrayApply);
+  }
+  if (elementType == "Short") {
+    return std::string(support::StdNames::RuntimeShortArrayApply);
+  }
   if (elementType == "Boolean") {
     return std::string(support::StdNames::RuntimeBooleanArrayApply);
   }
@@ -305,6 +373,12 @@ std::string arrayUpdateRuntimeName(const std::string& elementType,
   }
   if (elementType == "Int") {
     return std::string(support::StdNames::RuntimeIntArrayUpdate);
+  }
+  if (elementType == "Byte") {
+    return std::string(support::StdNames::RuntimeByteArrayUpdate);
+  }
+  if (elementType == "Short") {
+    return std::string(support::StdNames::RuntimeShortArrayUpdate);
   }
   if (elementType == "Boolean") {
     return std::string(support::StdNames::RuntimeBooleanArrayUpdate);
@@ -334,6 +408,12 @@ std::string arrayCloneRuntimeName(const std::string& elementType,
   if (elementType == "Int") {
     return std::string(support::StdNames::RuntimeIntArrayClone);
   }
+  if (elementType == "Byte") {
+    return std::string(support::StdNames::RuntimeByteArrayClone);
+  }
+  if (elementType == "Short") {
+    return std::string(support::StdNames::RuntimeShortArrayClone);
+  }
   if (elementType == "Boolean") {
     return std::string(support::StdNames::RuntimeBooleanArrayClone);
   }
@@ -355,10 +435,11 @@ std::string arrayCloneRuntimeName(const std::string& elementType,
 }
 
 bool isBuiltinTypeName(const std::string& name) {
-  return name == "Unknown" || name == "Nothing" || name == "Unit" || name == "Int" ||
-         name == "Long" || name == "Float" || name == "Double" || name == "Boolean" ||
-         name == "String" || name == "Char" || name == "Symbol" || name == "Null" ||
-         name == "Object" || isArrayTypeName(name);
+  return name == "Unknown" || name == "Nothing" || name == "Unit" || name == "Byte" ||
+         name == "Short" || name == "Int" || name == "Long" || name == "Float" ||
+         name == "Double" || name == "Boolean" || name == "String" || name == "Char" ||
+         name == "Symbol" || name == "Null" || name == "Object" ||
+         isArrayTypeName(name);
 }
 
 std::string qualifyTypeName(const std::string& name, const ValueContext& context) {
@@ -450,6 +531,10 @@ std::string primitiveTypeName(frontend::SimpleTypeKind kind) {
     return "Unit";
   case frontend::SimpleTypeKind::Boolean:
     return "Boolean";
+  case frontend::SimpleTypeKind::Byte:
+    return "Byte";
+  case frontend::SimpleTypeKind::Short:
+    return "Short";
   case frontend::SimpleTypeKind::Int:
     return "Int";
   case frontend::SimpleTypeKind::Long:
@@ -1256,6 +1341,10 @@ std::string runtimeToStringName(frontend::SimpleTypeKind kind) {
   switch (kind) {
   case frontend::SimpleTypeKind::Boolean:
     return std::string(support::StdNames::RuntimeBooleanToString);
+  case frontend::SimpleTypeKind::Byte:
+    return std::string(support::StdNames::RuntimeByteToString);
+  case frontend::SimpleTypeKind::Short:
+    return std::string(support::StdNames::RuntimeShortToString);
   case frontend::SimpleTypeKind::Int:
     return std::string(support::StdNames::RuntimeIntToString);
   case frontend::SimpleTypeKind::Long:
@@ -1275,6 +1364,10 @@ std::string runtimeHashCodeName(frontend::SimpleTypeKind kind) {
   switch (kind) {
   case frontend::SimpleTypeKind::Boolean:
     return std::string(support::StdNames::RuntimeBooleanHashCode);
+  case frontend::SimpleTypeKind::Byte:
+    return std::string(support::StdNames::RuntimeByteHashCode);
+  case frontend::SimpleTypeKind::Short:
+    return std::string(support::StdNames::RuntimeShortHashCode);
   case frontend::SimpleTypeKind::Long:
     return std::string(support::StdNames::RuntimeLongHashCode);
   case frontend::SimpleTypeKind::Float:
@@ -1292,11 +1385,61 @@ std::string runtimeHashCodeName(frontend::SimpleTypeKind kind) {
   }
 }
 
+std::string runtimeNumericConversionName(frontend::SimpleTypeKind source,
+                                         std::string_view conversion) {
+  if (conversion == support::StdNames::ToByte) {
+    if (source == frontend::SimpleTypeKind::Short) {
+      return std::string(support::StdNames::RuntimeShortToByte);
+    }
+    if (source == frontend::SimpleTypeKind::Int) {
+      return std::string(support::StdNames::RuntimeIntToByte);
+    }
+  }
+  if (conversion == support::StdNames::ToShort) {
+    if (source == frontend::SimpleTypeKind::Byte) {
+      return std::string(support::StdNames::RuntimeByteToShort);
+    }
+    if (source == frontend::SimpleTypeKind::Int) {
+      return std::string(support::StdNames::RuntimeIntToShort);
+    }
+  }
+  if (conversion == support::StdNames::ToInt) {
+    if (source == frontend::SimpleTypeKind::Byte) {
+      return std::string(support::StdNames::RuntimeByteToInt);
+    }
+    if (source == frontend::SimpleTypeKind::Short) {
+      return std::string(support::StdNames::RuntimeShortToInt);
+    }
+  }
+  return {};
+}
+
 nir::Value valueFor(const frontend::AstExpression& expression,
                     const ValueContext& context, bool preserveCallable = false);
 nir::Value expressionValueFor(const frontend::AstExpression& expression,
                               const ValueContext& context,
                               bool preserveCallable = false);
+
+nir::Value promoteNarrowIntegral(const frontend::AstExpression& expression,
+                                 const ValueContext& context) {
+  nir::Value value = expressionValueFor(expression, context);
+  const frontend::TypeInfo* type = annotatedTypeFor(expression, context);
+  if (type == nullptr) {
+    return value;
+  }
+  const std::string_view runtime = type->kind == frontend::SimpleTypeKind::Byte
+                                       ? support::StdNames::RuntimeByteToInt
+                                   : type->kind == frontend::SimpleTypeKind::Short
+                                       ? support::StdNames::RuntimeShortToInt
+                                       : std::string_view{};
+  if (runtime.empty()) {
+    return value;
+  }
+  std::vector<nir::Value> arguments;
+  arguments.push_back(std::move(value));
+  return nir::callValue(nir::localValue(std::string(runtime), expression.span),
+                        std::move(arguments), expression.span);
+}
 
 nir::Value boxForObjectStorage(nir::Value value, const std::string& targetType,
                                const frontend::AstExpression& source,
@@ -1648,6 +1791,24 @@ nir::Value valueFor(const frontend::AstExpression& expression,
       return nir::unknownValue("." + expression.text, expression.span);
     }
     {
+      if (expression.text == support::StdNames::ToByte ||
+          expression.text == support::StdNames::ToShort ||
+          expression.text == support::StdNames::ToInt) {
+        const frontend::AstExpression& receiver = expression.children.front();
+        const frontend::TypeInfo* receiverType = annotatedTypeFor(receiver, context);
+        if (receiverType != nullptr) {
+          nir::Value receiverValue = expressionValueFor(receiver, context);
+          const std::string runtime =
+              runtimeNumericConversionName(receiverType->kind, expression.text);
+          if (runtime.empty()) {
+            return receiverValue;
+          }
+          std::vector<nir::Value> arguments;
+          arguments.push_back(std::move(receiverValue));
+          return nir::callValue(nir::localValue(runtime, expression.span),
+                                std::move(arguments), expression.span);
+        }
+      }
       if (expression.text == support::StdNames::StringLength) {
         const frontend::TypeInfo* receiverType =
             annotatedTypeFor(expression.children.front(), context);
@@ -1813,6 +1974,26 @@ nir::Value valueFor(const frontend::AstExpression& expression,
       return nir::unknownValue("type-apply <malformed>", expression.span);
     }
     const frontend::AstExpression& callee = expression.children.front();
+    const bool isArrayEmpty =
+        callee.kind == AstExpressionKind::Select && callee.children.size() == 1 &&
+        callee.text == support::StdNames::ArrayEmpty &&
+        callee.children.front().kind == AstExpressionKind::Identifier &&
+        callee.children.front().text == "Array";
+    if (isArrayEmpty) {
+      const frontend::TypeInfo* resultType = annotatedTypeFor(expression, context);
+      const std::string elementType = resultType == nullptr
+                                          ? std::string{}
+                                          : arrayElementTypeName(resultType->name);
+      if (!elementType.empty()) {
+        recordReferenceArrayElementType(elementType, context);
+        std::vector<nir::Value> arguments;
+        arguments.push_back(nir::literalValue("0", "Int", expression.span));
+        return nir::callValue(
+            nir::localValue(arrayAllocRuntimeName(elementType, context),
+                            expression.span),
+            std::move(arguments), expression.span);
+      }
+    }
     if (callee.kind == AstExpressionKind::Identifier &&
         callee.text == support::StdNames::SizeOf) {
       return nir::sizeOfValue(qualifyTypeName(expression.declaredType, context),
@@ -1959,6 +2140,13 @@ nir::Value valueFor(const frontend::AstExpression& expression,
     }
     if (expression.children.size() == 1 &&
         expression.children.front().kind == AstExpressionKind::Select &&
+        (expression.children.front().text == support::StdNames::ToByte ||
+         expression.children.front().text == support::StdNames::ToShort ||
+         expression.children.front().text == support::StdNames::ToInt)) {
+      return valueFor(expression.children.front(), context);
+    }
+    if (expression.children.size() == 1 &&
+        expression.children.front().kind == AstExpressionKind::Select &&
         expression.children.front().text == support::StdNames::ToString) {
       return valueFor(expression.children.front(), context);
     }
@@ -1983,6 +2171,21 @@ nir::Value valueFor(const frontend::AstExpression& expression,
         arrayCallee.children.size() == 1 &&
         arrayCallee.children.front().kind == AstExpressionKind::New &&
         arrayCallee.children.front().text == "Array";
+    const bool arrayRange =
+        arrayCallee.kind == AstExpressionKind::Select &&
+        arrayCallee.children.size() == 1 &&
+        arrayCallee.text == support::StdNames::ArrayRange &&
+        arrayCallee.children.front().kind == AstExpressionKind::Identifier &&
+        arrayCallee.children.front().text == "Array";
+    const bool arrayConcat =
+        arrayCallee.kind == AstExpressionKind::TypeApply &&
+        arrayCallee.children.size() == 1 &&
+        arrayCallee.children.front().kind == AstExpressionKind::Select &&
+        arrayCallee.children.front().children.size() == 1 &&
+        arrayCallee.children.front().text == support::StdNames::ArrayConcat &&
+        arrayCallee.children.front().children.front().kind ==
+            AstExpressionKind::Identifier &&
+        arrayCallee.children.front().children.front().text == "Array";
     const bool arrayOfDim =
         arrayCallee.kind == AstExpressionKind::TypeApply &&
         arrayCallee.children.size() == 1 &&
@@ -1992,6 +2195,89 @@ nir::Value valueFor(const frontend::AstExpression& expression,
         arrayCallee.children.front().children.front().kind ==
             AstExpressionKind::Identifier &&
         arrayCallee.children.front().children.front().text == "Array";
+    const frontend::AstExpression* arrayFillTypeApply = nullptr;
+    if (arrayCallee.kind == AstExpressionKind::Call && !arrayCallee.children.empty() &&
+        arrayCallee.children.front().kind == AstExpressionKind::TypeApply &&
+        arrayCallee.children.front().children.size() == 1) {
+      const frontend::AstExpression& candidate = arrayCallee.children.front();
+      const frontend::AstExpression& selected = candidate.children.front();
+      if (selected.kind == AstExpressionKind::Select && selected.children.size() == 1 &&
+          selected.text == support::StdNames::ArrayFill &&
+          selected.children.front().kind == AstExpressionKind::Identifier &&
+          selected.children.front().text == "Array") {
+        arrayFillTypeApply = &candidate;
+      }
+    }
+    if (arrayFillTypeApply != nullptr && arrayCallee.children.size() >= 2 &&
+        expression.children.size() == 2) {
+      const frontend::TypeInfo* arrayType = annotatedTypeFor(expression, context);
+      const std::size_t dimensions = arrayCallee.children.size() - 1;
+      std::string elementType = arrayType == nullptr ? std::string{} : arrayType->name;
+      for (std::size_t i = 0; i < dimensions && !elementType.empty(); ++i) {
+        elementType = arrayElementTypeName(elementType);
+      }
+      if (arrayType == nullptr || elementType.empty() || dimensions == 0) {
+        return nir::unknownValue("malformed Array.fill", expression.span);
+      }
+      recordReferenceArrayElementType(elementType, context);
+      nir::Value element = expressionValueFor(expression.children[1], context);
+      if (elementType == "Object") {
+        if (const frontend::TypeInfo* type =
+                annotatedTypeFor(expression.children[1], context)) {
+          if (const std::string primitive = boxedObjectTypeName(type->kind);
+              !primitive.empty()) {
+            element = nir::boxValue(primitive, std::move(element),
+                                    expression.children[1].span);
+          }
+        }
+      }
+      std::vector<nir::Value> arguments;
+      for (std::size_t i = 1; i < arrayCallee.children.size(); ++i) {
+        arguments.push_back(expressionValueFor(arrayCallee.children[i], context));
+      }
+      arguments.push_back(std::move(element));
+      const std::string runtime = arrayFillRuntimeName(elementType, dimensions);
+      if (dimensions > 1 && context.runtimeArrayDeclarations != nullptr) {
+        context.runtimeArrayDeclarations->emplace(
+            runtime, arrayFillSignature(elementType, dimensions, arrayType->name));
+      }
+      return nir::callValue(nir::localValue(runtime, expression.span),
+                            std::move(arguments), expression.span);
+    }
+    if (arrayRange &&
+        (expression.children.size() == 3 || expression.children.size() == 4)) {
+      std::vector<nir::Value> arguments;
+      for (std::size_t i = 1; i < expression.children.size(); ++i) {
+        arguments.push_back(expressionValueFor(expression.children[i], context));
+      }
+      if (arguments.size() == 2) {
+        arguments.push_back(nir::literalValue("1", "Int", expression.span));
+      }
+      return nir::callValue(
+          nir::localValue(std::string(support::StdNames::RuntimeArrayRange),
+                          expression.span),
+          std::move(arguments), expression.span);
+    }
+    if (arrayConcat) {
+      const frontend::TypeInfo* arrayType = annotatedTypeFor(expression, context);
+      const std::string elementType =
+          arrayType == nullptr ? std::string{} : arrayElementTypeName(arrayType->name);
+      if (arrayType == nullptr || elementType.empty()) {
+        return nir::unknownValue("malformed Array.concat", expression.span);
+      }
+      recordReferenceArrayElementType(elementType, context);
+      std::vector<nir::Value> arguments;
+      for (std::size_t i = 1; i < expression.children.size(); ++i) {
+        arguments.push_back(expressionValueFor(expression.children[i], context));
+      }
+      const std::string runtime = arrayConcatRuntimeName(elementType, arguments.size());
+      if (context.runtimeArrayDeclarations != nullptr) {
+        context.runtimeArrayDeclarations->emplace(
+            runtime, arrayConcatSignature(arrayType->name, arguments.size()));
+      }
+      return nir::callValue(nir::localValue(runtime, expression.span),
+                            std::move(arguments), expression.span);
+    }
     if (dynamicArrayConstructor) {
       const frontend::TypeInfo* arrayType = annotatedTypeFor(expression, context);
       const std::string elementType =
@@ -2139,9 +2425,12 @@ nir::Value valueFor(const frontend::AstExpression& expression,
     if (expression.children.size() != 1) {
       return nir::unknownValue("<malformed-unary>", expression.span);
     }
-    return nir::unaryValue(expression.text,
-                           expressionValueFor(expression.children.front(), context),
-                           expression.span);
+    return nir::unaryValue(
+        expression.text,
+        expression.text == "+" || expression.text == "-"
+            ? promoteNarrowIntegral(expression.children.front(), context)
+            : expressionValueFor(expression.children.front(), context),
+        expression.span);
   case AstExpressionKind::Binary:
     if (expression.children.size() != 2) {
       return nir::unknownValue("<malformed-binary>", expression.span);
@@ -2170,8 +2459,8 @@ nir::Value valueFor(const frontend::AstExpression& expression,
       }
     }
     return nir::binaryValue(
-        expression.text, expressionValueFor(expression.children[0], context),
-        expressionValueFor(expression.children[1], context), expression.span);
+        expression.text, promoteNarrowIntegral(expression.children[0], context),
+        promoteNarrowIntegral(expression.children[1], context), expression.span);
   case AstExpressionKind::Assign: {
     if (expression.children.size() != 2) {
       return nir::unknownValue("<malformed-assign>", expression.span);
@@ -3085,6 +3374,31 @@ nir::Module NirEmitter::emit(const frontend::TypedModule& module) const {
                           "(Array [ Int ],Int,Int)Unit", support::SourceSpan::none());
   builder.addFunctionDecl(std::string(support::StdNames::RuntimeIntArrayClone),
                           "(Array [ Int ])Array [ Int ]", support::SourceSpan::none());
+  builder.addFunctionDecl(std::string(support::StdNames::RuntimeByteArrayAlloc),
+                          "(Int)Array [ Byte ]", support::SourceSpan::none());
+  builder.addFunctionDecl(std::string(support::StdNames::RuntimeByteArrayLength),
+                          "(Array [ Byte ])Int", support::SourceSpan::none());
+  builder.addFunctionDecl(std::string(support::StdNames::RuntimeByteArrayApply),
+                          "(Array [ Byte ],Int)Byte", support::SourceSpan::none());
+  builder.addFunctionDecl(std::string(support::StdNames::RuntimeByteArrayUpdate),
+                          "(Array [ Byte ],Int,Byte)Unit", support::SourceSpan::none());
+  builder.addFunctionDecl(std::string(support::StdNames::RuntimeByteArrayClone),
+                          "(Array [ Byte ])Array [ Byte ]",
+                          support::SourceSpan::none());
+  builder.addFunctionDecl(std::string(support::StdNames::RuntimeShortArrayAlloc),
+                          "(Int)Array [ Short ]", support::SourceSpan::none());
+  builder.addFunctionDecl(std::string(support::StdNames::RuntimeShortArrayLength),
+                          "(Array [ Short ])Int", support::SourceSpan::none());
+  builder.addFunctionDecl(std::string(support::StdNames::RuntimeShortArrayApply),
+                          "(Array [ Short ],Int)Short", support::SourceSpan::none());
+  builder.addFunctionDecl(std::string(support::StdNames::RuntimeShortArrayUpdate),
+                          "(Array [ Short ],Int,Short)Unit",
+                          support::SourceSpan::none());
+  builder.addFunctionDecl(std::string(support::StdNames::RuntimeShortArrayClone),
+                          "(Array [ Short ])Array [ Short ]",
+                          support::SourceSpan::none());
+  builder.addFunctionDecl(std::string(support::StdNames::RuntimeArrayRange),
+                          "(Int,Int,Int)Array [ Int ]", support::SourceSpan::none());
   builder.addFunctionDecl(std::string(support::StdNames::RuntimeBooleanArrayAlloc),
                           "(Int)Array [ Boolean ]", support::SourceSpan::none());
   builder.addFunctionDecl(std::string(support::StdNames::RuntimeBooleanArrayLength),
@@ -3145,8 +3459,12 @@ nir::Module NirEmitter::emit(const frontend::TypedModule& module) const {
                           "(Array [ Char ])Array [ Char ]",
                           support::SourceSpan::none());
   for (const std::string_view elementType :
-       {"String", "Int", "Boolean", "Long", "Double", "Float", "Char"}) {
+       {"String", "Byte", "Short", "Int", "Boolean", "Long", "Double", "Float",
+        "Char"}) {
     const std::string arrayType = "Array [ " + std::string(elementType) + " ]";
+    builder.addFunctionDecl(arrayFillRuntimeName(elementType),
+                            arrayFillSignature(elementType),
+                            support::SourceSpan::none());
     builder.addFunctionDecl(arrayCopyRuntimeName(elementType),
                             arrayCopySignature(arrayType), support::SourceSpan::none());
   }
@@ -3176,6 +3494,9 @@ nir::Module NirEmitter::emit(const frontend::TypedModule& module) const {
         referenceArrayRuntimeName(support::StdNames::RuntimeReferenceArrayClone,
                                   elementType),
         "(" + arrayType + ")" + arrayType, support::SourceSpan::none());
+    builder.addFunctionDecl(arrayFillRuntimeName(elementType),
+                            arrayFillSignature(elementType),
+                            support::SourceSpan::none());
     builder.addFunctionDecl(arrayCopyRuntimeName(elementType),
                             arrayCopySignature(arrayType), support::SourceSpan::none());
   }
@@ -3184,6 +3505,10 @@ nir::Module NirEmitter::emit(const frontend::TypedModule& module) const {
   }
   builder.addFunctionDecl(std::string(support::StdNames::RuntimeBooleanToString),
                           "(Boolean)String", support::SourceSpan::none());
+  builder.addFunctionDecl(std::string(support::StdNames::RuntimeByteToString),
+                          "(Byte)String", support::SourceSpan::none());
+  builder.addFunctionDecl(std::string(support::StdNames::RuntimeShortToString),
+                          "(Short)String", support::SourceSpan::none());
   builder.addFunctionDecl(std::string(support::StdNames::RuntimeIntToString),
                           "(Int)String", support::SourceSpan::none());
   builder.addFunctionDecl(std::string(support::StdNames::RuntimeLongToString),
@@ -3231,6 +3556,22 @@ nir::Module NirEmitter::emit(const frontend::TypedModule& module) const {
                           "(Object,Object)Boolean", support::SourceSpan::none());
   builder.addFunctionDecl(std::string(support::StdNames::RuntimeAnyReceiverEquals),
                           "(Object,Object)Boolean", support::SourceSpan::none());
+  builder.addFunctionDecl(std::string(support::StdNames::RuntimeIntToByte), "(Int)Byte",
+                          support::SourceSpan::none());
+  builder.addFunctionDecl(std::string(support::StdNames::RuntimeIntToShort),
+                          "(Int)Short", support::SourceSpan::none());
+  builder.addFunctionDecl(std::string(support::StdNames::RuntimeShortToByte),
+                          "(Short)Byte", support::SourceSpan::none());
+  builder.addFunctionDecl(std::string(support::StdNames::RuntimeByteToShort),
+                          "(Byte)Short", support::SourceSpan::none());
+  builder.addFunctionDecl(std::string(support::StdNames::RuntimeByteToInt), "(Byte)Int",
+                          support::SourceSpan::none());
+  builder.addFunctionDecl(std::string(support::StdNames::RuntimeShortToInt),
+                          "(Short)Int", support::SourceSpan::none());
+  builder.addFunctionDecl(std::string(support::StdNames::RuntimeByteHashCode),
+                          "(Byte)Int", support::SourceSpan::none());
+  builder.addFunctionDecl(std::string(support::StdNames::RuntimeShortHashCode),
+                          "(Short)Int", support::SourceSpan::none());
   builder.addFunctionDecl(std::string(support::StdNames::RuntimeBooleanHashCode),
                           "(Boolean)Int", support::SourceSpan::none());
   builder.addFunctionDecl(std::string(support::StdNames::RuntimeLongHashCode),

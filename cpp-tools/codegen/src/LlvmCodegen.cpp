@@ -109,6 +109,7 @@ struct LoweringState {
   std::size_t nextTemporaryRootSlot = 0;
   bool hasShadowFrame = false;
   bool hasSourceFrame = false;
+  bool preserveMutableLocalsAcrossHandlers = false;
 };
 
 void reportUnsupported(LoweringState& state, support::SourceSpan span,
@@ -227,6 +228,12 @@ std::string llvmType(const std::string& simpleType) {
   if (simpleType == "Boolean") {
     return "i1";
   }
+  if (simpleType == "Byte") {
+    return "i8";
+  }
+  if (simpleType == "Short") {
+    return "i16";
+  }
   if (simpleType == "Int" || simpleType == "Char") {
     return "i32";
   }
@@ -246,6 +253,12 @@ std::size_t typeSize(const std::string& simpleType) {
   const std::string lowered = llvmType(simpleType);
   if (lowered == "i1") {
     return 1;
+  }
+  if (lowered == "i8") {
+    return 1;
+  }
+  if (lowered == "i16") {
+    return 2;
   }
   if (lowered == "i32" || lowered == "float") {
     return 4;
@@ -279,6 +292,12 @@ std::string simpleTypeFromLlvm(const std::string& type) {
   if (type == "i1") {
     return "Boolean";
   }
+  if (type == "i8") {
+    return "Byte";
+  }
+  if (type == "i16") {
+    return "Short";
+  }
   if (type == "i32") {
     return "Int";
   }
@@ -296,7 +315,8 @@ std::string simpleTypeFromLlvm(const std::string& type) {
 
 std::string defaultValue(const std::string& type) {
   const std::string lowered = llvmType(type);
-  if (lowered == "i1" || lowered == "i32" || lowered == "i64") {
+  if (lowered == "i1" || lowered == "i8" || lowered == "i16" || lowered == "i32" ||
+      lowered == "i64") {
     return "0";
   }
   if (lowered == "float") {
@@ -346,9 +366,9 @@ bool isIntegerLiteral(std::string_view text) {
 }
 
 bool isBoxablePrimitiveType(const std::string& type) {
-  return type == "Unit" || type == "Boolean" || type == "Int" || type == "Long" ||
-         type == "Float" || type == "Double" || type == "Char" || type == "Symbol" ||
-         type == "String";
+  return type == "Unit" || type == "Boolean" || type == "Byte" || type == "Short" ||
+         type == "Int" || type == "Long" || type == "Float" || type == "Double" ||
+         type == "Char" || type == "Symbol" || type == "String";
 }
 
 bool isReferenceType(const std::string& simpleType) {
@@ -396,6 +416,14 @@ bool isIntArrayType(std::string_view typeName) {
   return arrayElementTypeName(typeName) == "Int";
 }
 
+bool isByteArrayType(std::string_view typeName) {
+  return arrayElementTypeName(typeName) == "Byte";
+}
+
+bool isShortArrayType(std::string_view typeName) {
+  return arrayElementTypeName(typeName) == "Short";
+}
+
 bool isBooleanArrayType(std::string_view typeName) {
   return arrayElementTypeName(typeName) == "Boolean";
 }
@@ -419,14 +447,15 @@ bool isCharArrayType(std::string_view typeName) {
 bool isReferenceArrayType(std::string_view typeName) {
   const std::string elementType = arrayElementTypeName(typeName);
   return !elementType.empty() && elementType != "String" &&
-         elementType != "java.lang.String" && elementType != "Int" &&
-         elementType != "Boolean" && elementType != "Long" && elementType != "Double" &&
-         elementType != "Float" && elementType != "Char" &&
-         llvmType(elementType) == "ptr";
+         elementType != "java.lang.String" && elementType != "Byte" &&
+         elementType != "Short" && elementType != "Int" && elementType != "Boolean" &&
+         elementType != "Long" && elementType != "Double" && elementType != "Float" &&
+         elementType != "Char" && llvmType(elementType) == "ptr";
 }
 
-constexpr std::array<std::string_view, 9> BoxedPrimitiveTypes = {
-    "Unit", "Boolean", "Int", "Long", "Float", "Double", "Char", "Symbol", "String"};
+constexpr std::array<std::string_view, 11> BoxedPrimitiveTypes = {
+    "Unit",  "Boolean", "Byte", "Short",  "Int",   "Long",
+    "Float", "Double",  "Char", "Symbol", "String"};
 
 std::string boxedPrimitiveDescriptorName(std::string_view type) {
   return "__scalanative_boxed_" + sanitizeIdentifier(type);
@@ -1003,6 +1032,58 @@ void emitRuntimeTypeHelpers(std::ostringstream& out,
   out << "  ret void\n";
   out << "}\n\n";
 
+  const auto emitNarrowArrayAccessors = [&](std::string_view kind,
+                                            std::string_view elementType) {
+    out << "define internal ptr @__scalanative_array_" << kind
+        << "_slot(ptr %array, i32 %index) {\n";
+    out << "entry:\n";
+    out << "  %is_null = icmp eq ptr %array, null\n";
+    out << "  br i1 %is_null, label %null_array, label %check_index\n";
+    out << "check_index:\n";
+    out << "  %is_nonnegative = icmp sge i32 %index, 0\n";
+    out << "  br i1 %is_nonnegative, label %check_bounds, label %trap\n";
+    out << "check_bounds:\n";
+    out << "  %length_slot = getelementptr i8, ptr %array, i64 " << ObjectHeaderSize
+        << "\n";
+    out << "  %length = load i64, ptr %length_slot\n";
+    out << "  %wide_index = sext i32 %index to i64\n";
+    out << "  %in_bounds = icmp ult i64 %wide_index, %length\n";
+    out << "  br i1 %in_bounds, label %ready, label %trap\n";
+    out << "ready:\n";
+    out << "  %elements = getelementptr i8, ptr %array, i64 " << ObjectHeaderSize + 8
+        << "\n";
+    out << "  %element_slot = getelementptr " << elementType
+        << ", ptr %elements, i64 %wide_index\n";
+    out << "  ret ptr %element_slot\n";
+    out << "trap:\n";
+    out << "  call void @__scalanative_throw_array_index_out_of_bounds()\n";
+    out << "  unreachable\n";
+    out << "null_array:\n";
+    out << "  call void @__scalanative_throw_null_array()\n";
+    out << "  unreachable\n";
+    out << "}\n\n";
+
+    out << "define internal " << elementType << " @__scalanative_array_" << kind
+        << "_at(ptr %array, i32 %index) {\n";
+    out << "entry:\n";
+    out << "  %element_slot = call ptr @__scalanative_array_" << kind
+        << "_slot(ptr %array, i32 %index)\n";
+    out << "  %element = load " << elementType << ", ptr %element_slot\n";
+    out << "  ret " << elementType << " %element\n";
+    out << "}\n\n";
+
+    out << "define internal void @__scalanative_array_" << kind
+        << "_set(ptr %array, i32 %index, " << elementType << " %value) {\n";
+    out << "entry:\n";
+    out << "  %element_slot = call ptr @__scalanative_array_" << kind
+        << "_slot(ptr %array, i32 %index)\n";
+    out << "  store " << elementType << " %value, ptr %element_slot\n";
+    out << "  ret void\n";
+    out << "}\n\n";
+  };
+  emitNarrowArrayAccessors("byte", "i8");
+  emitNarrowArrayAccessors("short", "i16");
+
   out << "define internal ptr @__scalanative_array_int_slot(ptr %array, i32 %index) "
          "{\n";
   out << "entry:\n";
@@ -1415,6 +1496,10 @@ void emitRuntimeTypeHelpers(std::ostringstream& out,
       << ", label %boxed_unit\n";
   out << "    i32 " << static_cast<std::uint32_t>(runtime::BoxedPrimitiveKind::Boolean)
       << ", label %boxed_boolean\n";
+  out << "    i32 " << static_cast<std::uint32_t>(runtime::BoxedPrimitiveKind::Byte)
+      << ", label %boxed_byte\n";
+  out << "    i32 " << static_cast<std::uint32_t>(runtime::BoxedPrimitiveKind::Short)
+      << ", label %boxed_short\n";
   out << "    i32 " << static_cast<std::uint32_t>(runtime::BoxedPrimitiveKind::Int)
       << ", label %boxed_int\n";
   out << "    i32 " << static_cast<std::uint32_t>(runtime::BoxedPrimitiveKind::Long)
@@ -1439,6 +1524,18 @@ void emitRuntimeTypeHelpers(std::ostringstream& out,
   out << "  %boolean_hash = call i32 @__scalanative_boolean_hash_code(i1 "
          "%boolean_value)\n";
   out << "  ret i32 %boolean_hash\n";
+  out << "boxed_byte:\n";
+  out << "  %byte_payload = getelementptr i8, ptr %object, i64 " << ObjectHeaderSize
+      << "\n";
+  out << "  %byte_value = load i8, ptr %byte_payload\n";
+  out << "  %byte_hash = sext i8 %byte_value to i32\n";
+  out << "  ret i32 %byte_hash\n";
+  out << "boxed_short:\n";
+  out << "  %short_payload = getelementptr i8, ptr %object, i64 " << ObjectHeaderSize
+      << "\n";
+  out << "  %short_value = load i16, ptr %short_payload\n";
+  out << "  %short_hash = sext i16 %short_value to i32\n";
+  out << "  ret i32 %short_hash\n";
   out << "boxed_int:\n";
   out << "  %int_payload = getelementptr i8, ptr %object, i64 " << ObjectHeaderSize
       << "\n";
@@ -1515,6 +1612,10 @@ void emitRuntimeTypeHelpers(std::ostringstream& out,
       << ", label %boxed_unit\n";
   out << "    i32 " << static_cast<std::uint32_t>(runtime::BoxedPrimitiveKind::Boolean)
       << ", label %boxed_boolean\n";
+  out << "    i32 " << static_cast<std::uint32_t>(runtime::BoxedPrimitiveKind::Byte)
+      << ", label %boxed_byte\n";
+  out << "    i32 " << static_cast<std::uint32_t>(runtime::BoxedPrimitiveKind::Short)
+      << ", label %boxed_short\n";
   out << "    i32 " << static_cast<std::uint32_t>(runtime::BoxedPrimitiveKind::Int)
       << ", label %boxed_int\n";
   out << "    i32 " << static_cast<std::uint32_t>(runtime::BoxedPrimitiveKind::Long)
@@ -1540,6 +1641,20 @@ void emitRuntimeTypeHelpers(std::ostringstream& out,
   out << "  %boolean_string = call ptr @__scalanative_string_from_boolean(i1 "
          "%boolean_value)\n";
   out << "  ret ptr %boolean_string\n";
+  out << "boxed_byte:\n";
+  out << "  %byte_payload = getelementptr i8, ptr %object, i64 " << ObjectHeaderSize
+      << "\n";
+  out << "  %byte_value = load i8, ptr %byte_payload\n";
+  out << "  %wide_byte = sext i8 %byte_value to i32\n";
+  out << "  %byte_string = call ptr @__scalanative_string_from_int(i32 %wide_byte)\n";
+  out << "  ret ptr %byte_string\n";
+  out << "boxed_short:\n";
+  out << "  %short_payload = getelementptr i8, ptr %object, i64 " << ObjectHeaderSize
+      << "\n";
+  out << "  %short_value = load i16, ptr %short_payload\n";
+  out << "  %wide_short = sext i16 %short_value to i32\n";
+  out << "  %short_string = call ptr @__scalanative_string_from_int(i32 %wide_short)\n";
+  out << "  ret ptr %short_string\n";
   out << "boxed_int:\n";
   out << "  %int_payload = getelementptr i8, ptr %object, i64 " << ObjectHeaderSize
       << "\n";
@@ -1706,6 +1821,10 @@ void emitRuntimeTypeHelpers(std::ostringstream& out,
       << ", label %equal\n";
   out << "    i32 " << static_cast<std::uint32_t>(runtime::BoxedPrimitiveKind::Boolean)
       << ", label %boxed_boolean\n";
+  out << "    i32 " << static_cast<std::uint32_t>(runtime::BoxedPrimitiveKind::Byte)
+      << ", label %boxed_byte\n";
+  out << "    i32 " << static_cast<std::uint32_t>(runtime::BoxedPrimitiveKind::Short)
+      << ", label %boxed_short\n";
   out << "    i32 " << static_cast<std::uint32_t>(runtime::BoxedPrimitiveKind::Int)
       << ", label %boxed_int\n";
   out << "    i32 " << static_cast<std::uint32_t>(runtime::BoxedPrimitiveKind::Long)
@@ -1730,6 +1849,24 @@ void emitRuntimeTypeHelpers(std::ostringstream& out,
   out << "  %right_boolean = load i1, ptr %right_boolean_payload\n";
   out << "  %boolean_equal = icmp eq i1 %left_boolean, %right_boolean\n";
   out << "  ret i1 %boolean_equal\n";
+  out << "boxed_byte:\n";
+  out << "  %left_byte_payload = getelementptr i8, ptr %left, i64 " << ObjectHeaderSize
+      << "\n";
+  out << "  %right_byte_payload = getelementptr i8, ptr %right, i64 "
+      << ObjectHeaderSize << "\n";
+  out << "  %left_byte = load i8, ptr %left_byte_payload\n";
+  out << "  %right_byte = load i8, ptr %right_byte_payload\n";
+  out << "  %byte_equal = icmp eq i8 %left_byte, %right_byte\n";
+  out << "  ret i1 %byte_equal\n";
+  out << "boxed_short:\n";
+  out << "  %left_short_payload = getelementptr i8, ptr %left, i64 " << ObjectHeaderSize
+      << "\n";
+  out << "  %right_short_payload = getelementptr i8, ptr %right, i64 "
+      << ObjectHeaderSize << "\n";
+  out << "  %left_short = load i16, ptr %left_short_payload\n";
+  out << "  %right_short = load i16, ptr %right_short_payload\n";
+  out << "  %short_equal = icmp eq i16 %left_short, %right_short\n";
+  out << "  ret i1 %short_equal\n";
   out << "boxed_int:\n";
   out << "  %left_int_payload = getelementptr i8, ptr %left, i64 " << ObjectHeaderSize
       << "\n";
@@ -2544,6 +2681,12 @@ void emitExceptionRuntimeHelpers(
                      ".str.assumption_failed", 18);
   emitRuntimeFailure("__scalanative_throw_requirement", illegalArgument,
                      ".str.requirement_failed", 19);
+  emitRuntimeFailure("__scalanative_throw_array_range_zero_step", illegalArgument,
+                     ".str.array_range_zero_step", 10);
+  emitRuntimeFailure("__scalanative_throw_array_range_too_large", illegalArgument,
+                     ".str.array_range_too_large", 25);
+  emitRuntimeFailure("__scalanative_throw_array_concat_too_large", illegalArgument,
+                     ".str.array_concat_too_large", 33);
 
   const auto emitCheckedCondition = [&](std::string_view helperName,
                                         std::string_view failureHelper) {
@@ -3566,6 +3709,12 @@ public:
       if (type.simpleType == "Boolean") {
         out << "!DIBasicType(name: \"Boolean\", size: 1, encoding: "
                "DW_ATE_boolean)\n";
+      } else if (type.simpleType == "Byte") {
+        out << "!DIBasicType(name: \"Byte\", size: 8, encoding: "
+               "DW_ATE_signed)\n";
+      } else if (type.simpleType == "Short") {
+        out << "!DIBasicType(name: \"Short\", size: 16, encoding: "
+               "DW_ATE_signed)\n";
       } else if (type.simpleType == "Int") {
         out << "!DIBasicType(name: \"Int\", size: 32, encoding: "
                "DW_ATE_signed)\n";
@@ -4125,7 +4274,8 @@ std::string inferSimpleType(const nir::Value& value, const LoweringState& state)
       return "Boolean";
     }
     if (!value.operands.empty()) {
-      return inferSimpleType(value.operands.front(), state);
+      const std::string operandType = inferSimpleType(value.operands.front(), state);
+      return operandType == "Byte" || operandType == "Short" ? "Int" : operandType;
     }
     return "Unknown";
   case nir::ValueKind::Binary:
@@ -4140,6 +4290,40 @@ std::string inferSimpleType(const nir::Value& value, const LoweringState& state)
       if (lhs == "String" || rhs == "String") {
         return "String";
       }
+    }
+    if (value.operands.size() == 2) {
+      const std::string lhs = inferSimpleType(value.operands[0], state);
+      const std::string rhs = inferSimpleType(value.operands[1], state);
+      const auto numericRank = [](std::string_view type) {
+        if (type == "Byte") {
+          return 1;
+        }
+        if (type == "Short") {
+          return 2;
+        }
+        if (type == "Int") {
+          return 3;
+        }
+        if (type == "Long") {
+          return 4;
+        }
+        if (type == "Float") {
+          return 5;
+        }
+        if (type == "Double") {
+          return 6;
+        }
+        return 0;
+      };
+      const int lhsRank = numericRank(lhs);
+      const int rhsRank = numericRank(rhs);
+      if (lhsRank != 0 && rhsRank != 0) {
+        if (std::max(lhsRank, rhsRank) <= 2) {
+          return "Int";
+        }
+        return lhsRank >= rhsRank ? lhs : rhs;
+      }
+      return lhs;
     }
     if (!value.operands.empty()) {
       return inferSimpleType(value.operands.front(), state);
@@ -4673,7 +4857,8 @@ std::string lowerZeroArgGlobalCall(const std::string& target,
 std::string lowerLiteral(const nir::Value& value, const std::string& expectedType,
                          const LoweringState& state, bool& supported) {
   const std::string lowered = llvmType(expectedType);
-  if ((lowered == "i32" || lowered == "i64") && isIntegerLiteral(value.text)) {
+  if ((lowered == "i8" || lowered == "i16" || lowered == "i32" || lowered == "i64") &&
+      isIntegerLiteral(value.text)) {
     supported = true;
     return value.text;
   }
@@ -4727,11 +4912,14 @@ std::string lowerLiteral(const nir::Value& value, const std::string& expectedTyp
 
 std::string lowerNew(const nir::Value& value, LoweringState& state,
                      std::ostringstream& out, bool& supported) {
-  if (isStringArrayType(value.text) || isIntArrayType(value.text) ||
+  if (isStringArrayType(value.text) || isByteArrayType(value.text) ||
+      isShortArrayType(value.text) || isIntArrayType(value.text) ||
       isBooleanArrayType(value.text) || isLongArrayType(value.text) ||
       isDoubleArrayType(value.text) || isFloatArrayType(value.text) ||
       isCharArrayType(value.text) || isReferenceArrayType(value.text)) {
     const bool stringElements = isStringArrayType(value.text);
+    const bool byteElements = isByteArrayType(value.text);
+    const bool shortElements = isShortArrayType(value.text);
     const bool intElements = isIntArrayType(value.text);
     const bool booleanElements = isBooleanArrayType(value.text);
     const bool longElements = isLongArrayType(value.text);
@@ -4739,6 +4927,8 @@ std::string lowerNew(const nir::Value& value, LoweringState& state,
     const bool floatElements = isFloatArrayType(value.text);
     const bool charElements = isCharArrayType(value.text);
     const std::string elementType = stringElements    ? "String"
+                                    : byteElements    ? "Byte"
+                                    : shortElements   ? "Short"
                                     : intElements     ? "Int"
                                     : booleanElements ? "Boolean"
                                     : longElements    ? "Long"
@@ -4747,12 +4937,16 @@ std::string lowerNew(const nir::Value& value, LoweringState& state,
                                     : charElements    ? "Char"
                                                    : arrayElementTypeName(value.text);
     const std::size_t elementSize = stringElements    ? 8
+                                    : byteElements    ? 1
+                                    : shortElements   ? 2
                                     : intElements     ? 4
                                     : booleanElements ? 1
                                     : floatElements   ? 4
                                     : charElements    ? 4
                                                       : 8;
     const char* elementLlvmType = stringElements    ? "ptr"
+                                  : byteElements    ? "i8"
+                                  : shortElements   ? "i16"
                                   : intElements     ? "i32"
                                   : booleanElements ? "i1"
                                   : longElements    ? "i64"
@@ -4913,6 +5107,14 @@ std::string lowerSizeOf(const nir::Value& value, LoweringState& state,
   if (value.text == "Boolean") {
     supported = true;
     return "1";
+  }
+  if (value.text == "Byte") {
+    supported = true;
+    return "1";
+  }
+  if (value.text == "Short") {
+    supported = true;
+    return "2";
   }
   if (value.text == "Int" || value.text == "Float" || value.text == "Char") {
     supported = true;
@@ -5377,8 +5579,12 @@ std::string lowerAssign(const nir::Value& value, const std::string& expectedType
       supported = false;
       return {};
     }
-    out << "  store " << llvmType(simpleType->second) << ' ' << lowered << ", ptr %"
-        << slot->second << "\n";
+    out << "  store ";
+    if (state.preserveMutableLocalsAcrossHandlers) {
+      out << "volatile ";
+    }
+    out << llvmType(simpleType->second) << ' ' << lowered << ", ptr %" << slot->second
+        << "\n";
     auto localValueName = state.localValueNames.find(local);
     const std::string& rootKey =
         localValueName == state.localValueNames.end() ? local : localValueName->second;
@@ -5470,6 +5676,12 @@ std::size_t runtimeArrayElementSize(std::string_view elementType) {
   if (elementType == "Boolean") {
     return 1;
   }
+  if (elementType == "Byte") {
+    return 1;
+  }
+  if (elementType == "Short") {
+    return 2;
+  }
   if (elementType == "Int" || elementType == "Float" || elementType == "Char") {
     return 4;
   }
@@ -5546,6 +5758,90 @@ std::string emitArrayOfDimAllocation(std::size_t dimension,
   return "%" + array;
 }
 
+std::string emitArrayFillAllocation(std::size_t dimension,
+                                    const std::vector<std::string>& lengths,
+                                    const std::string& arrayType,
+                                    const nir::Value& elementValue,
+                                    LoweringState& state, std::ostringstream& out,
+                                    bool& supported) {
+  const std::string elementType = arrayElementTypeName(arrayType);
+  const bool innermost = dimension + 1 == lengths.size();
+  const std::size_t elementSize = innermost ? runtimeArrayElementSize(elementType) : 8;
+  if (elementType.empty() || elementSize == 0) {
+    supported = false;
+    return {};
+  }
+
+  const std::string array = nextTemporary(state);
+  out << "  %" << array << " = call ptr @__scalanative_array_alloc(i32 "
+      << lengths[dimension] << ", i64 " << elementSize << ")\n";
+  state.values[array] = "ptr";
+  state.simpleTypes[array] = arrayType;
+
+  const std::string tag = nextTemporary(state);
+  const std::string loopLabel = "array_fill_loop_" + tag;
+  const std::string bodyLabel = "array_fill_body_" + tag;
+  const std::string latchLabel = "array_fill_latch_" + tag;
+  const std::string doneLabel = "array_fill_done_" + tag;
+  const std::string index = nextTemporary(state);
+  const std::string inBounds = nextTemporary(state);
+  const std::string nextIndex = nextTemporary(state);
+  const std::string preheaderLabel = state.currentBlockLabel;
+  out << "  br label %" << loopLabel << "\n";
+  out << loopLabel << ":\n";
+  out << "  %" << index << " = phi i32 [ 0, %" << preheaderLabel << " ], [ %"
+      << nextIndex << ", %" << latchLabel << " ]\n";
+  out << "  %" << inBounds << " = icmp slt i32 %" << index << ", " << lengths[dimension]
+      << "\n";
+  out << "  br i1 %" << inBounds << ", label %" << bodyLabel << ", label %" << doneLabel
+      << "\n";
+  out << bodyLabel << ":\n";
+  state.currentBlockLabel = bodyLabel;
+
+  std::string element;
+  if (innermost) {
+    bool elementSupported = false;
+    element = lowerValue(elementValue, elementType, state, out, elementSupported);
+    if (!elementSupported) {
+      supported = false;
+      return {};
+    }
+  } else {
+    element = emitArrayFillAllocation(dimension + 1, lengths, elementType, elementValue,
+                                      state, out, supported);
+    if (!supported) {
+      return {};
+    }
+  }
+
+  const std::string wideIndex = nextTemporary(state);
+  const std::string elements = nextTemporary(state);
+  const std::string slot = nextTemporary(state);
+  const std::string storageType =
+      elementType == "Boolean" ? "i8" : llvmType(elementType);
+  out << "  %" << wideIndex << " = sext i32 %" << index << " to i64\n";
+  out << "  %" << elements << " = getelementptr i8, ptr %" << array << ", i64 "
+      << ObjectHeaderSize + 8 << "\n";
+  out << "  %" << slot << " = getelementptr " << storageType << ", ptr %" << elements
+      << ", i64 %" << wideIndex << "\n";
+  out << "  store " << llvmType(elementType) << ' ' << element << ", ptr %" << slot
+      << "\n";
+  state.values[wideIndex] = "i64";
+  state.simpleTypes[wideIndex] = "Long";
+  state.values[elements] = "ptr";
+  state.simpleTypes[elements] = "Object";
+  state.values[slot] = "ptr";
+  state.simpleTypes[slot] = "Object";
+  out << "  br label %" << latchLabel << "\n";
+  out << latchLabel << ":\n";
+  out << "  %" << nextIndex << " = add i32 %" << index << ", 1\n";
+  out << "  br label %" << loopLabel << "\n";
+  out << doneLabel << ":\n";
+  state.currentBlockLabel = doneLabel;
+  supported = true;
+  return "%" + array;
+}
+
 std::string lowerCall(const nir::Value& value, const std::string& expectedType,
                       LoweringState& state, std::ostringstream& out, bool& supported) {
   if (value.operands.empty()) {
@@ -5581,6 +5877,7 @@ std::string lowerCall(const nir::Value& value, const std::string& expectedType,
   const bool isRuntimeArrayApply = target == support::StdNames::RuntimeArrayApply;
   const bool isRuntimeArrayUpdate = target == support::StdNames::RuntimeArrayUpdate;
   const bool isRuntimeArrayClone = target == support::StdNames::RuntimeArrayClone;
+  const bool isRuntimeArrayRange = target == support::StdNames::RuntimeArrayRange;
   const bool isRuntimeIntArrayLength =
       target == support::StdNames::RuntimeIntArrayLength;
   const bool isRuntimeIntArrayAlloc = target == support::StdNames::RuntimeIntArrayAlloc;
@@ -5588,6 +5885,26 @@ std::string lowerCall(const nir::Value& value, const std::string& expectedType,
   const bool isRuntimeIntArrayUpdate =
       target == support::StdNames::RuntimeIntArrayUpdate;
   const bool isRuntimeIntArrayClone = target == support::StdNames::RuntimeIntArrayClone;
+  const bool isRuntimeByteArrayLength =
+      target == support::StdNames::RuntimeByteArrayLength;
+  const bool isRuntimeByteArrayAlloc =
+      target == support::StdNames::RuntimeByteArrayAlloc;
+  const bool isRuntimeByteArrayApply =
+      target == support::StdNames::RuntimeByteArrayApply;
+  const bool isRuntimeByteArrayUpdate =
+      target == support::StdNames::RuntimeByteArrayUpdate;
+  const bool isRuntimeByteArrayClone =
+      target == support::StdNames::RuntimeByteArrayClone;
+  const bool isRuntimeShortArrayLength =
+      target == support::StdNames::RuntimeShortArrayLength;
+  const bool isRuntimeShortArrayAlloc =
+      target == support::StdNames::RuntimeShortArrayAlloc;
+  const bool isRuntimeShortArrayApply =
+      target == support::StdNames::RuntimeShortArrayApply;
+  const bool isRuntimeShortArrayUpdate =
+      target == support::StdNames::RuntimeShortArrayUpdate;
+  const bool isRuntimeShortArrayClone =
+      target == support::StdNames::RuntimeShortArrayClone;
   const bool isRuntimeBooleanArrayLength =
       target == support::StdNames::RuntimeBooleanArrayLength;
   const bool isRuntimeBooleanArrayAlloc =
@@ -5650,6 +5967,10 @@ std::string lowerCall(const nir::Value& value, const std::string& expectedType,
       std::string(support::StdNames::RuntimeReferenceArrayClone) + ".";
   const std::string arrayOfDimPrefix =
       std::string(support::StdNames::RuntimeArrayOfDim) + ".";
+  const std::string arrayFillPrefix =
+      std::string(support::StdNames::RuntimeArrayFill) + ".";
+  const std::string arrayConcatPrefix =
+      std::string(support::StdNames::RuntimeArrayConcat) + ".";
   const std::string arrayCopyPrefix =
       std::string(support::StdNames::RuntimeArrayCopy) + ".";
   const std::string referenceArrayCopyPrefix =
@@ -5665,10 +5986,14 @@ std::string lowerCall(const nir::Value& value, const std::string& expectedType,
   const bool isRuntimeReferenceArrayClone =
       target.starts_with(referenceArrayClonePrefix);
   const bool isRuntimeArrayOfDim = target.starts_with(arrayOfDimPrefix);
+  const bool isRuntimeArrayFill = target.starts_with(arrayFillPrefix);
+  const bool isRuntimeArrayConcat = target.starts_with(arrayConcatPrefix);
   const bool isRuntimeArrayCopy = target.starts_with(arrayCopyPrefix);
   const bool isRuntimeReferenceArrayCopy = target.starts_with(referenceArrayCopyPrefix);
   const bool isRuntimePrimitiveToString =
       target == support::StdNames::RuntimeBooleanToString ||
+      target == support::StdNames::RuntimeByteToString ||
+      target == support::StdNames::RuntimeShortToString ||
       target == support::StdNames::RuntimeIntToString ||
       target == support::StdNames::RuntimeLongToString ||
       target == support::StdNames::RuntimeFloatToString ||
@@ -5693,6 +6018,8 @@ std::string lowerCall(const nir::Value& value, const std::string& expectedType,
   const bool isRuntimeAnyReceiverEquals =
       target == support::StdNames::RuntimeAnyReceiverEquals;
   const bool isRuntimeHashCode =
+      target == support::StdNames::RuntimeByteHashCode ||
+      target == support::StdNames::RuntimeShortHashCode ||
       target == support::StdNames::RuntimeBooleanHashCode ||
       target == support::StdNames::RuntimeLongHashCode ||
       target == support::StdNames::RuntimeFloatHashCode ||
@@ -5702,6 +6029,13 @@ std::string lowerCall(const nir::Value& value, const std::string& expectedType,
       target == support::StdNames::RuntimeSymbolHashCode ||
       target == support::StdNames::RuntimeAnyHashCode ||
       target == support::StdNames::RuntimeAnyReceiverHashCode;
+  const bool isRuntimeNumericConversion =
+      target == support::StdNames::RuntimeIntToByte ||
+      target == support::StdNames::RuntimeIntToShort ||
+      target == support::StdNames::RuntimeShortToByte ||
+      target == support::StdNames::RuntimeByteToShort ||
+      target == support::StdNames::RuntimeByteToInt ||
+      target == support::StdNames::RuntimeShortToInt;
   const bool isRuntimeFormat = target == support::StdNames::RuntimeFormat;
   const bool isRuntimeBooleanFormat = target == support::StdNames::RuntimeFormatBoolean;
   if (isRuntimeGcCollect) {
@@ -5742,6 +6076,31 @@ std::string lowerCall(const nir::Value& value, const std::string& expectedType,
     out << "  call void @__scalanative_gc_set_threshold(i64 " << threshold << ")\n";
     supported = true;
     return {};
+  }
+  if (isRuntimeNumericConversion) {
+    if (value.operands.size() != 2 || signature->parameterTypes.size() != 1 ||
+        expectedType != signature->returnType) {
+      supported = false;
+      return defaultValue(expectedType);
+    }
+    const std::string& sourceType = signature->parameterTypes.front();
+    const std::string& targetType = signature->returnType;
+    bool operandSupported = false;
+    const std::string operand =
+        lowerValue(value.operands[1], sourceType, state, out, operandSupported);
+    if (!operandSupported) {
+      supported = false;
+      return defaultValue(expectedType);
+    }
+    const std::string result = nextTemporary(state);
+    const bool widening = typeSize(sourceType) < typeSize(targetType);
+    out << "  %" << result << " = " << (widening ? "sext " : "trunc ")
+        << llvmType(sourceType) << ' ' << operand << " to " << llvmType(targetType)
+        << "\n";
+    state.values[result] = llvmType(targetType);
+    state.simpleTypes[result] = targetType;
+    supported = true;
+    return "%" + result;
   }
   if (isRuntimePrimitiveToString) {
     if (value.operands.size() != 2 || expectedType != "String") {
@@ -6028,7 +6387,11 @@ std::string lowerCall(const nir::Value& value, const std::string& expectedType,
     }
     std::string argumentType;
     std::string helper;
-    if (target == support::StdNames::RuntimeBooleanHashCode) {
+    if (target == support::StdNames::RuntimeByteHashCode) {
+      argumentType = "Byte";
+    } else if (target == support::StdNames::RuntimeShortHashCode) {
+      argumentType = "Short";
+    } else if (target == support::StdNames::RuntimeBooleanHashCode) {
       argumentType = "Boolean";
       helper = "__scalanative_boolean_hash_code";
     } else if (target == support::StdNames::RuntimeLongHashCode) {
@@ -6068,6 +6431,14 @@ std::string lowerCall(const nir::Value& value, const std::string& expectedType,
       checkedArgument = requireNonNullReceiver(argument, state, out);
     }
     const std::string result = nextTemporary(state);
+    if (helper.empty()) {
+      out << "  %" << result << " = sext " << llvmType(argumentType) << ' '
+          << checkedArgument << " to i32\n";
+      state.values[result] = "i32";
+      state.simpleTypes[result] = "Int";
+      supported = true;
+      return "%" + result;
+    }
     out << "  %" << result << " = call i32 @" << helper << '(' << llvmType(argumentType)
         << ' ' << checkedArgument << ")\n";
     state.values[result] = "i32";
@@ -6087,8 +6458,9 @@ std::string lowerCall(const nir::Value& value, const std::string& expectedType,
     const bool supportedValueType =
         isRuntimeBooleanFormat
             ? valueType == "Boolean"
-            : valueType == "Float" || valueType == "Double" || valueType == "Int" ||
-                  valueType == "Long" || valueType == "Char" || valueType == "String";
+            : valueType == "Float" || valueType == "Double" || valueType == "Byte" ||
+                  valueType == "Short" || valueType == "Int" || valueType == "Long" ||
+                  valueType == "Char" || valueType == "String";
     if (!formatSupported || !supportedValueType) {
       supported = false;
       return defaultValue(expectedType);
@@ -6117,9 +6489,10 @@ std::string lowerCall(const nir::Value& value, const std::string& expectedType,
       state.values[promoted] = "double";
       state.simpleTypes[promoted] = "Double";
       formatArgument = "double %" + promoted;
-    } else if (valueType == "Int") {
+    } else if (valueType == "Byte" || valueType == "Short" || valueType == "Int") {
       const std::string widened = nextTemporary(state);
-      out << "  %" << widened << " = sext i32 " << formattedValue << " to i64\n";
+      out << "  %" << widened << " = sext " << llvmType(valueType) << ' '
+          << formattedValue << " to i64\n";
       state.values[widened] = "i64";
       state.simpleTypes[widened] = "Long";
       formatArgument = "i64 %" + widened;
@@ -6168,6 +6541,306 @@ std::string lowerCall(const nir::Value& value, const std::string& expectedType,
     supported = true;
     return "%" + length;
   }
+  if (isRuntimeArrayRange) {
+    if (value.operands.size() != 4 || signature->parameterTypes.size() != 3 ||
+        expectedType != "Array [ Int ]" || signature->returnType != expectedType ||
+        !std::all_of(signature->parameterTypes.begin(), signature->parameterTypes.end(),
+                     [](const std::string& type) { return type == "Int"; })) {
+      supported = false;
+      return defaultValue(expectedType);
+    }
+
+    std::vector<std::string> arguments;
+    arguments.reserve(3);
+    for (std::size_t i = 1; i < value.operands.size(); ++i) {
+      bool argumentSupported = false;
+      const std::string argument =
+          lowerValue(value.operands[i], "Int", state, out, argumentSupported);
+      if (!argumentSupported) {
+        supported = false;
+        return defaultValue(expectedType);
+      }
+      arguments.push_back(argument);
+    }
+
+    const std::string wideStart = nextTemporary(state);
+    const std::string wideEnd = nextTemporary(state);
+    const std::string wideStep = nextTemporary(state);
+    out << "  %" << wideStart << " = sext i32 " << arguments[0] << " to i64\n";
+    out << "  %" << wideEnd << " = sext i32 " << arguments[1] << " to i64\n";
+    out << "  %" << wideStep << " = sext i32 " << arguments[2] << " to i64\n";
+
+    const std::string tag = nextTemporary(state);
+    const std::string zeroStepLabel = "array_range_zero_step_" + tag;
+    const std::string directionLabel = "array_range_direction_" + tag;
+    const std::string positiveLabel = "array_range_positive_" + tag;
+    const std::string negativeLabel = "array_range_negative_" + tag;
+    const std::string countLabel = "array_range_count_" + tag;
+    const std::string tooLargeLabel = "array_range_too_large_" + tag;
+    const std::string allocateLabel = "array_range_allocate_" + tag;
+    const std::string loopLabel = "array_range_loop_" + tag;
+    const std::string bodyLabel = "array_range_body_" + tag;
+    const std::string latchLabel = "array_range_latch_" + tag;
+    const std::string doneLabel = "array_range_done_" + tag;
+
+    const std::string zeroStep = nextTemporary(state);
+    out << "  %" << zeroStep << " = icmp eq i64 %" << wideStep << ", 0\n";
+    out << "  br i1 %" << zeroStep << ", label %" << zeroStepLabel << ", label %"
+        << directionLabel << "\n";
+    out << zeroStepLabel << ":\n";
+    out << "  call void @__scalanative_throw_array_range_zero_step()\n";
+    out << "  unreachable\n";
+    out << directionLabel << ":\n";
+
+    const std::string positiveStep = nextTemporary(state);
+    out << "  %" << positiveStep << " = icmp sgt i64 %" << wideStep << ", 0\n";
+    out << "  br i1 %" << positiveStep << ", label %" << positiveLabel << ", label %"
+        << negativeLabel << "\n";
+
+    out << positiveLabel << ":\n";
+    const std::string positiveDifference = nextTemporary(state);
+    const std::string positiveNonEmpty = nextTemporary(state);
+    const std::string positiveBias = nextTemporary(state);
+    const std::string positiveNumerator = nextTemporary(state);
+    const std::string positiveQuotient = nextTemporary(state);
+    const std::string positiveCount = nextTemporary(state);
+    out << "  %" << positiveDifference << " = sub i64 %" << wideEnd << ", %"
+        << wideStart << "\n";
+    out << "  %" << positiveNonEmpty << " = icmp sgt i64 %" << positiveDifference
+        << ", 0\n";
+    out << "  %" << positiveBias << " = sub i64 %" << wideStep << ", 1\n";
+    out << "  %" << positiveNumerator << " = add i64 %" << positiveDifference << ", %"
+        << positiveBias << "\n";
+    out << "  %" << positiveQuotient << " = sdiv i64 %" << positiveNumerator << ", %"
+        << wideStep << "\n";
+    out << "  %" << positiveCount << " = select i1 %" << positiveNonEmpty << ", i64 %"
+        << positiveQuotient << ", i64 0\n";
+    out << "  br label %" << countLabel << "\n";
+
+    out << negativeLabel << ":\n";
+    const std::string negativeStride = nextTemporary(state);
+    const std::string negativeDifference = nextTemporary(state);
+    const std::string negativeNonEmpty = nextTemporary(state);
+    const std::string negativeBias = nextTemporary(state);
+    const std::string negativeNumerator = nextTemporary(state);
+    const std::string negativeQuotient = nextTemporary(state);
+    const std::string negativeCount = nextTemporary(state);
+    out << "  %" << negativeStride << " = sub i64 0, %" << wideStep << "\n";
+    out << "  %" << negativeDifference << " = sub i64 %" << wideStart << ", %"
+        << wideEnd << "\n";
+    out << "  %" << negativeNonEmpty << " = icmp sgt i64 %" << negativeDifference
+        << ", 0\n";
+    out << "  %" << negativeBias << " = sub i64 %" << negativeStride << ", 1\n";
+    out << "  %" << negativeNumerator << " = add i64 %" << negativeDifference << ", %"
+        << negativeBias << "\n";
+    out << "  %" << negativeQuotient << " = sdiv i64 %" << negativeNumerator << ", %"
+        << negativeStride << "\n";
+    out << "  %" << negativeCount << " = select i1 %" << negativeNonEmpty << ", i64 %"
+        << negativeQuotient << ", i64 0\n";
+    out << "  br label %" << countLabel << "\n";
+
+    out << countLabel << ":\n";
+    const std::string count = nextTemporary(state);
+    const std::string tooLarge = nextTemporary(state);
+    out << "  %" << count << " = phi i64 [ %" << positiveCount << ", %" << positiveLabel
+        << " ], [ %" << negativeCount << ", %" << negativeLabel << " ]\n";
+    out << "  %" << tooLarge << " = icmp sgt i64 %" << count << ", 2147483647\n";
+    out << "  br i1 %" << tooLarge << ", label %" << tooLargeLabel << ", label %"
+        << allocateLabel << "\n";
+    out << tooLargeLabel << ":\n";
+    out << "  call void @__scalanative_throw_array_range_too_large()\n";
+    out << "  unreachable\n";
+
+    out << allocateLabel << ":\n";
+    const std::string length = nextTemporary(state);
+    const std::string array = nextTemporary(state);
+    out << "  %" << length << " = trunc i64 %" << count << " to i32\n";
+    out << "  %" << array << " = call ptr @__scalanative_array_alloc(i32 %" << length
+        << ", i64 4)\n";
+    state.values[array] = "ptr";
+    state.simpleTypes[array] = expectedType;
+
+    const std::string index = nextTemporary(state);
+    const std::string inBounds = nextTemporary(state);
+    const std::string wideIndex = nextTemporary(state);
+    const std::string offset = nextTemporary(state);
+    const std::string wideElement = nextTemporary(state);
+    const std::string element = nextTemporary(state);
+    const std::string elements = nextTemporary(state);
+    const std::string slot = nextTemporary(state);
+    const std::string nextIndex = nextTemporary(state);
+    out << "  br label %" << loopLabel << "\n";
+    out << loopLabel << ":\n";
+    out << "  %" << index << " = phi i32 [ 0, %" << allocateLabel << " ], [ %"
+        << nextIndex << ", %" << latchLabel << " ]\n";
+    out << "  %" << inBounds << " = icmp slt i32 %" << index << ", %" << length << "\n";
+    out << "  br i1 %" << inBounds << ", label %" << bodyLabel << ", label %"
+        << doneLabel << "\n";
+    out << bodyLabel << ":\n";
+    out << "  %" << wideIndex << " = sext i32 %" << index << " to i64\n";
+    out << "  %" << offset << " = mul i64 %" << wideIndex << ", %" << wideStep << "\n";
+    out << "  %" << wideElement << " = add i64 %" << wideStart << ", %" << offset
+        << "\n";
+    out << "  %" << element << " = trunc i64 %" << wideElement << " to i32\n";
+    out << "  %" << elements << " = getelementptr i8, ptr %" << array << ", i64 "
+        << ObjectHeaderSize + 8 << "\n";
+    out << "  %" << slot << " = getelementptr i32, ptr %" << elements << ", i64 %"
+        << wideIndex << "\n";
+    out << "  store i32 %" << element << ", ptr %" << slot << "\n";
+    out << "  br label %" << latchLabel << "\n";
+    out << latchLabel << ":\n";
+    out << "  %" << nextIndex << " = add i32 %" << index << ", 1\n";
+    out << "  br label %" << loopLabel << "\n";
+    out << doneLabel << ":\n";
+    state.currentBlockLabel = doneLabel;
+    supported = true;
+    return "%" + array;
+  }
+  if (isRuntimeArrayConcat) {
+    const std::size_t arrayCount = signature->parameterTypes.size();
+    if (value.operands.size() != arrayCount + 1 ||
+        expectedType != signature->returnType ||
+        !std::all_of(signature->parameterTypes.begin(), signature->parameterTypes.end(),
+                     [&](const std::string& type) { return type == expectedType; })) {
+      supported = false;
+      return defaultValue(expectedType);
+    }
+    const std::string elementType = arrayElementTypeName(expectedType);
+    const std::size_t elementSize = runtimeArrayElementSize(elementType);
+    if (elementType.empty() || elementSize == 0) {
+      supported = false;
+      return defaultValue(expectedType);
+    }
+
+    std::vector<std::string> arrays;
+    arrays.reserve(arrayCount);
+    for (std::size_t i = 1; i < value.operands.size(); ++i) {
+      bool arraySupported = false;
+      const std::string array =
+          lowerValue(value.operands[i], expectedType, state, out, arraySupported);
+      if (!arraySupported) {
+        supported = false;
+        return defaultValue(expectedType);
+      }
+      arrays.push_back(array);
+    }
+
+    std::vector<std::string> lengths;
+    lengths.reserve(arrayCount);
+    for (const std::string& array : arrays) {
+      const std::string length = nextTemporary(state);
+      out << "  %" << length << " = call i64 @__scalanative_array_length(ptr " << array
+          << ")\n";
+      state.values[length] = "i64";
+      state.simpleTypes[length] = "Long";
+      lengths.push_back(length);
+    }
+
+    std::string totalLength = "0";
+    for (const std::string& length : lengths) {
+      const std::string nextLength = nextTemporary(state);
+      out << "  %" << nextLength << " = add i64 " << totalLength << ", %" << length
+          << "\n";
+      totalLength = "%" + nextLength;
+    }
+
+    const std::string tag = nextTemporary(state);
+    const std::string tooLarge = nextTemporary(state);
+    const std::string tooLargeLabel = "array_concat_too_large_" + tag;
+    const std::string allocateLabel = "array_concat_allocate_" + tag;
+    out << "  %" << tooLarge << " = icmp ugt i64 " << totalLength << ", 2147483647\n";
+    out << "  br i1 %" << tooLarge << ", label %" << tooLargeLabel << ", label %"
+        << allocateLabel << "\n";
+    out << tooLargeLabel << ":\n";
+    out << "  call void @__scalanative_throw_array_concat_too_large()\n";
+    out << "  unreachable\n";
+
+    out << allocateLabel << ":\n";
+    const std::string narrowLength = nextTemporary(state);
+    const std::string result = nextTemporary(state);
+    out << "  %" << narrowLength << " = trunc i64 " << totalLength << " to i32\n";
+    out << "  %" << result << " = call ptr @__scalanative_array_alloc(i32 %"
+        << narrowLength << ", i64 " << elementSize << ")\n";
+    state.values[result] = "ptr";
+    state.simpleTypes[result] = expectedType;
+
+    const std::string destinationElements = nextTemporary(state);
+    out << "  %" << destinationElements << " = getelementptr i8, ptr %" << result
+        << ", i64 " << ObjectHeaderSize + 8 << "\n";
+    std::string destinationElementOffset = "0";
+    for (std::size_t i = 0; i < arrays.size(); ++i) {
+      const std::string sourceElements = nextTemporary(state);
+      const std::string destinationByteOffset = nextTemporary(state);
+      const std::string destination = nextTemporary(state);
+      const std::string byteCount = nextTemporary(state);
+      out << "  %" << sourceElements << " = getelementptr i8, ptr " << arrays[i]
+          << ", i64 " << ObjectHeaderSize + 8 << "\n";
+      out << "  %" << destinationByteOffset << " = mul i64 " << destinationElementOffset
+          << ", " << elementSize << "\n";
+      out << "  %" << destination << " = getelementptr i8, ptr %" << destinationElements
+          << ", i64 %" << destinationByteOffset << "\n";
+      out << "  %" << byteCount << " = mul i64 %" << lengths[i] << ", " << elementSize
+          << "\n";
+      out << "  call void @llvm.memcpy.p0.p0.i64(ptr %" << destination << ", ptr %"
+          << sourceElements << ", i64 %" << byteCount << ", i1 false)\n";
+      const std::string nextOffset = nextTemporary(state);
+      out << "  %" << nextOffset << " = add i64 " << destinationElementOffset << ", %"
+          << lengths[i] << "\n";
+      destinationElementOffset = "%" + nextOffset;
+    }
+    state.currentBlockLabel = allocateLabel;
+    supported = true;
+    return "%" + result;
+  }
+  if (isRuntimeArrayFill) {
+    const std::size_t dimensions =
+        signature->parameterTypes.empty() ? 0 : signature->parameterTypes.size() - 1;
+    if (dimensions == 0 || value.operands.size() != dimensions + 2 ||
+        expectedType != signature->returnType) {
+      supported = false;
+      return defaultValue(expectedType);
+    }
+    if (!std::all_of(signature->parameterTypes.begin(),
+                     signature->parameterTypes.begin() +
+                         static_cast<std::ptrdiff_t>(dimensions),
+                     [](const std::string& type) { return type == "Int"; })) {
+      supported = false;
+      return defaultValue(expectedType);
+    }
+
+    std::string elementType = signature->returnType;
+    for (std::size_t i = 0; i < dimensions; ++i) {
+      elementType = arrayElementTypeName(elementType);
+      if (elementType.empty()) {
+        supported = false;
+        return defaultValue(expectedType);
+      }
+    }
+    if (runtimeArrayElementSize(elementType) == 0 ||
+        signature->parameterTypes.back() != elementType) {
+      supported = false;
+      return defaultValue(expectedType);
+    }
+
+    std::vector<std::string> lengths;
+    lengths.reserve(dimensions);
+    for (std::size_t i = 0; i < dimensions; ++i) {
+      bool lengthSupported = false;
+      const std::string length =
+          lowerValue(value.operands[i + 1], "Int", state, out, lengthSupported);
+      if (!lengthSupported) {
+        supported = false;
+        return defaultValue(expectedType);
+      }
+      lengths.push_back(length);
+    }
+
+    supported = true;
+    const std::string array =
+        emitArrayFillAllocation(0, lengths, signature->returnType,
+                                value.operands[dimensions + 1], state, out, supported);
+    return supported ? array : defaultValue(expectedType);
+  }
   if (isRuntimeArrayOfDim) {
     const std::size_t dimensions = signature->parameterTypes.size();
     if (dimensions < 2 || value.operands.size() != dimensions + 1 ||
@@ -6211,20 +6884,24 @@ std::string lowerCall(const nir::Value& value, const std::string& expectedType,
     supported = true;
     return emitArrayOfDimAllocation(0, lengths, signature->returnType, state, out);
   }
-  if (isRuntimeArrayAlloc || isRuntimeIntArrayAlloc || isRuntimeBooleanArrayAlloc ||
+  if (isRuntimeArrayAlloc || isRuntimeIntArrayAlloc || isRuntimeByteArrayAlloc ||
+      isRuntimeShortArrayAlloc || isRuntimeBooleanArrayAlloc ||
       isRuntimeLongArrayAlloc || isRuntimeDoubleArrayAlloc ||
       isRuntimeFloatArrayAlloc || isRuntimeCharArrayAlloc ||
       isRuntimeReferenceArrayAlloc) {
     const std::string arrayType = isRuntimeReferenceArrayAlloc ? signature->returnType
                                   : isRuntimeArrayAlloc        ? "Array [ String ]"
                                   : isRuntimeIntArrayAlloc     ? "Array [ Int ]"
+                                  : isRuntimeByteArrayAlloc    ? "Array [ Byte ]"
+                                  : isRuntimeShortArrayAlloc   ? "Array [ Short ]"
                                   : isRuntimeBooleanArrayAlloc ? "Array [ Boolean ]"
                                   : isRuntimeDoubleArrayAlloc  ? "Array [ Double ]"
                                   : isRuntimeFloatArrayAlloc   ? "Array [ Float ]"
                                   : isRuntimeCharArrayAlloc    ? "Array [ Char ]"
                                                                : "Array [ Long ]";
     const std::size_t elementSize =
-        isRuntimeBooleanArrayAlloc ? 1
+        isRuntimeByteArrayAlloc || isRuntimeBooleanArrayAlloc ? 1
+        : isRuntimeShortArrayAlloc                            ? 2
         : isRuntimeIntArrayAlloc || isRuntimeFloatArrayAlloc || isRuntimeCharArrayAlloc
             ? 4
             : 8;
@@ -6247,20 +6924,24 @@ std::string lowerCall(const nir::Value& value, const std::string& expectedType,
     supported = true;
     return "%" + array;
   }
-  if (isRuntimeArrayClone || isRuntimeIntArrayClone || isRuntimeBooleanArrayClone ||
+  if (isRuntimeArrayClone || isRuntimeIntArrayClone || isRuntimeByteArrayClone ||
+      isRuntimeShortArrayClone || isRuntimeBooleanArrayClone ||
       isRuntimeLongArrayClone || isRuntimeDoubleArrayClone ||
       isRuntimeFloatArrayClone || isRuntimeCharArrayClone ||
       isRuntimeReferenceArrayClone) {
     const std::string arrayType = isRuntimeReferenceArrayClone ? signature->returnType
                                   : isRuntimeArrayClone        ? "Array [ String ]"
                                   : isRuntimeIntArrayClone     ? "Array [ Int ]"
+                                  : isRuntimeByteArrayClone    ? "Array [ Byte ]"
+                                  : isRuntimeShortArrayClone   ? "Array [ Short ]"
                                   : isRuntimeBooleanArrayClone ? "Array [ Boolean ]"
                                   : isRuntimeDoubleArrayClone  ? "Array [ Double ]"
                                   : isRuntimeFloatArrayClone   ? "Array [ Float ]"
                                   : isRuntimeCharArrayClone    ? "Array [ Char ]"
                                                                : "Array [ Long ]";
     const std::size_t elementSize =
-        isRuntimeBooleanArrayClone ? 1
+        isRuntimeByteArrayClone || isRuntimeBooleanArrayClone ? 1
+        : isRuntimeShortArrayClone                            ? 2
         : isRuntimeIntArrayClone || isRuntimeFloatArrayClone || isRuntimeCharArrayClone
             ? 4
             : 8;
@@ -6318,7 +6999,8 @@ std::string lowerCall(const nir::Value& value, const std::string& expectedType,
           return true;
         }
         if (!arrayElementTypeName(elementType).empty() || elementType == "String" ||
-            elementType == "Int" || elementType == "Boolean" || elementType == "Long" ||
+            elementType == "Byte" || elementType == "Short" || elementType == "Int" ||
+            elementType == "Boolean" || elementType == "Long" ||
             elementType == "Double" || elementType == "Float" ||
             elementType == "Char" || state.classLayouts == nullptr) {
           return false;
@@ -6372,7 +7054,8 @@ std::string lowerCall(const nir::Value& value, const std::string& expectedType,
     supported = true;
     return {};
   }
-  if (isRuntimeArrayLength || isRuntimeIntArrayLength || isRuntimeBooleanArrayLength ||
+  if (isRuntimeArrayLength || isRuntimeIntArrayLength || isRuntimeByteArrayLength ||
+      isRuntimeShortArrayLength || isRuntimeBooleanArrayLength ||
       isRuntimeLongArrayLength || isRuntimeDoubleArrayLength ||
       isRuntimeFloatArrayLength || isRuntimeCharArrayLength ||
       isRuntimeReferenceArrayLength) {
@@ -6386,6 +7069,8 @@ std::string lowerCall(const nir::Value& value, const std::string& expectedType,
             ? signature->parameterTypes.front()
         : isRuntimeArrayLength        ? "Array [ String ]"
         : isRuntimeIntArrayLength     ? "Array [ Int ]"
+        : isRuntimeByteArrayLength    ? "Array [ Byte ]"
+        : isRuntimeShortArrayLength   ? "Array [ Short ]"
         : isRuntimeBooleanArrayLength ? "Array [ Boolean ]"
         : isRuntimeDoubleArrayLength  ? "Array [ Double ]"
         : isRuntimeFloatArrayLength   ? "Array [ Float ]"
@@ -6409,12 +7094,15 @@ std::string lowerCall(const nir::Value& value, const std::string& expectedType,
     supported = true;
     return "%" + length;
   }
-  if (isRuntimeArrayApply || isRuntimeIntArrayApply || isRuntimeBooleanArrayApply ||
+  if (isRuntimeArrayApply || isRuntimeIntArrayApply || isRuntimeByteArrayApply ||
+      isRuntimeShortArrayApply || isRuntimeBooleanArrayApply ||
       isRuntimeLongArrayApply || isRuntimeDoubleArrayApply ||
       isRuntimeFloatArrayApply || isRuntimeCharArrayApply ||
       isRuntimeReferenceArrayApply) {
     const bool stringElements = isRuntimeArrayApply;
     const bool intElements = isRuntimeIntArrayApply;
+    const bool byteElements = isRuntimeByteArrayApply;
+    const bool shortElements = isRuntimeShortArrayApply;
     const bool booleanElements = isRuntimeBooleanArrayApply;
     const bool doubleElements = isRuntimeDoubleArrayApply;
     const bool floatElements = isRuntimeFloatArrayApply;
@@ -6424,6 +7112,8 @@ std::string lowerCall(const nir::Value& value, const std::string& expectedType,
         referenceElements && !signature->parameterTypes.empty()
             ? arrayElementTypeName(signature->parameterTypes.front())
         : stringElements  ? "String"
+        : byteElements    ? "Byte"
+        : shortElements   ? "Short"
         : intElements     ? "Int"
         : booleanElements ? "Boolean"
         : doubleElements  ? "Double"
@@ -6432,6 +7122,8 @@ std::string lowerCall(const nir::Value& value, const std::string& expectedType,
                           : "Long";
     const std::string arrayType = "Array [ " + elementType + " ]";
     const char* elementLlvmType = stringElements || referenceElements ? "ptr"
+                                  : byteElements                      ? "i8"
+                                  : shortElements                     ? "i16"
                                   : intElements                       ? "i32"
                                   : booleanElements                   ? "i1"
                                   : doubleElements                    ? "double"
@@ -6439,6 +7131,8 @@ std::string lowerCall(const nir::Value& value, const std::string& expectedType,
                                   : charElements                      ? "i32"
                                                                       : "i64";
     const char* elementKind = stringElements      ? "string"
+                              : byteElements      ? "byte"
+                              : shortElements     ? "short"
                               : intElements       ? "int"
                               : booleanElements   ? "boolean"
                               : doubleElements    ? "double"
@@ -6469,12 +7163,15 @@ std::string lowerCall(const nir::Value& value, const std::string& expectedType,
     supported = true;
     return "%" + element;
   }
-  if (isRuntimeArrayUpdate || isRuntimeIntArrayUpdate || isRuntimeBooleanArrayUpdate ||
+  if (isRuntimeArrayUpdate || isRuntimeIntArrayUpdate || isRuntimeByteArrayUpdate ||
+      isRuntimeShortArrayUpdate || isRuntimeBooleanArrayUpdate ||
       isRuntimeLongArrayUpdate || isRuntimeDoubleArrayUpdate ||
       isRuntimeFloatArrayUpdate || isRuntimeCharArrayUpdate ||
       isRuntimeReferenceArrayUpdate) {
     const bool stringElements = isRuntimeArrayUpdate;
     const bool intElements = isRuntimeIntArrayUpdate;
+    const bool byteElements = isRuntimeByteArrayUpdate;
+    const bool shortElements = isRuntimeShortArrayUpdate;
     const bool booleanElements = isRuntimeBooleanArrayUpdate;
     const bool doubleElements = isRuntimeDoubleArrayUpdate;
     const bool floatElements = isRuntimeFloatArrayUpdate;
@@ -6484,6 +7181,8 @@ std::string lowerCall(const nir::Value& value, const std::string& expectedType,
         referenceElements && !signature->parameterTypes.empty()
             ? arrayElementTypeName(signature->parameterTypes.front())
         : stringElements  ? "String"
+        : byteElements    ? "Byte"
+        : shortElements   ? "Short"
         : intElements     ? "Int"
         : booleanElements ? "Boolean"
         : doubleElements  ? "Double"
@@ -6492,6 +7191,8 @@ std::string lowerCall(const nir::Value& value, const std::string& expectedType,
                           : "Long";
     const std::string arrayType = "Array [ " + elementType + " ]";
     const char* elementLlvmType = stringElements || referenceElements ? "ptr"
+                                  : byteElements                      ? "i8"
+                                  : shortElements                     ? "i16"
                                   : intElements                       ? "i32"
                                   : booleanElements                   ? "i1"
                                   : doubleElements                    ? "double"
@@ -6499,6 +7200,8 @@ std::string lowerCall(const nir::Value& value, const std::string& expectedType,
                                   : charElements                      ? "i32"
                                                                       : "i64";
     const char* elementKind = stringElements      ? "string"
+                              : byteElements      ? "byte"
+                              : shortElements     ? "short"
                               : intElements       ? "int"
                               : booleanElements   ? "boolean"
                               : doubleElements    ? "double"
@@ -6646,6 +7349,15 @@ std::string lowerCall(const nir::Value& value, const std::string& expectedType,
       out << "  %" << converted << " = call ptr @__scalanative_any_to_string("
           << loweredArguments.front() << ")\n";
       out << "  call i32 @puts(ptr %" << converted << ")\n";
+    } else if (argumentSimpleTypes.front() == "Byte" ||
+               argumentSimpleTypes.front() == "Short") {
+      const std::string widened = nextTemporary(state);
+      out << "  %" << widened << " = sext " << loweredArguments.front() << " to i32\n";
+      state.values[widened] = "i32";
+      state.simpleTypes[widened] = "Int";
+      out << "  call i32 (ptr, ...) @printf(ptr getelementptr inbounds ([4 x i8], "
+             "ptr @.fmt.int, i64 0, i64 0), i32 %"
+          << widened << ")\n";
     } else if (argumentSimpleTypes.front() == "Int") {
       out << "  call i32 (ptr, ...) @printf(ptr getelementptr inbounds ([4 x i8], "
              "ptr @.fmt.int, i64 0, i64 0), "
@@ -6755,8 +7467,11 @@ std::string lowerUnary(const nir::Value& value, const std::string& expectedType,
 
   const bool isIntegral = expectedType == "Int" || expectedType == "Long";
   const bool isFloating = expectedType == "Float" || expectedType == "Double";
+  const bool narrowIntegralPromotion =
+      expectedType == "Int" && (operandType == "Byte" || operandType == "Short");
   if ((value.text != "+" && value.text != "-") || (!isIntegral && !isFloating) ||
-      (operandType != expectedType && operandType != "Unknown")) {
+      (operandType != expectedType && operandType != "Unknown" &&
+       !narrowIntegralPromotion)) {
     supported = false;
     return defaultValue(expectedType);
   }
@@ -6824,6 +7539,8 @@ std::string lowerStringOperand(const nir::Value& value, LoweringState& state,
   std::string helper;
   if (operandType == "Boolean") {
     helper = "__scalanative_string_from_boolean";
+  } else if (operandType == "Byte" || operandType == "Short") {
+    helper = "__scalanative_string_from_int";
   } else if (operandType == "Int") {
     helper = "__scalanative_string_from_int";
   } else if (operandType == "Long") {
@@ -6847,9 +7564,20 @@ std::string lowerStringOperand(const nir::Value& value, LoweringState& state,
     return defaultValue("String");
   }
 
+  std::string stringOperand = operand;
+  std::string stringOperandType = operandType;
+  if (operandType == "Byte" || operandType == "Short") {
+    const std::string widened = nextTemporary(state);
+    out << "  %" << widened << " = sext " << llvmType(operandType) << ' ' << operand
+        << " to i32\n";
+    state.values[widened] = "i32";
+    state.simpleTypes[widened] = "Int";
+    stringOperand = "%" + widened;
+    stringOperandType = "Int";
+  }
   const std::string temporary = nextTemporary(state);
-  out << "  %" << temporary << " = call ptr @" << helper << "(" << llvmType(operandType)
-      << " " << operand << ")\n";
+  out << "  %" << temporary << " = call ptr @" << helper << "("
+      << llvmType(stringOperandType) << " " << stringOperand << ")\n";
   state.values[temporary] = "ptr";
   state.simpleTypes[temporary] = "String";
   supported = true;
@@ -7055,7 +7783,8 @@ std::string lowerBinary(const nir::Value& value, const std::string& expectedType
     if (expectedType != "Boolean" || operandType == "Unknown" ||
         (rhsType != "Unknown" && rhsType != operandType &&
          !compatiblePointerNullComparison && !compatibleReferencePointerComparison) ||
-        (operandLlvmType != "i1" && operandLlvmType != "i32" &&
+        (operandLlvmType != "i1" && operandLlvmType != "i8" &&
+         operandLlvmType != "i16" && operandLlvmType != "i32" &&
          operandLlvmType != "i64" && operandLlvmType != "float" &&
          operandLlvmType != "double" && operandLlvmType != "ptr")) {
       supported = false;
@@ -7768,8 +8497,11 @@ std::string lowerValueUnrooted(const nir::Value& value, const std::string& expec
         return defaultValue(expectedType);
       }
       const std::string temporary = nextTemporary(state);
-      out << "  %" << temporary << " = load " << llvmType(simpleType->second)
-          << ", ptr %" << slot->second << "\n";
+      out << "  %" << temporary << " = load ";
+      if (state.preserveMutableLocalsAcrossHandlers) {
+        out << "volatile ";
+      }
+      out << llvmType(simpleType->second) << ", ptr %" << slot->second << "\n";
       state.values[temporary] = llvmType(simpleType->second);
       state.simpleTypes[temporary] = simpleType->second;
       supported = true;
@@ -7971,7 +8703,50 @@ std::string lowerValueUnrooted(const nir::Value& value, const std::string& expec
 
 std::string lowerValue(const nir::Value& value, const std::string& expectedType,
                        LoweringState& state, std::ostringstream& out, bool& supported) {
-  std::string lowered = lowerValueUnrooted(value, expectedType, state, out, supported);
+  const auto numericRank = [](std::string_view type) {
+    if (type == "Byte") {
+      return 1;
+    }
+    if (type == "Short") {
+      return 2;
+    }
+    if (type == "Int") {
+      return 3;
+    }
+    if (type == "Long") {
+      return 4;
+    }
+    if (type == "Float") {
+      return 5;
+    }
+    if (type == "Double") {
+      return 6;
+    }
+    return 0;
+  };
+  const std::string sourceType = inferSimpleType(value, state);
+  const int sourceRank = numericRank(sourceType);
+  const int targetRank = numericRank(expectedType);
+  const bool widenNumeric =
+      sourceType != expectedType && sourceRank != 0 && targetRank > sourceRank;
+
+  std::string lowered = lowerValueUnrooted(
+      value, widenNumeric ? sourceType : expectedType, state, out, supported);
+  if (supported && widenNumeric) {
+    const std::string widened = nextTemporary(state);
+    const std::string sourceLlvmType = llvmType(sourceType);
+    const std::string targetLlvmType = llvmType(expectedType);
+    const bool sourceFloating = sourceType == "Float" || sourceType == "Double";
+    const bool targetFloating = expectedType == "Float" || expectedType == "Double";
+    const char* instruction = sourceFloating   ? "fpext"
+                              : targetFloating ? "sitofp"
+                                               : "sext";
+    out << "  %" << widened << " = " << instruction << ' ' << sourceLlvmType << ' '
+        << lowered << " to " << targetLlvmType << "\n";
+    state.values[widened] = targetLlvmType;
+    state.simpleTypes[widened] = expectedType;
+    lowered = "%" + widened;
+  }
   if (!supported || !state.hasShadowFrame || lowered.empty() || lowered == "null") {
     return lowered;
   }
@@ -8064,6 +8839,14 @@ std::size_t countReferenceLocalBindings(const nir::Value& value) {
     count += countReferenceLocalBindings(operand);
   }
   return count;
+}
+
+bool containsExceptionHandler(const nir::Value& value) {
+  if (value.kind == nir::ValueKind::Try) {
+    return true;
+  }
+  return std::any_of(value.operands.begin(), value.operands.end(),
+                     containsExceptionHandler);
 }
 
 std::string takeBindingRootSlot(const std::string& simpleType, LoweringState& state) {
@@ -8179,7 +8962,11 @@ void emitVar(const nir::Instruction& instruction, LoweringState& state,
 
   const std::string slot = name + "_slot";
   out << "  %" << slot << " = alloca " << loweredType << "\n";
-  out << "  store " << loweredType << ' ' << lowered << ", ptr %" << slot << "\n";
+  out << "  store ";
+  if (state.preserveMutableLocalsAcrossHandlers) {
+    out << "volatile ";
+  }
+  out << loweredType << ' ' << lowered << ", ptr %" << slot << "\n";
   if (!bindingRootSlot.empty()) {
     state.shadowRootSlots[name] = bindingRootSlot;
     out << "  store ptr " << lowered << ", ptr %" << bindingRootSlot << "\n";
@@ -8298,6 +9085,11 @@ void emitFunction(
   state.sources = sources;
   state.errors = &errors;
   state.functionName = definition.name;
+  state.preserveMutableLocalsAcrossHandlers = std::any_of(
+      definition.body.instructions.begin(), definition.body.instructions.end(),
+      [](const nir::Instruction& instruction) {
+        return containsExceptionHandler(instruction.value);
+      });
   if (sourceFrame != nullptr) {
     state.source = sourceFrame->source;
     state.hasSourceFrame = true;
@@ -8789,6 +9581,12 @@ CodegenResult LlvmCodegen::emit(const linker::LinkedProgram& program,
          "c\"Assumption failed\\00\"\n\n";
   out << "@.str.requirement_failed = private unnamed_addr constant [19 x i8] "
          "c\"Requirement failed\\00\"\n\n";
+  out << "@.str.array_range_zero_step = private unnamed_addr constant [10 x i8] "
+         "c\"zero step\\00\"\n";
+  out << "@.str.array_range_too_large = private unnamed_addr constant [25 x i8] "
+         "c\"Array range is too large\\00\"\n";
+  out << "@.str.array_concat_too_large = private unnamed_addr constant [33 x i8] "
+         "c\"Array concatenation is too large\\00\"\n\n";
   out << "@.str.stack_trace_unknown = private unnamed_addr constant [10 x i8] "
          "c\"<unknown>\\00\"\n";
   out << "@.str.stack_trace_element_unknown = private unnamed_addr constant [25 x "

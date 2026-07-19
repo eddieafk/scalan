@@ -829,9 +829,9 @@ bool isTypedNullReferenceValue(const nir::Value& value, std::string_view declare
 }
 
 bool isBoxedAbiType(std::string_view type) {
-  return type == "Unit" || type == "Boolean" || type == "Int" || type == "Long" ||
-         type == "Float" || type == "Double" || type == "Char" || type == "Symbol" ||
-         type == "String";
+  return type == "Unit" || type == "Boolean" || type == "Byte" || type == "Short" ||
+         type == "Int" || type == "Long" || type == "Float" || type == "Double" ||
+         type == "Char" || type == "Symbol" || type == "String";
 }
 
 bool isTopObjectTarget(std::string_view type) {
@@ -917,6 +917,12 @@ bool isRuntimeArrayLengthHelper(std::string_view target, std::string_view elemen
   if (elementType == "Int") {
     return target == support::StdNames::RuntimeIntArrayLength;
   }
+  if (elementType == "Byte") {
+    return target == support::StdNames::RuntimeByteArrayLength;
+  }
+  if (elementType == "Short") {
+    return target == support::StdNames::RuntimeShortArrayLength;
+  }
   if (elementType == "Boolean") {
     return target == support::StdNames::RuntimeBooleanArrayLength;
   }
@@ -945,6 +951,12 @@ bool isRuntimeArrayApplyHelper(std::string_view target, std::string_view element
   if (elementType == "Int") {
     return target == support::StdNames::RuntimeIntArrayApply;
   }
+  if (elementType == "Byte") {
+    return target == support::StdNames::RuntimeByteArrayApply;
+  }
+  if (elementType == "Short") {
+    return target == support::StdNames::RuntimeShortArrayApply;
+  }
   if (elementType == "Boolean") {
     return target == support::StdNames::RuntimeBooleanArrayApply;
   }
@@ -969,6 +981,8 @@ bool isRuntimeArrayApplyHelper(std::string_view target, std::string_view element
 bool isRuntimeArrayUpdateTarget(std::string_view target) {
   return target == support::StdNames::RuntimeArrayUpdate ||
          target == support::StdNames::RuntimeIntArrayUpdate ||
+         target == support::StdNames::RuntimeByteArrayUpdate ||
+         target == support::StdNames::RuntimeShortArrayUpdate ||
          target == support::StdNames::RuntimeBooleanArrayUpdate ||
          target == support::StdNames::RuntimeLongArrayUpdate ||
          target == support::StdNames::RuntimeDoubleArrayUpdate ||
@@ -984,6 +998,12 @@ bool isRuntimeArrayUpdateHelper(std::string_view target, std::string_view elemen
   }
   if (elementType == "Int") {
     return target == support::StdNames::RuntimeIntArrayUpdate;
+  }
+  if (elementType == "Byte") {
+    return target == support::StdNames::RuntimeByteArrayUpdate;
+  }
+  if (elementType == "Short") {
+    return target == support::StdNames::RuntimeShortArrayUpdate;
   }
   if (elementType == "Boolean") {
     return target == support::StdNames::RuntimeBooleanArrayUpdate;
@@ -1009,6 +1029,8 @@ bool isRuntimeArrayUpdateHelper(std::string_view target, std::string_view elemen
 bool isRuntimeArrayReadTarget(std::string_view target) {
   return target == support::StdNames::RuntimeArrayLength ||
          target == support::StdNames::RuntimeIntArrayLength ||
+         target == support::StdNames::RuntimeByteArrayLength ||
+         target == support::StdNames::RuntimeShortArrayLength ||
          target == support::StdNames::RuntimeBooleanArrayLength ||
          target == support::StdNames::RuntimeLongArrayLength ||
          target == support::StdNames::RuntimeDoubleArrayLength ||
@@ -1016,6 +1038,8 @@ bool isRuntimeArrayReadTarget(std::string_view target) {
          target == support::StdNames::RuntimeCharArrayLength ||
          target == support::StdNames::RuntimeArrayApply ||
          target == support::StdNames::RuntimeIntArrayApply ||
+         target == support::StdNames::RuntimeByteArrayApply ||
+         target == support::StdNames::RuntimeShortArrayApply ||
          target == support::StdNames::RuntimeBooleanArrayApply ||
          target == support::StdNames::RuntimeLongArrayApply ||
          target == support::StdNames::RuntimeDoubleArrayApply ||
@@ -1028,7 +1052,9 @@ bool isRuntimeArrayReadTarget(std::string_view target) {
 }
 
 bool isRuntimeHashCodeTarget(std::string_view target) {
-  return target == support::StdNames::RuntimeBooleanHashCode ||
+  return target == support::StdNames::RuntimeByteHashCode ||
+         target == support::StdNames::RuntimeShortHashCode ||
+         target == support::StdNames::RuntimeBooleanHashCode ||
          target == support::StdNames::RuntimeLongHashCode ||
          target == support::StdNames::RuntimeFloatHashCode ||
          target == support::StdNames::RuntimeDoubleHashCode ||

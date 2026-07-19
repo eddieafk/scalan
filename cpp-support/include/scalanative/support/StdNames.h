@@ -76,10 +76,17 @@ struct StdNames final {
   inline static constexpr std::string_view SizeOf = "sizeof";
   inline static constexpr std::string_view StringLength = "length";
   inline static constexpr std::string_view ToString = "toString";
+  inline static constexpr std::string_view ToByte = "toByte";
+  inline static constexpr std::string_view ToShort = "toShort";
+  inline static constexpr std::string_view ToInt = "toInt";
   inline static constexpr std::string_view Equals = "equals";
   inline static constexpr std::string_view HashCode = "hashCode";
   inline static constexpr std::string_view Zone = "Zone";
   inline static constexpr std::string_view ZoneScoped = "scoped";
+  inline static constexpr std::string_view ArrayEmpty = "empty";
+  inline static constexpr std::string_view ArrayFill = "fill";
+  inline static constexpr std::string_view ArrayRange = "range";
+  inline static constexpr std::string_view ArrayConcat = "concat";
   inline static constexpr std::string_view ArrayOfDim = "ofDim";
   inline static constexpr std::string_view ArrayClone = "clone";
   inline static constexpr std::string_view ArrayCopy = "copy";
@@ -127,6 +134,26 @@ struct StdNames final {
       "scala.scalanative.runtime.intArrayUpdate";
   inline static constexpr std::string_view RuntimeIntArrayClone =
       "scala.scalanative.runtime.intArrayClone";
+  inline static constexpr std::string_view RuntimeByteArrayLength =
+      "scala.scalanative.runtime.byteArrayLength";
+  inline static constexpr std::string_view RuntimeByteArrayAlloc =
+      "scala.scalanative.runtime.byteArrayAlloc";
+  inline static constexpr std::string_view RuntimeByteArrayApply =
+      "scala.scalanative.runtime.byteArrayApply";
+  inline static constexpr std::string_view RuntimeByteArrayUpdate =
+      "scala.scalanative.runtime.byteArrayUpdate";
+  inline static constexpr std::string_view RuntimeByteArrayClone =
+      "scala.scalanative.runtime.byteArrayClone";
+  inline static constexpr std::string_view RuntimeShortArrayLength =
+      "scala.scalanative.runtime.shortArrayLength";
+  inline static constexpr std::string_view RuntimeShortArrayAlloc =
+      "scala.scalanative.runtime.shortArrayAlloc";
+  inline static constexpr std::string_view RuntimeShortArrayApply =
+      "scala.scalanative.runtime.shortArrayApply";
+  inline static constexpr std::string_view RuntimeShortArrayUpdate =
+      "scala.scalanative.runtime.shortArrayUpdate";
+  inline static constexpr std::string_view RuntimeShortArrayClone =
+      "scala.scalanative.runtime.shortArrayClone";
   inline static constexpr std::string_view RuntimeBooleanArrayLength =
       "scala.scalanative.runtime.booleanArrayLength";
   inline static constexpr std::string_view RuntimeBooleanArrayAlloc =
@@ -189,12 +216,22 @@ struct StdNames final {
       "scala.scalanative.runtime.referenceArrayClone";
   inline static constexpr std::string_view RuntimeArrayOfDim =
       "scala.scalanative.runtime.arrayOfDim";
+  inline static constexpr std::string_view RuntimeArrayFill =
+      "scala.scalanative.runtime.arrayFill";
+  inline static constexpr std::string_view RuntimeArrayRange =
+      "scala.scalanative.runtime.arrayRange";
+  inline static constexpr std::string_view RuntimeArrayConcat =
+      "scala.scalanative.runtime.arrayConcat";
   inline static constexpr std::string_view RuntimeArrayCopy =
       "scala.scalanative.runtime.arrayCopy";
   inline static constexpr std::string_view RuntimeReferenceArrayCopy =
       "scala.scalanative.runtime.referenceArrayCopy";
   inline static constexpr std::string_view RuntimeBooleanToString =
       "scala.scalanative.runtime.booleanToString";
+  inline static constexpr std::string_view RuntimeByteToString =
+      "scala.scalanative.runtime.byteToString";
+  inline static constexpr std::string_view RuntimeShortToString =
+      "scala.scalanative.runtime.shortToString";
   inline static constexpr std::string_view RuntimeIntToString =
       "scala.scalanative.runtime.intToString";
   inline static constexpr std::string_view RuntimeLongToString =
@@ -229,6 +266,22 @@ struct StdNames final {
       "scala.scalanative.runtime.anyEquals";
   inline static constexpr std::string_view RuntimeAnyReceiverEquals =
       "scala.scalanative.runtime.anyReceiverEquals";
+  inline static constexpr std::string_view RuntimeIntToByte =
+      "scala.scalanative.runtime.intToByte";
+  inline static constexpr std::string_view RuntimeIntToShort =
+      "scala.scalanative.runtime.intToShort";
+  inline static constexpr std::string_view RuntimeShortToByte =
+      "scala.scalanative.runtime.shortToByte";
+  inline static constexpr std::string_view RuntimeByteToShort =
+      "scala.scalanative.runtime.byteToShort";
+  inline static constexpr std::string_view RuntimeByteToInt =
+      "scala.scalanative.runtime.byteToInt";
+  inline static constexpr std::string_view RuntimeShortToInt =
+      "scala.scalanative.runtime.shortToInt";
+  inline static constexpr std::string_view RuntimeByteHashCode =
+      "scala.scalanative.runtime.byteHashCode";
+  inline static constexpr std::string_view RuntimeShortHashCode =
+      "scala.scalanative.runtime.shortHashCode";
   inline static constexpr std::string_view RuntimeBooleanHashCode =
       "scala.scalanative.runtime.booleanHashCode";
   inline static constexpr std::string_view RuntimeLongHashCode =

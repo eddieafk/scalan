@@ -1879,6 +1879,14 @@ Current scaffold status:
   The current jump-buffer storage is sized for the supported 64-bit glibc
   target; target-specific sizing or a platform-independent unwinder is required
   before this mechanism is portable to other native ABIs.
+  Functions containing a structured exception handler now give mutable local
+  slots an explicit live-across-handler policy. Their LLVM loads and stores are
+  volatile, so Boolean, numeric, Char, and reference assignments performed after
+  `_setjmp` remain observable after a caught `longjmp`; reference locals continue
+  to update their GC shadow roots as well. The policy is conservatively scoped
+  to the whole handler-bearing function, while mutable locals in functions
+  without handlers retain ordinary optimizable accesses. This is a codegen
+  correctness rule and does not revise the runtime ABI.
 - Runtime ABI 10 begins the standard exception surface and uncaught diagnostic
   contract. The frontend now seeds `java.lang.Throwable` and
   `java.lang.Exception`; source can construct `Exception(message)`, catch either
@@ -2502,6 +2510,87 @@ Current scaffold status:
   exact-type copying because their current specialized representations do not
   carry ordinary object descriptors. ABI 47 does not change array ownership or
   GC placement.
+- The ABI 47 frontend surface also recognizes `Array.empty[T]` for every
+  supported primitive, `String`, class, trait, object, `Any`, and nested-array
+  element type. It shares constructor/`ofDim` element validation and lowers
+  directly to the existing element-typed allocation intrinsic with a constant
+  zero length. No new runtime helper, allocation policy, or ABI revision is
+  required.
+- Runtime ABI 48 adds the explicit-type
+  `Array.fill[T](length)(element)` companion operation for the same supported
+  element universe. The frontend requires one `Int` length and one conforming
+  element expression; NIR records an element-typed fill intrinsic while keeping
+  the element structurally unevaluated.
+
+  LLVM evaluates the length once, allocates through the existing checked typed
+  array path, and lowers the element expression inside a compact fill loop.
+  This preserves Scala's by-name behavior: the expression runs once per slot,
+  does not run for zero length, and is not evaluated when a negative length
+  throws `NegativeArraySizeException`. Primitive widths use direct one-, four-,
+  or eight-byte stores; `String`, class, `Any`, and nested-array elements use
+  reference slots, with `Any` boxing also occurring per iteration. Filled arrays
+  retain the program-arena ownership policy; ABI 48 does not change GC placement.
+- Runtime ABI 49 generalizes explicit-type fill to
+  `Array.fill[T](first, remaining...)(element)`. The frontend accepts one or
+  more `Int` dimensions and constructs a result with one nested `Array` layer
+  per dimension. NIR uses dimension-qualified typed fill intrinsics for the
+  multidimensional forms while preserving the element expression structurally.
+
+  LLVM evaluates every dimension expression exactly once from left to right,
+  then recursively allocates independent nested arrays. The element remains
+  by-name and is lowered only in the innermost loop, once per final slot.
+  Consequently an empty outer dimension neither allocates unreachable inner
+  arrays nor evaluates the element; a negative inner dimension throws only when
+  an outer slot reaches it. Primitive and reference slots retain ABI 48's direct
+  width-aware stores and program-arena ownership. ABI 49 does not change GC
+  placement.
+- Runtime ABI 50 adds `Array.range(start, end)` and
+  `Array.range(start, end, step)` for `Int`. The frontend requires two or three
+  `Int` arguments, and NIR normalizes the two-argument form to the typed
+  `(Int,Int,Int)Array[Int]` intrinsic with a unit step.
+
+  LLVM evaluates source arguments exactly once from left to right and computes
+  the exclusive-end element count with signed 64-bit intermediates. Positive and
+  negative steps share one direct four-byte fill loop; a direction mismatch
+  produces an empty array. Step zero throws a catchable
+  `IllegalArgumentException` with Scala's concise `zero step` message before
+  allocation. A range whose count exceeds the runtime's signed 32-bit array
+  length limit throws the same exception class with
+  `Array range is too large`, avoiding arithmetic wraparound and accidental
+  undersized allocation. Range arrays retain program-arena ownership; ABI 50
+  does not change GC placement.
+- Runtime ABI 51 adds explicit-type `Array.concat[T](arrays...)`, including the
+  zero-input empty-array form. The current frontend accepts supported scalar,
+  reference, `Any`, and nested-array element types, and requires each operand to
+  have the exact declared `Array[T]` type. NIR records an element- and
+  arity-qualified intrinsic so variadic signatures remain unambiguous.
+
+  LLVM evaluates every operand exactly once from left to right before inspecting
+  any input. It then performs catchable null checks, accumulates lengths in 64
+  bits, rejects totals above the signed 32-bit array-length limit with
+  `IllegalArgumentException("Array concatenation is too large")`, and allocates
+  the destination once. Payloads are copied in order with width-aware
+  `llvm.memcpy`; reference and nested-array elements therefore preserve Scala's
+  shallow concatenation semantics. Concat arrays retain program-arena ownership;
+  ABI 51 does not change GC placement.
+- Runtime ABI 52 adds first-class signed `Byte` and `Short` values. LLVM stores
+  them as `i8` and `i16`; explicit `toByte`/`toShort` conversions truncate, while
+  lossless widening sign-extends through `Short` and `Int`. Unary and binary
+  arithmetic promotes narrow integral operands to `Int`, matching Scala's
+  value-level result types rather than silently retaining the storage width.
+
+  The new types participate in typed arrays, literals built through explicit
+  narrowing, fill/copy/clone/concat operations, `Any` boxing and checked
+  unboxing, equality, hashing, string conversion, formatted interpolation,
+  `println`, and `sizeof`. Their boxed primitive descriptor IDs extend the
+  existing stable sequence without renumbering older kinds. Narrow arrays use
+  direct one- and two-byte slots and retain the current program-arena ownership
+  policy, so ABI 52 does not change GC placement.
+
+  This milestone supplies the scalar and array-width foundation needed by a
+  future native-memory and `ByteBuffer` surface. It does not yet add buffer
+  ownership, byte order, indexed bounds contracts, bulk buffer operations, or
+  off-heap allocation.
 - The frontend seeds a tiny runtime builtin, `println(value): Unit`, for the
   currently supported literal/value subset.
 - `cpp-nscplugin` emits `scala.scalanative.runtime.println : (Unknown)Unit` as a
@@ -2509,10 +2598,11 @@ Current scaffold status:
 - LLVM codegen pre-scans structured NIR for string literals, emits private
   global byte constants, and lowers string values to `ptr`.
 - Runtime `println` currently lowers strings to the C ABI `puts(ptr)` and
-  `Boolean`, `Int`, `Long`, `Float`, `Double`, and `Char` values to matching
-  native output calls, including the required C vararg promotions. Boolean
-  values select the immortal `true`/`false` text constants and use `puts`,
-  matching Scala's textual output rather than printing numeric bits.
+  `Boolean`, `Byte`, `Short`, `Int`, `Long`, `Float`, `Double`, and `Char`
+  values to matching native output calls, including the required C vararg
+  promotions. Boolean values select the immortal `true`/`false` text constants
+  and use `puts`, matching Scala's textual output rather than printing numeric
+  bits.
 - The runtime ABI exposes a common type kind and layout model for boxed
   primitives, concrete classes, and non-allocatable traits. All allocated class objects now reserve a
   one-word descriptor header, including standalone classes that previously used

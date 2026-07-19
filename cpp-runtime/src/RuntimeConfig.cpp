@@ -47,6 +47,12 @@ BoxedPrimitiveKind boxedPrimitiveKind(std::string_view typeName) {
   if (typeName == "Boolean") {
     return BoxedPrimitiveKind::Boolean;
   }
+  if (typeName == "Byte") {
+    return BoxedPrimitiveKind::Byte;
+  }
+  if (typeName == "Short") {
+    return BoxedPrimitiveKind::Short;
+  }
   if (typeName == "Int") {
     return BoxedPrimitiveKind::Int;
   }
@@ -77,6 +83,10 @@ const char* boxedPrimitiveKindName(BoxedPrimitiveKind kind) {
     return "Unit";
   case BoxedPrimitiveKind::Boolean:
     return "Boolean";
+  case BoxedPrimitiveKind::Byte:
+    return "Byte";
+  case BoxedPrimitiveKind::Short:
+    return "Short";
   case BoxedPrimitiveKind::Int:
     return "Int";
   case BoxedPrimitiveKind::Long:
@@ -103,6 +113,10 @@ BoxedPrimitiveDescriptor boxedPrimitiveDescriptor(BoxedPrimitiveKind kind) {
     return {static_cast<std::uint32_t>(kind), 0, 1};
   case BoxedPrimitiveKind::Boolean:
     return {static_cast<std::uint32_t>(kind), 1, 1};
+  case BoxedPrimitiveKind::Byte:
+    return {static_cast<std::uint32_t>(kind), 1, 1};
+  case BoxedPrimitiveKind::Short:
+    return {static_cast<std::uint32_t>(kind), 2, 2};
   case BoxedPrimitiveKind::Int:
   case BoxedPrimitiveKind::Float:
   case BoxedPrimitiveKind::Char:
@@ -134,7 +148,7 @@ RuntimeTypeLayout boxedPrimitiveTypeLayout(BoxedPrimitiveKind kind) {
 }
 
 std::string runtimeAbiName() {
-  return "cpp-scalanative-runtime-47";
+  return "cpp-scalanative-runtime-52";
 }
 
 } // namespace scalanative::runtime

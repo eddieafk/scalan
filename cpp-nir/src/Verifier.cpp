@@ -16,9 +16,9 @@ namespace scalanative::nir {
 namespace {
 
 bool isBoxablePrimitiveType(const std::string& type) {
-  return type == "Unit" || type == "Boolean" || type == "Int" || type == "Long" ||
-         type == "Float" || type == "Double" || type == "Char" || type == "Symbol" ||
-         type == "String";
+  return type == "Unit" || type == "Boolean" || type == "Byte" || type == "Short" ||
+         type == "Int" || type == "Long" || type == "Float" || type == "Double" ||
+         type == "Char" || type == "Symbol" || type == "String";
 }
 
 bool isFunction(DefinitionKind kind) {
@@ -81,19 +81,21 @@ std::string signatureReturnType(const std::string& signature) {
 }
 
 bool isReferenceType(const std::string& type) {
-  return type != "Unit" && type != "Boolean" && type != "Int" && type != "Long" &&
-         type != "Float" && type != "Double" && type != "Char" && type != "Symbol" &&
-         type != "Nothing";
+  return type != "Unit" && type != "Boolean" && type != "Byte" && type != "Short" &&
+         type != "Int" && type != "Long" && type != "Float" && type != "Double" &&
+         type != "Char" && type != "Symbol" && type != "Nothing";
 }
 
 bool isZoneResultType(const std::string& type) {
-  return type == "Nothing" || type == "Unit" || type == "Boolean" || type == "Int" ||
-         type == "Long" || type == "Float" || type == "Double" || type == "Char";
+  return type == "Nothing" || type == "Unit" || type == "Boolean" || type == "Byte" ||
+         type == "Short" || type == "Int" || type == "Long" || type == "Float" ||
+         type == "Double" || type == "Char";
 }
 
 bool isSizeOfPrimitiveType(const std::string& type) {
-  return type == "Unit" || type == "Boolean" || type == "Int" || type == "Long" ||
-         type == "Float" || type == "Double" || type == "Char";
+  return type == "Unit" || type == "Boolean" || type == "Byte" || type == "Short" ||
+         type == "Int" || type == "Long" || type == "Float" || type == "Double" ||
+         type == "Char";
 }
 
 std::string compactTypeName(std::string_view typeName) {
@@ -128,9 +130,10 @@ std::string arrayElementTypeName(std::string_view typeName) {
 }
 
 bool isScalarArrayElementTypeName(const std::string& typeName) {
-  return typeName == "String" || typeName == "java.lang.String" || typeName == "Int" ||
-         typeName == "Boolean" || typeName == "Long" || typeName == "Double" ||
-         typeName == "Float" || typeName == "Char";
+  return typeName == "String" || typeName == "java.lang.String" || typeName == "Byte" ||
+         typeName == "Short" || typeName == "Int" || typeName == "Boolean" ||
+         typeName == "Long" || typeName == "Double" || typeName == "Float" ||
+         typeName == "Char";
 }
 
 bool isTopObjectType(const std::string& type) {
@@ -152,6 +155,25 @@ bool typesConform(const std::string& expected, const std::string& actual) {
     return true;
   }
   if (isTopObjectType(expected) && isReferenceType(actual)) {
+    return true;
+  }
+  if (expected == "Short" && actual == "Byte") {
+    return true;
+  }
+  if (expected == "Int" && (actual == "Byte" || actual == "Short")) {
+    return true;
+  }
+  if (expected == "Long" &&
+      (actual == "Byte" || actual == "Short" || actual == "Int")) {
+    return true;
+  }
+  if (expected == "Float" &&
+      (actual == "Byte" || actual == "Short" || actual == "Int" || actual == "Long")) {
+    return true;
+  }
+  if (expected == "Double" &&
+      (actual == "Byte" || actual == "Short" || actual == "Int" || actual == "Long" ||
+       actual == "Float")) {
     return true;
   }
   return actual == "Null" && isReferenceType(expected);
@@ -1953,12 +1975,16 @@ private:
       return ValueInfo{operand.resolved, "Boolean", {}};
     }
     if (value.text == "+" || value.text == "-") {
-      if (operand.type != "Int" && operand.type != "Long" && operand.type != "Float" &&
+      if (operand.type != "Byte" && operand.type != "Short" && operand.type != "Int" &&
+          operand.type != "Long" && operand.type != "Float" &&
           operand.type != "Double" && operand.type != "Unknown") {
         addError("NIR function definition '" + definition_.name + "' applies " +
                  value.text + " to a non-numeric operand");
       }
-      return ValueInfo{operand.resolved, operand.type, {}};
+      return ValueInfo{operand.resolved,
+                       operand.type == "Byte" || operand.type == "Short" ? "Int"
+                                                                         : operand.type,
+                       {}};
     }
 
     addError("NIR function definition '" + definition_.name +
@@ -1984,8 +2010,8 @@ private:
     }
     if (value.text == "&" || value.text == "|" || value.text == "^") {
       const auto isBitwise = [](const std::string& type) {
-        return type == "Boolean" || type == "Int" || type == "Long" ||
-               type == "Unknown";
+        return type == "Boolean" || type == "Byte" || type == "Short" ||
+               type == "Int" || type == "Long" || type == "Unknown";
       };
       if (!isBitwise(lhs.type) || !isBitwise(rhs.type)) {
         addError("NIR function definition '" + definition_.name +
@@ -1996,10 +2022,13 @@ private:
                  "' has bitwise operands with mismatched types: " + lhs.type + " and " +
                  rhs.type);
       }
-      return ValueInfo{lhs.resolved && rhs.resolved, lhs.type, {}};
+      return ValueInfo{lhs.resolved && rhs.resolved,
+                       lhs.type == "Byte" || lhs.type == "Short" ? "Int" : lhs.type,
+                       {}};
     }
     if (value.text == "<<" || value.text == ">>" || value.text == ">>>") {
-      if (lhs.type != "Int" && lhs.type != "Long" && lhs.type != "Unknown") {
+      if (lhs.type != "Byte" && lhs.type != "Short" && lhs.type != "Int" &&
+          lhs.type != "Long" && lhs.type != "Unknown") {
         addError("NIR function definition '" + definition_.name +
                  "' has a shift left operand that is not Int or Long");
       }
@@ -2007,7 +2036,9 @@ private:
         addError("NIR function definition '" + definition_.name +
                  "' has a shift count that is not Int");
       }
-      return ValueInfo{lhs.resolved && rhs.resolved, lhs.type, {}};
+      return ValueInfo{lhs.resolved && rhs.resolved,
+                       lhs.type == "Byte" || lhs.type == "Short" ? "Int" : lhs.type,
+                       {}};
     }
     if (value.text == "==" || value.text == "!=" || value.text == "<" ||
         value.text == ">" || value.text == "<=" || value.text == ">=") {
@@ -2016,9 +2047,10 @@ private:
     if (value.text == "+" && (lhs.type == "String" || rhs.type == "String")) {
       const auto isStringConvertible = [](const std::string& type) {
         return type == "Unit" || type == "String" || type == "Boolean" ||
-               type == "Int" || type == "Long" || type == "Float" || type == "Double" ||
-               type == "Char" || type == "Symbol" || type == "Null" ||
-               isReferenceType(type) || type == "Unknown";
+               type == "Byte" || type == "Short" || type == "Int" || type == "Long" ||
+               type == "Float" || type == "Double" || type == "Char" ||
+               type == "Symbol" || type == "Null" || isReferenceType(type) ||
+               type == "Unknown";
       };
       if (!isStringConvertible(lhs.type) || !isStringConvertible(rhs.type)) {
         addError("NIR function definition '" + definition_.name +
@@ -2028,10 +2060,12 @@ private:
       return ValueInfo{lhs.resolved && rhs.resolved, "String", {}};
     }
     if (value.text == "%" &&
-        ((lhs.type != "Int" && lhs.type != "Long" && lhs.type != "Float" &&
-          lhs.type != "Double" && lhs.type != "Unknown") ||
-         (rhs.type != "Int" && rhs.type != "Long" && rhs.type != "Float" &&
-          rhs.type != "Double" && rhs.type != "Unknown"))) {
+        ((lhs.type != "Byte" && lhs.type != "Short" && lhs.type != "Int" &&
+          lhs.type != "Long" && lhs.type != "Float" && lhs.type != "Double" &&
+          lhs.type != "Unknown") ||
+         (rhs.type != "Byte" && rhs.type != "Short" && rhs.type != "Int" &&
+          rhs.type != "Long" && rhs.type != "Float" && rhs.type != "Double" &&
+          rhs.type != "Unknown"))) {
       addError("NIR function definition '" + definition_.name +
                "' has remainder operands that are not numeric");
     }
@@ -2040,7 +2074,9 @@ private:
                "' has binary operands with mismatched types: " + lhs.type + " and " +
                rhs.type);
     }
-    return ValueInfo{lhs.resolved && rhs.resolved, lhs.type, {}};
+    return ValueInfo{lhs.resolved && rhs.resolved,
+                     lhs.type == "Byte" || lhs.type == "Short" ? "Int" : lhs.type,
+                     {}};
   }
 
   ValueInfo verifyAssign(const Value& value) {

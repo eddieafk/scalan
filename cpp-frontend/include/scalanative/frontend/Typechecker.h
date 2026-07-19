@@ -16,6 +16,8 @@ enum class SimpleTypeKind {
   Unknown,
   Nothing,
   Unit,
+  Byte,
+  Short,
   Int,
   Long,
   Float,
@@ -168,6 +170,11 @@ private:
   [[nodiscard]] TypeInfo
   typeFromDeclaredName(const std::string& name, const Scope* scope = nullptr,
                        const support::SourceSpan* span = nullptr) const;
+  [[nodiscard]] bool isSupportedArrayElementType(const TypeInfo& candidate,
+                                                 const Scope& scope,
+                                                 const support::SourceSpan& span) const;
+  [[nodiscard]] bool arrayElementConforms(const TypeInfo& expected,
+                                          const TypeInfo& actual) const;
   [[nodiscard]] TypeInfo preliminaryDeclarationType(const AstDeclaration& declaration,
                                                     const Scope* scope = nullptr) const;
   [[nodiscard]] TypeInfo commonType(const TypeInfo& lhs, const TypeInfo& rhs) const;

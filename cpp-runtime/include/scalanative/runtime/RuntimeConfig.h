@@ -33,6 +33,8 @@ enum class BoxedPrimitiveKind : std::uint32_t {
   Unit = 7,
   Symbol = 8,
   String = 9,
+  Byte = 10,
+  Short = 11,
 };
 
 struct BoxedPrimitiveDescriptor {

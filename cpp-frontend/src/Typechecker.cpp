@@ -59,6 +59,7 @@ bool isReferenceOrNullType(const TypeInfo& type) {
 
 bool isBoxablePrimitiveType(SimpleTypeKind kind) {
   return kind == SimpleTypeKind::Unit || kind == SimpleTypeKind::Boolean ||
+         kind == SimpleTypeKind::Byte || kind == SimpleTypeKind::Short ||
          kind == SimpleTypeKind::Int || kind == SimpleTypeKind::Long ||
          kind == SimpleTypeKind::Float || kind == SimpleTypeKind::Double ||
          kind == SimpleTypeKind::Char || kind == SimpleTypeKind::Symbol ||
@@ -67,7 +68,8 @@ bool isBoxablePrimitiveType(SimpleTypeKind kind) {
 
 bool isCompilerKnownEqualsReceiver(const TypeInfo& type) {
   return type.kind == SimpleTypeKind::Unit || type.kind == SimpleTypeKind::String ||
-         type.kind == SimpleTypeKind::Boolean || type.kind == SimpleTypeKind::Int ||
+         type.kind == SimpleTypeKind::Boolean || type.kind == SimpleTypeKind::Byte ||
+         type.kind == SimpleTypeKind::Short || type.kind == SimpleTypeKind::Int ||
          type.kind == SimpleTypeKind::Long || type.kind == SimpleTypeKind::Float ||
          type.kind == SimpleTypeKind::Double || type.kind == SimpleTypeKind::Char ||
          type.kind == SimpleTypeKind::Symbol || type.kind == SimpleTypeKind::Object ||
@@ -98,7 +100,8 @@ bool isCompilerKnownEqualsArgumentCompatible(const TypeInfo& receiver,
 
 bool isCompilerKnownHashCodeReceiver(const TypeInfo& type) {
   return type.kind == SimpleTypeKind::Unit || type.kind == SimpleTypeKind::String ||
-         type.kind == SimpleTypeKind::Boolean || type.kind == SimpleTypeKind::Int ||
+         type.kind == SimpleTypeKind::Boolean || type.kind == SimpleTypeKind::Byte ||
+         type.kind == SimpleTypeKind::Short || type.kind == SimpleTypeKind::Int ||
          type.kind == SimpleTypeKind::Long || type.kind == SimpleTypeKind::Float ||
          type.kind == SimpleTypeKind::Double || type.kind == SimpleTypeKind::Char ||
          type.kind == SimpleTypeKind::Symbol || type.kind == SimpleTypeKind::Null ||
@@ -118,13 +121,15 @@ bool isZoneScopedCall(const AstExpression& expression) {
 
 bool canEscapeZone(SimpleTypeKind kind) {
   return kind != SimpleTypeKind::Unknown && kind != SimpleTypeKind::Unit &&
-         kind != SimpleTypeKind::Boolean && kind != SimpleTypeKind::Int &&
+         kind != SimpleTypeKind::Boolean && kind != SimpleTypeKind::Byte &&
+         kind != SimpleTypeKind::Short && kind != SimpleTypeKind::Int &&
          kind != SimpleTypeKind::Long && kind != SimpleTypeKind::Float &&
          kind != SimpleTypeKind::Double && kind != SimpleTypeKind::Char;
 }
 
 bool hasCompileTimeSize(SimpleTypeKind kind) {
   return kind == SimpleTypeKind::Unit || kind == SimpleTypeKind::Boolean ||
+         kind == SimpleTypeKind::Byte || kind == SimpleTypeKind::Short ||
          kind == SimpleTypeKind::Int || kind == SimpleTypeKind::Long ||
          kind == SimpleTypeKind::Float || kind == SimpleTypeKind::Double ||
          kind == SimpleTypeKind::Char;
@@ -162,7 +167,8 @@ std::string arrayElementTypeName(std::string_view typeName) {
 }
 
 bool isBuiltinArrayElementKind(SimpleTypeKind kind) {
-  return kind == SimpleTypeKind::String || kind == SimpleTypeKind::Int ||
+  return kind == SimpleTypeKind::String || kind == SimpleTypeKind::Byte ||
+         kind == SimpleTypeKind::Short || kind == SimpleTypeKind::Int ||
          kind == SimpleTypeKind::Boolean || kind == SimpleTypeKind::Long ||
          kind == SimpleTypeKind::Double || kind == SimpleTypeKind::Float ||
          kind == SimpleTypeKind::Char;
@@ -1765,6 +1771,38 @@ TypeInfo Typechecker::inferExpressionType(const AstExpression& expression,
   return type;
 }
 
+bool Typechecker::isSupportedArrayElementType(const TypeInfo& candidate,
+                                              const Scope& scope,
+                                              const support::SourceSpan& span) const {
+  if (isBuiltinArrayElementKind(candidate.kind) || isAnyArrayElementType(candidate)) {
+    return true;
+  }
+  if (candidate.kind != SimpleTypeKind::Object) {
+    return false;
+  }
+  if (const std::string nestedElement = arrayElementTypeName(candidate.name);
+      !nestedElement.empty()) {
+    return isSupportedArrayElementType(
+        typeFromDeclaredName(nestedElement, &scope, &span), scope, span);
+  }
+  const SymbolInfo* symbol = typeSymbolForDeclaredName(candidate.name, &scope);
+  return symbol != nullptr && (symbol->kind == AstDeclarationKind::Class ||
+                               symbol->kind == AstDeclarationKind::Trait ||
+                               symbol->kind == AstDeclarationKind::Object);
+}
+
+bool Typechecker::arrayElementConforms(const TypeInfo& expected,
+                                       const TypeInfo& actual) const {
+  if (actual.kind == SimpleTypeKind::Unknown) {
+    return true;
+  }
+  if (isAnyArrayElementType(expected)) {
+    return isSupportedAnyArrayValueType(actual);
+  }
+  return expected.kind == SimpleTypeKind::Object ? isAssignable(expected, actual)
+                                                 : expected.kind == actual.kind;
+}
+
 TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
                                               Scope& scope) {
   switch (expression.kind) {
@@ -1901,6 +1939,11 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
     const bool isCast = callee.kind == AstExpressionKind::Select &&
                         callee.children.size() == 1 &&
                         callee.text == support::StdNames::AsInstanceOf;
+    const bool isArrayEmpty =
+        callee.kind == AstExpressionKind::Select && callee.children.size() == 1 &&
+        callee.text == support::StdNames::ArrayEmpty &&
+        callee.children.front().kind == AstExpressionKind::Identifier &&
+        callee.children.front().text == "Array";
     if (isSizeOf) {
       const TypeInfo target =
           typeFromDeclaredName(expression.declaredType, &scope, &expression.span);
@@ -1915,6 +1958,17 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
                                expression.declaredType);
       }
       return TypeInfo{SimpleTypeKind::Int, "Int"};
+    }
+    if (isArrayEmpty) {
+      const TypeInfo elementType =
+          typeFromDeclaredName(expression.declaredType, &scope, &expression.span);
+      if (!isSupportedArrayElementType(elementType, scope, expression.span)) {
+        diagnostics_.error(
+            expression.span,
+            "Array.empty type argument must be a supported scalar, reference, or "
+            "nested array type in this subset");
+      }
+      return TypeInfo{SimpleTypeKind::Object, arrayTypeName(elementType)};
     }
     if (!isTypeTest && !isCast) {
       diagnostics_.error(expression.span,
@@ -2006,27 +2060,121 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
         callee.text == support::StdNames::ArrayCopy &&
         callee.children.front().kind == AstExpressionKind::Identifier &&
         callee.children.front().text == "Array";
-    std::function<bool(const TypeInfo&)> isSupportedArrayElement =
-        [&](const TypeInfo& candidate) {
-          if (isBuiltinArrayElementKind(candidate.kind)) {
-            return true;
-          }
-          if (isAnyArrayElementType(candidate)) {
-            return true;
-          }
-          if (candidate.kind != SimpleTypeKind::Object) {
-            return false;
-          }
-          if (const std::string nestedElement = arrayElementTypeName(candidate.name);
-              !nestedElement.empty()) {
-            return isSupportedArrayElement(
-                typeFromDeclaredName(nestedElement, &scope, &expression.span));
-          }
-          const SymbolInfo* symbol = typeSymbolForDeclaredName(candidate.name, &scope);
-          return symbol != nullptr && (symbol->kind == AstDeclarationKind::Class ||
-                                       symbol->kind == AstDeclarationKind::Trait ||
-                                       symbol->kind == AstDeclarationKind::Object);
-        };
+    const bool arrayRange =
+        callee.kind == AstExpressionKind::Select && callee.children.size() == 1 &&
+        callee.text == support::StdNames::ArrayRange &&
+        callee.children.front().kind == AstExpressionKind::Identifier &&
+        callee.children.front().text == "Array";
+    const AstExpression* arrayConcatTypeApply = nullptr;
+    if (callee.kind == AstExpressionKind::TypeApply && callee.children.size() == 1) {
+      const AstExpression& selected = callee.children.front();
+      if (selected.kind == AstExpressionKind::Select && selected.children.size() == 1 &&
+          selected.text == support::StdNames::ArrayConcat &&
+          selected.children.front().kind == AstExpressionKind::Identifier &&
+          selected.children.front().text == "Array") {
+        arrayConcatTypeApply = &callee;
+      }
+    }
+    const AstExpression* arrayFillTypeApply = nullptr;
+    if (callee.kind == AstExpressionKind::Call && !callee.children.empty() &&
+        callee.children.front().kind == AstExpressionKind::TypeApply &&
+        callee.children.front().children.size() == 1) {
+      const AstExpression& candidate = callee.children.front();
+      const AstExpression& selected = candidate.children.front();
+      if (selected.kind == AstExpressionKind::Select && selected.children.size() == 1 &&
+          selected.text == support::StdNames::ArrayFill &&
+          selected.children.front().kind == AstExpressionKind::Identifier &&
+          selected.children.front().text == "Array") {
+        arrayFillTypeApply = &candidate;
+      }
+    }
+    if (arrayFillTypeApply != nullptr) {
+      const TypeInfo elementType = typeFromDeclaredName(
+          arrayFillTypeApply->declaredType, &scope, &arrayFillTypeApply->span);
+      if (!isSupportedArrayElementType(elementType, scope, expression.span)) {
+        diagnostics_.error(
+            arrayFillTypeApply->span,
+            "Array.fill type argument must be a supported scalar, reference, or "
+            "nested array type in this subset");
+      }
+
+      std::vector<TypeInfo> lengthTypes;
+      for (std::size_t i = 1; i < callee.children.size(); ++i) {
+        lengthTypes.push_back(inferExpressionType(callee.children[i], scope));
+      }
+      if (lengthTypes.empty()) {
+        diagnostics_.error(callee.span,
+                           "Array.fill requires at least one Int dimension");
+      }
+      for (std::size_t i = 0; i < lengthTypes.size(); ++i) {
+        if (lengthTypes[i].kind != SimpleTypeKind::Int &&
+            lengthTypes[i].kind != SimpleTypeKind::Unknown) {
+          diagnostics_.error(callee.children[i + 1].span,
+                             "Array.fill dimensions must have type Int");
+        }
+      }
+
+      std::vector<TypeInfo> valueTypes;
+      for (std::size_t i = 1; i < expression.children.size(); ++i) {
+        valueTypes.push_back(inferExpressionType(expression.children[i], scope));
+      }
+      if (valueTypes.size() != 1) {
+        diagnostics_.error(expression.span,
+                           "Array.fill requires exactly one element expression");
+      } else if (!arrayElementConforms(elementType, valueTypes.front())) {
+        diagnostics_.error(expression.children[1].span,
+                           "Array.fill element does not conform to its declared type");
+      }
+      TypeInfo resultType = elementType;
+      const std::size_t dimensions = std::max<std::size_t>(1, lengthTypes.size());
+      for (std::size_t i = 0; i < dimensions; ++i) {
+        resultType = TypeInfo{SimpleTypeKind::Object, arrayTypeName(resultType)};
+      }
+      return resultType;
+    }
+    if (arrayConcatTypeApply != nullptr) {
+      const TypeInfo elementType = typeFromDeclaredName(
+          arrayConcatTypeApply->declaredType, &scope, &arrayConcatTypeApply->span);
+      if (!isSupportedArrayElementType(elementType, scope, expression.span)) {
+        diagnostics_.error(
+            arrayConcatTypeApply->span,
+            "Array.concat type argument must be a supported scalar, reference, or "
+            "nested array type in this subset");
+      }
+
+      const std::string expectedArrayType = arrayTypeName(elementType);
+      for (std::size_t i = 1; i < expression.children.size(); ++i) {
+        const TypeInfo argumentType =
+            inferExpressionType(expression.children[i], scope);
+        if (argumentType.kind != SimpleTypeKind::Unknown &&
+            (argumentType.kind != SimpleTypeKind::Object ||
+             argumentType.name != expectedArrayType)) {
+          diagnostics_.error(
+              expression.children[i].span,
+              "Array.concat arguments must match its declared array type");
+        }
+      }
+      return TypeInfo{SimpleTypeKind::Object, expectedArrayType};
+    }
+    if (arrayRange) {
+      std::vector<TypeInfo> argumentTypes;
+      for (std::size_t i = 1; i < expression.children.size(); ++i) {
+        argumentTypes.push_back(inferExpressionType(expression.children[i], scope));
+      }
+      if (argumentTypes.size() != 2 && argumentTypes.size() != 3) {
+        diagnostics_.error(expression.span,
+                           "Array.range requires start, end, and an optional step");
+      }
+      for (std::size_t i = 0; i < argumentTypes.size(); ++i) {
+        if (argumentTypes[i].kind != SimpleTypeKind::Int &&
+            argumentTypes[i].kind != SimpleTypeKind::Unknown) {
+          diagnostics_.error(expression.children[i + 1].span,
+                             "Array.range arguments must have type Int");
+        }
+      }
+      return TypeInfo{SimpleTypeKind::Object,
+                      arrayTypeName(TypeInfo{SimpleTypeKind::Int, "Int"})};
+    }
     if (arrayCopy) {
       std::vector<TypeInfo> argumentTypes;
       for (std::size_t i = 1; i < expression.children.size(); ++i) {
@@ -2084,7 +2232,7 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
     if (dynamicArrayConstructor || arrayOfDim) {
       TypeInfo elementType =
           typeFromDeclaredName(callee.declaredType, &scope, &callee.span);
-      if (!isSupportedArrayElement(elementType)) {
+      if (!isSupportedArrayElementType(elementType, scope, expression.span)) {
         diagnostics_.error(
             callee.span,
             std::string(arrayOfDim ? "Array.ofDim" : "Array constructor") +
@@ -2127,20 +2275,9 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
     }
     if (inferredArrayLiteral || explicitArrayLiteral) {
       TypeInfo elementType{SimpleTypeKind::String, "String"};
-      const auto arrayElementConforms = [&](const TypeInfo& expected,
-                                            const TypeInfo& actual) {
-        if (actual.kind == SimpleTypeKind::Unknown) {
-          return true;
-        }
-        if (isAnyArrayElementType(expected)) {
-          return isSupportedAnyArrayValueType(actual);
-        }
-        return expected.kind == SimpleTypeKind::Object ? isAssignable(expected, actual)
-                                                       : expected.kind == actual.kind;
-      };
       if (explicitArrayLiteral) {
         elementType = typeFromDeclaredName(callee.declaredType, &scope, &callee.span);
-        if (!isSupportedArrayElement(elementType)) {
+        if (!isSupportedArrayElementType(elementType, scope, expression.span)) {
           diagnostics_.error(
               callee.span,
               "Array literal type argument must be a supported scalar, reference, "
@@ -2167,10 +2304,11 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
               return !arrayElementConforms(elementType, candidate);
             });
         if (allElementsSupportObjectSlots &&
-            (!isSupportedArrayElement(elementType) || needsObjectSlots)) {
+            (!isSupportedArrayElementType(elementType, scope, expression.span) ||
+             needsObjectSlots)) {
           elementType = TypeInfo{SimpleTypeKind::Object, "Object"};
         } else if (elementType.kind != SimpleTypeKind::Unknown &&
-                   !isSupportedArrayElement(elementType)) {
+                   !isSupportedArrayElementType(elementType, scope, expression.span)) {
           diagnostics_.error(
               expression.children[1].span,
               "Array literal element type is unsupported in this subset");
@@ -2217,6 +2355,21 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
         }
         return receiverType;
       }
+    }
+    const bool isNumericConversionCall = callee.kind == AstExpressionKind::Select &&
+                                         callee.children.size() == 1 &&
+                                         (callee.text == support::StdNames::ToByte ||
+                                          callee.text == support::StdNames::ToShort ||
+                                          callee.text == support::StdNames::ToInt);
+    if (isNumericConversionCall) {
+      TypeInfo calleeType = inferExpressionType(callee, scope);
+      for (std::size_t i = 1; i < expression.children.size(); ++i) {
+        (void)inferExpressionType(expression.children[i], scope);
+      }
+      if (expression.children.size() != 1) {
+        diagnostics_.error(expression.span, callee.text + " does not accept arguments");
+      }
+      return calleeType;
     }
     const bool isEqualsCall = callee.kind == AstExpressionKind::Select &&
                               callee.children.size() == 1 &&
@@ -2320,7 +2473,9 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
               expression.children[2].span,
               "f-interpolation %...f specifiers require Float or Double values");
         }
-        if (conversion == 'd' && argumentTypes[1].kind != SimpleTypeKind::Int &&
+        if (conversion == 'd' && argumentTypes[1].kind != SimpleTypeKind::Byte &&
+            argumentTypes[1].kind != SimpleTypeKind::Short &&
+            argumentTypes[1].kind != SimpleTypeKind::Int &&
             argumentTypes[1].kind != SimpleTypeKind::Long) {
           diagnostics_.error(
               expression.children[2].span,
@@ -2654,7 +2809,9 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
       return TypeInfo{SimpleTypeKind::Boolean, "Boolean"};
     }
     if (expression.text == "+" || expression.text == "-") {
-      if (operand.kind != SimpleTypeKind::Int && operand.kind != SimpleTypeKind::Long &&
+      if (operand.kind != SimpleTypeKind::Byte &&
+          operand.kind != SimpleTypeKind::Short &&
+          operand.kind != SimpleTypeKind::Int && operand.kind != SimpleTypeKind::Long &&
           operand.kind != SimpleTypeKind::Float &&
           operand.kind != SimpleTypeKind::Double &&
           operand.kind != SimpleTypeKind::Unknown) {
@@ -2662,7 +2819,10 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
                            "unary operator " + expression.text +
                                " requires a numeric operand");
       }
-      return operand;
+      return operand.kind == SimpleTypeKind::Byte ||
+                     operand.kind == SimpleTypeKind::Short
+                 ? TypeInfo{SimpleTypeKind::Int, "Int"}
+                 : operand;
     }
     diagnostics_.error(expression.span,
                        "unsupported unary operator: " + expression.text);
@@ -2693,7 +2853,8 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
     }
     if (expression.text == "&" || expression.text == "|" || expression.text == "^") {
       const auto isBitwise = [](SimpleTypeKind kind) {
-        return kind == SimpleTypeKind::Boolean || kind == SimpleTypeKind::Int ||
+        return kind == SimpleTypeKind::Boolean || kind == SimpleTypeKind::Byte ||
+               kind == SimpleTypeKind::Short || kind == SimpleTypeKind::Int ||
                kind == SimpleTypeKind::Long || kind == SimpleTypeKind::Unknown;
       };
       if (!isBitwise(lhs.kind) || !isBitwise(rhs.kind)) {
@@ -2705,11 +2866,15 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
           lhs.kind != rhs.kind) {
         diagnostics_.error(expression.span, "bitwise operands must have the same type");
       }
-      return commonType(lhs, rhs);
+      const TypeInfo result = commonType(lhs, rhs);
+      return result.kind == SimpleTypeKind::Byte || result.kind == SimpleTypeKind::Short
+                 ? TypeInfo{SimpleTypeKind::Int, "Int"}
+                 : result;
     }
     if (expression.text == "<<" || expression.text == ">>" ||
         expression.text == ">>>") {
-      if (lhs.kind != SimpleTypeKind::Int && lhs.kind != SimpleTypeKind::Long &&
+      if (lhs.kind != SimpleTypeKind::Byte && lhs.kind != SimpleTypeKind::Short &&
+          lhs.kind != SimpleTypeKind::Int && lhs.kind != SimpleTypeKind::Long &&
           lhs.kind != SimpleTypeKind::Unknown) {
         diagnostics_.error(expression.children[0].span,
                            "shift left operand must have type Int or Long");
@@ -2718,13 +2883,16 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
         diagnostics_.error(expression.children[1].span,
                            "shift count must have type Int");
       }
-      return lhs;
+      return lhs.kind == SimpleTypeKind::Byte || lhs.kind == SimpleTypeKind::Short
+                 ? TypeInfo{SimpleTypeKind::Int, "Int"}
+                 : lhs;
     }
     if (expression.text == "+" &&
         (lhs.kind == SimpleTypeKind::String || rhs.kind == SimpleTypeKind::String)) {
       const auto isStringConvertible = [](SimpleTypeKind kind) {
         return kind == SimpleTypeKind::Unit || kind == SimpleTypeKind::String ||
-               kind == SimpleTypeKind::Boolean || kind == SimpleTypeKind::Int ||
+               kind == SimpleTypeKind::Boolean || kind == SimpleTypeKind::Byte ||
+               kind == SimpleTypeKind::Short || kind == SimpleTypeKind::Int ||
                kind == SimpleTypeKind::Long || kind == SimpleTypeKind::Float ||
                kind == SimpleTypeKind::Double || kind == SimpleTypeKind::Char ||
                kind == SimpleTypeKind::Symbol || kind == SimpleTypeKind::Null ||
@@ -2739,7 +2907,8 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
     }
     if (expression.text == "%") {
       const auto isNumeric = [](SimpleTypeKind kind) {
-        return kind == SimpleTypeKind::Int || kind == SimpleTypeKind::Long ||
+        return kind == SimpleTypeKind::Byte || kind == SimpleTypeKind::Short ||
+               kind == SimpleTypeKind::Int || kind == SimpleTypeKind::Long ||
                kind == SimpleTypeKind::Float || kind == SimpleTypeKind::Double ||
                kind == SimpleTypeKind::Unknown;
       };
@@ -2748,7 +2917,10 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
                            "remainder operator % requires numeric operands");
       }
     }
-    return commonType(lhs, rhs);
+    const TypeInfo result = commonType(lhs, rhs);
+    return result.kind == SimpleTypeKind::Byte || result.kind == SimpleTypeKind::Short
+               ? TypeInfo{SimpleTypeKind::Int, "Int"}
+               : result;
   }
   }
   return TypeInfo{SimpleTypeKind::Unknown, "Unknown"};
@@ -3397,6 +3569,29 @@ TypeInfo Typechecker::inferSelectType(const AstExpression& expression, Scope& sc
       return TypeInfo{SimpleTypeKind::Int, "Int"};
     }
   }
+  if ((expression.text == support::StdNames::ToByte ||
+       expression.text == support::StdNames::ToShort ||
+       expression.text == support::StdNames::ToInt) &&
+      expression.children.size() == 1) {
+    const TypeInfo receiver = inferExpressionType(expression.children.front(), scope);
+    const bool supportedReceiver = receiver.kind == SimpleTypeKind::Byte ||
+                                   receiver.kind == SimpleTypeKind::Short ||
+                                   receiver.kind == SimpleTypeKind::Int ||
+                                   receiver.kind == SimpleTypeKind::Unknown;
+    if (!supportedReceiver) {
+      diagnostics_.error(expression.span,
+                         expression.text +
+                             " is currently supported for Byte, Short, and Int");
+      return TypeInfo{SimpleTypeKind::Unknown, "Unknown"};
+    }
+    if (expression.text == support::StdNames::ToByte) {
+      return TypeInfo{SimpleTypeKind::Byte, "Byte"};
+    }
+    if (expression.text == support::StdNames::ToShort) {
+      return TypeInfo{SimpleTypeKind::Short, "Short"};
+    }
+    return TypeInfo{SimpleTypeKind::Int, "Int"};
+  }
   if (expression.text == support::StdNames::ToString &&
       expression.children.size() == 1) {
     const TypeInfo receiver = inferExpressionType(expression.children.front(), scope);
@@ -3408,6 +3603,8 @@ TypeInfo Typechecker::inferSelectType(const AstExpression& expression, Scope& sc
     case SimpleTypeKind::String:
     case SimpleTypeKind::Unit:
     case SimpleTypeKind::Boolean:
+    case SimpleTypeKind::Byte:
+    case SimpleTypeKind::Short:
     case SimpleTypeKind::Int:
     case SimpleTypeKind::Long:
     case SimpleTypeKind::Float:
@@ -4191,6 +4388,12 @@ TypeInfo Typechecker::typeFromDeclaredName(const std::string& name, const Scope*
   if (normalized == "Unit") {
     return TypeInfo{SimpleTypeKind::Unit, "Unit"};
   }
+  if (normalized == "Byte") {
+    return TypeInfo{SimpleTypeKind::Byte, "Byte"};
+  }
+  if (normalized == "Short") {
+    return TypeInfo{SimpleTypeKind::Short, "Short"};
+  }
   if (normalized == "Int") {
     return TypeInfo{SimpleTypeKind::Int, "Int"};
   }
@@ -4487,14 +4690,18 @@ TypeInfo Typechecker::commonType(const TypeInfo& lhs, const TypeInfo& rhs) const
 
   auto rank = [](SimpleTypeKind kind) {
     switch (kind) {
-    case SimpleTypeKind::Int:
+    case SimpleTypeKind::Byte:
       return 1;
-    case SimpleTypeKind::Long:
+    case SimpleTypeKind::Short:
       return 2;
-    case SimpleTypeKind::Float:
+    case SimpleTypeKind::Int:
       return 3;
-    case SimpleTypeKind::Double:
+    case SimpleTypeKind::Long:
       return 4;
+    case SimpleTypeKind::Float:
+      return 5;
+    case SimpleTypeKind::Double:
+      return 6;
     default:
       return 0;
     }
@@ -4540,13 +4747,22 @@ bool Typechecker::isAssignable(const TypeInfo& expected, const TypeInfo& actual)
   }
   if (expected.kind == SimpleTypeKind::Double) {
     return actual.kind == SimpleTypeKind::Float ||
-           actual.kind == SimpleTypeKind::Long || actual.kind == SimpleTypeKind::Int;
+           actual.kind == SimpleTypeKind::Long || actual.kind == SimpleTypeKind::Int ||
+           actual.kind == SimpleTypeKind::Short || actual.kind == SimpleTypeKind::Byte;
   }
   if (expected.kind == SimpleTypeKind::Float) {
-    return actual.kind == SimpleTypeKind::Long || actual.kind == SimpleTypeKind::Int;
+    return actual.kind == SimpleTypeKind::Long || actual.kind == SimpleTypeKind::Int ||
+           actual.kind == SimpleTypeKind::Short || actual.kind == SimpleTypeKind::Byte;
   }
   if (expected.kind == SimpleTypeKind::Long) {
-    return actual.kind == SimpleTypeKind::Int;
+    return actual.kind == SimpleTypeKind::Int || actual.kind == SimpleTypeKind::Short ||
+           actual.kind == SimpleTypeKind::Byte;
+  }
+  if (expected.kind == SimpleTypeKind::Int) {
+    return actual.kind == SimpleTypeKind::Short || actual.kind == SimpleTypeKind::Byte;
+  }
+  if (expected.kind == SimpleTypeKind::Short) {
+    return actual.kind == SimpleTypeKind::Byte;
   }
   return false;
 }
@@ -4696,6 +4912,10 @@ const char* simpleTypeKindName(SimpleTypeKind kind) {
     return "Nothing";
   case SimpleTypeKind::Unit:
     return "Unit";
+  case SimpleTypeKind::Byte:
+    return "Byte";
+  case SimpleTypeKind::Short:
+    return "Short";
   case SimpleTypeKind::Int:
     return "Int";
   case SimpleTypeKind::Long:

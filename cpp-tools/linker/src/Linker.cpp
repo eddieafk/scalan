@@ -44,9 +44,9 @@ bool isDispatchTypeDefinition(nir::DefinitionKind kind) {
 }
 
 bool isBoxablePrimitiveType(const std::string& type) {
-  return type == "Unit" || type == "Boolean" || type == "Int" || type == "Long" ||
-         type == "Float" || type == "Double" || type == "Char" || type == "Symbol" ||
-         type == "String";
+  return type == "Unit" || type == "Boolean" || type == "Byte" || type == "Short" ||
+         type == "Int" || type == "Long" || type == "Float" || type == "Double" ||
+         type == "Char" || type == "Symbol" || type == "String";
 }
 
 bool isRuntimeReferenceArrayCopyOperation(std::string_view name) {
@@ -65,6 +65,8 @@ bool isRuntimeArrayOperation(std::string_view name) {
   const std::string referenceClonePrefix =
       std::string(support::StdNames::RuntimeReferenceArrayClone) + ".";
   const std::string copyPrefix = std::string(support::StdNames::RuntimeArrayCopy) + ".";
+  const std::string concatPrefix =
+      std::string(support::StdNames::RuntimeArrayConcat) + ".";
   return name == support::StdNames::RuntimeArrayLength ||
          name == support::StdNames::RuntimeArrayApply ||
          name == support::StdNames::RuntimeArrayUpdate ||
@@ -73,6 +75,14 @@ bool isRuntimeArrayOperation(std::string_view name) {
          name == support::StdNames::RuntimeIntArrayApply ||
          name == support::StdNames::RuntimeIntArrayUpdate ||
          name == support::StdNames::RuntimeIntArrayClone ||
+         name == support::StdNames::RuntimeByteArrayLength ||
+         name == support::StdNames::RuntimeByteArrayApply ||
+         name == support::StdNames::RuntimeByteArrayUpdate ||
+         name == support::StdNames::RuntimeByteArrayClone ||
+         name == support::StdNames::RuntimeShortArrayLength ||
+         name == support::StdNames::RuntimeShortArrayApply ||
+         name == support::StdNames::RuntimeShortArrayUpdate ||
+         name == support::StdNames::RuntimeShortArrayClone ||
          name == support::StdNames::RuntimeBooleanArrayLength ||
          name == support::StdNames::RuntimeBooleanArrayApply ||
          name == support::StdNames::RuntimeBooleanArrayUpdate ||
@@ -97,7 +107,7 @@ bool isRuntimeArrayOperation(std::string_view name) {
          name.starts_with(referenceApplyPrefix) ||
          name.starts_with(referenceUpdatePrefix) ||
          name.starts_with(referenceClonePrefix) || name.starts_with(copyPrefix) ||
-         isRuntimeReferenceArrayCopyOperation(name);
+         name.starts_with(concatPrefix) || isRuntimeReferenceArrayCopyOperation(name);
 }
 
 bool isRuntimeArrayAllocationOperation(std::string_view name) {
@@ -105,14 +115,21 @@ bool isRuntimeArrayAllocationOperation(std::string_view name) {
       std::string(support::StdNames::RuntimeReferenceArrayAlloc) + ".";
   const std::string ofDimPrefix =
       std::string(support::StdNames::RuntimeArrayOfDim) + ".";
+  const std::string fillPrefix = std::string(support::StdNames::RuntimeArrayFill) + ".";
+  const std::string concatPrefix =
+      std::string(support::StdNames::RuntimeArrayConcat) + ".";
   return name == support::StdNames::RuntimeArrayAlloc ||
          name == support::StdNames::RuntimeIntArrayAlloc ||
+         name == support::StdNames::RuntimeByteArrayAlloc ||
+         name == support::StdNames::RuntimeShortArrayAlloc ||
          name == support::StdNames::RuntimeBooleanArrayAlloc ||
          name == support::StdNames::RuntimeLongArrayAlloc ||
          name == support::StdNames::RuntimeDoubleArrayAlloc ||
          name == support::StdNames::RuntimeFloatArrayAlloc ||
          name == support::StdNames::RuntimeCharArrayAlloc ||
-         name.starts_with(referenceAllocPrefix) || name.starts_with(ofDimPrefix);
+         name == support::StdNames::RuntimeArrayRange ||
+         name.starts_with(referenceAllocPrefix) || name.starts_with(ofDimPrefix) ||
+         name.starts_with(fillPrefix) || name.starts_with(concatPrefix);
 }
 
 bool isRuntimeAssertOperation(std::string_view name) {
@@ -125,6 +142,13 @@ bool isRuntimeAssumeOperation(std::string_view name) {
 
 bool isRuntimeRequireOperation(std::string_view name) {
   return name == support::StdNames::RuntimeRequire;
+}
+
+bool isRuntimeIllegalArgumentOperation(std::string_view name) {
+  const std::string concatPrefix =
+      std::string(support::StdNames::RuntimeArrayConcat) + ".";
+  return isRuntimeRequireOperation(name) ||
+         name == support::StdNames::RuntimeArrayRange || name.starts_with(concatPrefix);
 }
 
 bool isRuntimeNullReceiverOperation(std::string_view name) {
@@ -697,7 +721,8 @@ void collectValueReferences(const nir::Value& value, ReferenceContext& context,
   case nir::ValueKind::SizeOf:
     if (const GlobalInfo* global = resolveGlobal(value.text, context)) {
       references.push_back(global->definition->name);
-    } else if (value.text != "Unit" && value.text != "Boolean" && value.text != "Int" &&
+    } else if (value.text != "Unit" && value.text != "Boolean" &&
+               value.text != "Byte" && value.text != "Short" && value.text != "Int" &&
                value.text != "Long" && value.text != "Float" &&
                value.text != "Double" && value.text != "Char") {
       unresolved.push_back(value.text);
@@ -935,7 +960,8 @@ collectDefinitionReferences(const nir::Definition& definition,
       references.push_back(assertionErrorName);
     }
   }
-  if (isFunction(definition.kind) && isRuntimeRequireOperation(definition.name)) {
+  if (isFunction(definition.kind) &&
+      isRuntimeIllegalArgumentOperation(definition.name)) {
     const std::string illegalArgumentName(
         support::StdNames::JavaLangIllegalArgumentException);
     if (globals.contains(illegalArgumentName)) {

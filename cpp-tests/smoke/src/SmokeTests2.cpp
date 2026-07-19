@@ -892,7 +892,7 @@ object Main {
               contains(result.llvmIr,
                        "c\"Value cannot be cast to requested type\\00\"") &&
               countOccurrences(result.llvmIr,
-                               "call void @__scalanative_throw_class_cast()") == 10 &&
+                               "call void @__scalanative_throw_class_cast()") == 12 &&
               contains(result.llvmIr,
                        "fail:\n  call void @__scalanative_throw_class_cast()\n  "
                        "unreachable\nsuccess:"),
@@ -1826,6 +1826,36 @@ object CauseRules {
   }
 }
 
+object HandlerLocalRules {
+  def liveAcrossCatch(): String = {
+    var booleanValue = false
+    var intValue = 1
+    var longValue = 2L
+    var floatValue = 1.0F
+    var doubleValue = 2.0
+    var charValue = 'a'
+    var stringValue = "before"
+    var referenceValue: DefaultFailure = null
+    try {
+      booleanValue = true
+      intValue = 7
+      longValue = 8L
+      floatValue = 2.5F
+      doubleValue = 3.5
+      charValue = 'z'
+      stringValue = "after"
+      referenceValue = new DefaultFailure("retained")
+      throw new DefaultFailure("trigger")
+    } catch {
+      case caught: DefaultFailure =>
+        booleanValue + "|" + intValue + "|" + longValue + "|" +
+          (floatValue == 2.5F) + "|" + (doubleValue == 3.5) + "|" +
+          charValue + "|" + stringValue + "|" + referenceValue.getMessage +
+          "|" + caught.getMessage
+    }
+  }
+}
+
 object ArrayRules {
   def nullLength(): String = {
     val values: Array[Int] = null
@@ -1890,6 +1920,231 @@ object ArrayRules {
       "|" + longs(0) + "|" + doubles(0) + "|" + floats(0) + "|" +
       chars(0) + "|" + (strings(0) == null) + "|" +
       (failures(0) == null) + "|" + (anyValues(0) == null)
+  }
+
+  def emptyBehavior(): String = {
+    val booleans = Array.empty[Boolean]
+    val ints = Array.empty[Int]
+    val longs = Array.empty[Long]
+    val doubles = Array.empty[Double]
+    val floats = Array.empty[Float]
+    val chars = Array.empty[Char]
+    val strings = Array.empty[String]
+    val failures = Array.empty[DefaultFailure]
+    val anyValues = Array.empty[Any]
+    val matrix = Array.empty[Array[Int]]
+    booleans.length + "|" + ints.length + "|" + longs.length + "|" +
+      doubles.length + "|" + floats.length + "|" + chars.length + "|" +
+      strings.length + "|" + failures.length + "|" + anyValues.length + "|" +
+      matrix.length
+  }
+
+  def fillBehavior(): String = {
+    var counter = 0
+    val ints = Array.fill[Int](3)({
+      counter = counter + 1
+      counter
+    })
+    val skipped = Array.fill[Int](0)({
+      counter = counter + 100
+      counter
+    })
+    var lengthCalls = 0
+    val fixed = Array.fill[Int]({
+      lengthCalls = lengthCalls + 1
+      2
+    })(9)
+    val booleans = Array.fill[Boolean](2)(true)
+    val chars = Array.fill[Char](2)('q')
+    val floats = Array.fill[Float](2)(1.5F)
+    val longs = Array.fill[Long](2)(8L)
+    val doubles = Array.fill[Double](2)(2.5)
+    val strings = Array.fill[String](2)("filled")
+    val failures =
+      Array.fill[DefaultFailure](2)(new DefaultFailure("filled"))
+    val anyValues = Array.fill[Any](2)(7)
+    val matrix = Array.fill[Array[Int]](2)(Array(1))
+    matrix(0)(0) = 9
+    val integerValues =
+      ints(0) + "," + ints(1) + "," + ints(2) + "|" + counter
+    val scalarValues =
+      skipped.length + "|" + lengthCalls + "|" + fixed(1) + "|" +
+        booleans(1) + "|" + chars(1) + "|" + (floats(0) == 1.5F) + "|" +
+        longs(1) + "|" + (doubles(0) == 2.5) + "|" + strings(0)
+    val referenceValues =
+      (failures(0) == failures(1)) + "|" +
+        anyValues(1).asInstanceOf[Int] + "|" + matrix(0)(0) + "|" +
+        matrix(1)(0) + "|" + (matrix(0) == matrix(1))
+    integerValues + "|" + scalarValues + "|" + referenceValues
+  }
+
+  def multiFillBehavior(): String = {
+    var dimensionCalls = 0
+    var elementCalls = 0
+    val matrix = Array.fill[Int]({
+      dimensionCalls = dimensionCalls + 1
+      2
+    }, {
+      dimensionCalls = dimensionCalls + 1
+      3
+    })({
+      elementCalls = elementCalls + 1
+      elementCalls
+    })
+    matrix(0)(0) = 20
+    val cube = Array.fill[String](2, 1, 2)("cell")
+    val failures =
+      Array.fill[DefaultFailure](2, 2)(new DefaultFailure("cell"))
+    val skipped = Array.fill[Int](0, 0 - 1)({
+      elementCalls = elementCalls + 100
+      elementCalls
+    })
+    var negativeElementCalls = 0
+    val negative = try {
+      println(Array.fill[Int](1, 0 - 1)({
+        negativeElementCalls = negativeElementCalls + 1
+        7
+      }).length)
+      "missed negative inner fill dimension"
+    } catch {
+      case failure: NegativeArraySizeException => failure.getMessage
+    }
+    matrix.length + "|" + matrix(0).length + "|" + matrix(0)(0) + "|" +
+      matrix(0)(1) + "|" + matrix(1)(0) + "|" + elementCalls + "|" +
+      dimensionCalls + "|" + (matrix(0) == matrix(1)) + "|" +
+      cube(1)(0)(1) + "|" + (failures(0) == failures(1)) + "|" +
+      (failures(0)(0) == failures(0)(1)) + "|" +
+      (failures(0)(0) == failures(1)(0)) + "|" + skipped.length + "|" +
+      negative + "|" + negativeElementCalls
+  }
+
+  def rangeBehavior(): String = {
+    var argumentCalls = 0
+    val ascending = Array.range({
+      argumentCalls = argumentCalls + 1
+      1
+    }, {
+      argumentCalls = argumentCalls + 1
+      8
+    }, {
+      argumentCalls = argumentCalls + 1
+      2
+    })
+    val defaults = Array.range(2, 5)
+    val descending = Array.range(7, 0, 0 - 3)
+    val emptyPositive = Array.range(5, 1, 2)
+    val emptyNegative = Array.range(1, 5, 0 - 2)
+    val minimum = (0 - 2147483647) - 1
+    val minimumStep = Array.range(2147483647, minimum, minimum)
+    ascending.length + "|" + ascending(0) + "|" + ascending(1) + "|" +
+      ascending(2) + "|" + ascending(3) + "|" + defaults.length + "|" +
+      defaults(0) + "|" + defaults(2) + "|" + descending.length + "|" +
+      descending(0) + "|" + descending(1) + "|" + descending(2) + "|" +
+      emptyPositive.length + "|" + emptyNegative.length + "|" +
+      minimumStep.length + "|" + minimumStep(0) + "|" + minimumStep(1) +
+      "|" + argumentCalls
+  }
+
+  def rangeFailures(): String = {
+    val zeroStep = try {
+      println(Array.range(1, 5, 0).length)
+      "missed zero range step"
+    } catch {
+      case failure: IllegalArgumentException => failure.getMessage
+    }
+    val minimum = (0 - 2147483647) - 1
+    val tooLarge = try {
+      println(Array.range(minimum, 2147483647).length)
+      "missed oversized array range"
+    } catch {
+      case failure: IllegalArgumentException => failure.getMessage
+    }
+    zeroStep + "|" + tooLarge
+  }
+
+  def concatBehavior(): String = {
+    var argumentCalls = 0
+    val ints = Array.concat[Int](
+      {
+        argumentCalls = argumentCalls + 1
+        Array(1, 2)
+      },
+      {
+        argumentCalls = argumentCalls + 1
+        Array.empty[Int]
+      },
+      {
+        argumentCalls = argumentCalls + 1
+        Array(3, 4)
+      }
+    )
+    val empty = Array.concat[Int]()
+    val booleans = Array.concat[Boolean](Array(true), Array(false))
+    val chars = Array.concat[Char](Array('a'), Array('b'))
+    val floats = Array.concat[Float](Array(1.5F), Array(2.5F))
+    val longs = Array.concat[Long](Array(7L), Array(8L))
+    val doubles = Array.concat[Double](Array(2.5), Array(3.5))
+    val strings =
+      Array.concat[String](Array("left"), Array.empty[String], Array("right"))
+    val failure = new DefaultFailure("first")
+    val failures = Array.concat[DefaultFailure](
+      Array[DefaultFailure](failure),
+      Array[DefaultFailure](new DefaultFailure("second"))
+    )
+    val anyValues =
+      Array.concat[Any](Array[Any](1), Array.empty[Any], Array[Any](7))
+    val first = Array(1)
+    val second = Array(2)
+    val nested = Array.concat[Array[Int]](
+      Array[Array[Int]](first),
+      Array[Array[Int]](second)
+    )
+    nested(0)(0) = 9
+    ints.length + "|" + ints(0) + "|" + ints(1) + "|" + ints(2) + "|" +
+      ints(3) + "|" + argumentCalls + "|" + empty.length + "|" +
+      booleans(1) + "|" + chars(1) + "|" + (floats(1) == 2.5F) + "|" +
+      longs(1) + "|" + (doubles(1) == 3.5) + "|" + strings(1) + "|" +
+      (failures(0) == failure) + "|" + anyValues(1).asInstanceOf[Int] + "|" +
+      first(0) + "|" + second(0) + "|" + (nested(0) == first)
+  }
+
+  def concatFailure(): String = {
+    val missing: Array[Int] = null
+    var argumentCalls = 0
+    try {
+      println(Array.concat[Int](
+        {
+          argumentCalls = argumentCalls + 1
+          Array(1)
+        },
+        {
+          argumentCalls = argumentCalls + 1
+          missing
+        },
+        {
+          argumentCalls = argumentCalls + 1
+          Array(3)
+        }
+      ).length)
+      "missed null concat input"
+    } catch {
+      case failure: NullPointerException =>
+        failure.getMessage + "|" + argumentCalls
+    }
+  }
+
+  def negativeFill(): String = {
+    var evaluated = 0
+    try {
+      println(Array.fill[Int](0 - 1)({
+        evaluated = 1
+        7
+      }).length)
+      "missed negative fill length"
+    } catch {
+      case failure: NegativeArraySizeException =>
+        failure.getMessage + "|" + evaluated
+    }
   }
 
   def nestedOfDim(rows: Int, columns: Int): String = {
@@ -2360,6 +2615,15 @@ object Main {
     println(ArrayRules.upperWrite())
     println(ArrayRules.referenceRead())
     println(ArrayRules.dynamicDefaults(3))
+    println(ArrayRules.emptyBehavior())
+    println(ArrayRules.fillBehavior())
+    println(ArrayRules.multiFillBehavior())
+    println(ArrayRules.rangeBehavior())
+    println(ArrayRules.rangeFailures())
+    println(ArrayRules.concatBehavior())
+    println(ArrayRules.concatFailure())
+    println(HandlerLocalRules.liveAcrossCatch())
+    println(ArrayRules.negativeFill())
     println(ArrayRules.nestedOfDim(2, 3))
     println(ArrayRules.multiDimensional(2, 3))
     println(ArrayRules.cloneBehavior())
@@ -2425,10 +2689,26 @@ object Main {
     std::cerr << result.diagnosticsText;
     return code;
   }
+  const std::string handlerFreeMutableName =
+      "define ptr @demo_exceptions_ArrayRules_fillBehavior()";
+  const std::size_t handlerFreeMutableStart =
+      result.llvmIr.find(handlerFreeMutableName);
+  const std::size_t handlerFreeMutableEnd =
+      handlerFreeMutableStart == std::string::npos
+          ? std::string::npos
+          : result.llvmIr.find("\n}\n", handlerFreeMutableStart);
+  const std::string handlerFreeMutableIr =
+      handlerFreeMutableStart == std::string::npos ||
+              handlerFreeMutableEnd == std::string::npos
+          ? std::string{}
+          : result.llvmIr.substr(handlerFreeMutableStart,
+                                 handlerFreeMutableEnd - handlerFreeMutableStart);
   if (int code = expect(
-          contains(result.nirText,
-                   "define @demo.exceptions.Thrower.fail : "
-                   "(demo.exceptions.Failure,java.lang.Throwable)Int") &&
+          !handlerFreeMutableIr.empty() &&
+              !contains(handlerFreeMutableIr, "volatile") &&
+              contains(result.nirText,
+                       "define @demo.exceptions.Thrower.fail : "
+                       "(demo.exceptions.Failure,java.lang.Throwable)Int") &&
               contains(result.nirText,
                        "class @java.lang.Exception : @java.lang.Throwable") &&
               contains(result.nirText,
@@ -2540,6 +2820,102 @@ object Main {
               contains(result.nirText,
                        "call %scala.scalanative.runtime.referenceArrayAlloc."
                        "demo.exceptions.DefaultFailure(%length)") &&
+              contains(result.nirText,
+                       "call %scala.scalanative.runtime.booleanArrayAlloc(0)") &&
+              contains(result.nirText,
+                       "call %scala.scalanative.runtime.intArrayAlloc(0)") &&
+              contains(result.nirText,
+                       "call %scala.scalanative.runtime.longArrayAlloc(0)") &&
+              contains(result.nirText,
+                       "call %scala.scalanative.runtime.doubleArrayAlloc(0)") &&
+              contains(result.nirText,
+                       "call %scala.scalanative.runtime.floatArrayAlloc(0)") &&
+              contains(result.nirText,
+                       "call %scala.scalanative.runtime.charArrayAlloc(0)") &&
+              contains(result.nirText,
+                       "call %scala.scalanative.runtime.arrayAlloc(0)") &&
+              contains(result.nirText,
+                       "call %scala.scalanative.runtime.referenceArrayAlloc."
+                       "demo.exceptions.DefaultFailure(0)") &&
+              contains(
+                  result.nirText,
+                  "call %scala.scalanative.runtime.referenceArrayAlloc.Object(0)") &&
+              contains(result.nirText,
+                       "call %scala.scalanative.runtime.referenceArrayAlloc."
+                       "nested$Array$5bInt$5d(0)") &&
+              contains(result.nirText,
+                       "declare @scala.scalanative.runtime.arrayFill.Int : "
+                       "(Int,Int)Array [ Int ]") &&
+              contains(result.nirText,
+                       "call %scala.scalanative.runtime.arrayFill.Boolean(") &&
+              contains(result.nirText,
+                       "call %scala.scalanative.runtime.arrayFill.Int(") &&
+              contains(result.nirText,
+                       "call %scala.scalanative.runtime.arrayFill.Char(") &&
+              contains(result.nirText,
+                       "call %scala.scalanative.runtime.arrayFill.Float(") &&
+              contains(result.nirText,
+                       "call %scala.scalanative.runtime.arrayFill.Long(") &&
+              contains(result.nirText,
+                       "call %scala.scalanative.runtime.arrayFill.Double(") &&
+              contains(result.nirText,
+                       "call %scala.scalanative.runtime.arrayFill.String(") &&
+              contains(result.nirText, "call %scala.scalanative.runtime.arrayFill."
+                                       "demo.exceptions.DefaultFailure(") &&
+              contains(result.nirText,
+                       "call %scala.scalanative.runtime.arrayFill.Object(2, "
+                       "box[Int](7))") &&
+              contains(result.nirText, "call %scala.scalanative.runtime.arrayFill."
+                                       "nested$Array$5bInt$5d(") &&
+              contains(result.nirText,
+                       "declare @scala.scalanative.runtime.arrayFill.Int.2 : "
+                       "(Int,Int,Int)Array [ Array [ Int ] ]") &&
+              contains(result.nirText,
+                       "declare @scala.scalanative.runtime.arrayFill.String.3 : "
+                       "(Int,Int,Int,String)Array [ Array [ Array [ String ] ] ]") &&
+              contains(result.nirText,
+                       "declare @scala.scalanative.runtime.arrayFill."
+                       "demo.exceptions.DefaultFailure.2 : "
+                       "(Int,Int,demo.exceptions.DefaultFailure)"
+                       "Array [ Array [ demo.exceptions.DefaultFailure ] ]") &&
+              contains(result.nirText,
+                       "declare @scala.scalanative.runtime.arrayRange : "
+                       "(Int,Int,Int)Array [ Int ]") &&
+              contains(result.nirText,
+                       "call %scala.scalanative.runtime.arrayRange(2, 5, 1)") &&
+              contains(result.nirText,
+                       "call %scala.scalanative.runtime.arrayRange(7, 0, (0 - 3))") &&
+              contains(result.nirText,
+                       "declare @scala.scalanative.runtime.arrayConcat.Int.3 : "
+                       "(Array [ Int ],Array [ Int ],Array [ Int ])Array [ Int ]") &&
+              contains(result.nirText,
+                       "declare @scala.scalanative.runtime.arrayConcat.Int.0 : "
+                       "()Array [ Int ]") &&
+              contains(result.nirText,
+                       "call %scala.scalanative.runtime.arrayConcat.Boolean.2(") &&
+              contains(result.nirText,
+                       "call %scala.scalanative.runtime.arrayConcat.Char.2(") &&
+              contains(result.nirText,
+                       "call %scala.scalanative.runtime.arrayConcat.Float.2(") &&
+              contains(result.nirText,
+                       "call %scala.scalanative.runtime.arrayConcat.Long.2(") &&
+              contains(result.nirText,
+                       "call %scala.scalanative.runtime.arrayConcat.Double.2(") &&
+              contains(result.nirText,
+                       "call %scala.scalanative.runtime.arrayConcat.String.3(") &&
+              contains(result.nirText,
+                       "call %scala.scalanative.runtime.arrayConcat.Object.3(") &&
+              contains(result.nirText,
+                       "declare @scala.scalanative.runtime.arrayConcat."
+                       "demo.exceptions.DefaultFailure.2 : "
+                       "(Array [ demo.exceptions.DefaultFailure ],Array [ "
+                       "demo.exceptions.DefaultFailure ])Array [ "
+                       "demo.exceptions.DefaultFailure ]") &&
+              contains(result.nirText,
+                       "declare @scala.scalanative.runtime.arrayConcat."
+                       "nested$Array$5bInt$5d.2 : "
+                       "(Array [ Array [ Int ] ],Array [ Array [ Int ] ])"
+                       "Array [ Array [ Int ] ]") &&
               contains(result.nirText,
                        "declare @scala.scalanative.runtime.referenceArrayAlloc."
                        "nested$Array$5bInt$5d : "
@@ -2673,7 +3049,7 @@ object Main {
                        "declare @scala.scalanative.runtime.referenceArrayUpdate."
                        "java.lang.StackTraceElement") &&
               contains(result.nirText, "throw %failure") &&
-              contains(result.llvmIr, "Runtime ABI = 'cpp-scalanative-runtime-47'") &&
+              contains(result.llvmIr, "Runtime ABI = 'cpp-scalanative-runtime-52'") &&
               contains(result.llvmIr, "@__type_java_lang_ArrayStoreException =") &&
               contains(result.llvmIr,
                        "define internal void @__scalanative_throw_array_store() "
@@ -2684,6 +3060,36 @@ object Main {
               contains(result.llvmIr, "%element_matches = call i1 "
                                       "@__scalanative_is_instance_of(ptr %element, ptr "
                                       "%target_descriptor)") &&
+              contains(result.llvmIr, "array_fill_loop_") &&
+              contains(result.llvmIr, "array_fill_body_") &&
+              contains(result.llvmIr, "array_fill_latch_") &&
+              contains(result.llvmIr, "array_fill_done_") &&
+              contains(result.llvmIr, "array_range_positive_") &&
+              contains(result.llvmIr, "array_range_negative_") &&
+              contains(result.llvmIr, "array_range_loop_") &&
+              contains(result.llvmIr,
+                       "define internal void "
+                       "@__scalanative_throw_array_range_zero_step() noreturn") &&
+              contains(result.llvmIr, "c\"Array range is too large\\00\"") &&
+              contains(result.llvmIr, "array_concat_allocate_") &&
+              contains(result.llvmIr, "array_concat_too_large_") &&
+              contains(result.llvmIr,
+                       "define internal void "
+                       "@__scalanative_throw_array_concat_too_large() noreturn") &&
+              contains(result.llvmIr, "c\"Array concatenation is too large\\00\"") &&
+              contains(result.llvmIr, "call void @llvm.memcpy.p0.p0.i64(ptr %") &&
+              contains(result.llvmIr, "store volatile i1 ") &&
+              contains(result.llvmIr, "store volatile i32 ") &&
+              contains(result.llvmIr, "store volatile i64 ") &&
+              contains(result.llvmIr, "store volatile float ") &&
+              contains(result.llvmIr, "store volatile double ") &&
+              contains(result.llvmIr, "store volatile ptr ") &&
+              contains(result.llvmIr, "load volatile i1, ptr %") &&
+              contains(result.llvmIr, "load volatile i32, ptr %") &&
+              contains(result.llvmIr, "load volatile i64, ptr %") &&
+              contains(result.llvmIr, "load volatile float, ptr %") &&
+              contains(result.llvmIr, "load volatile double, ptr %") &&
+              contains(result.llvmIr, "load volatile ptr, ptr %") &&
               contains(result.llvmIr, "@__type_java_lang_AssertionError =") &&
               contains(result.llvmIr,
                        "define internal void @__scalanative_throw_assertion() "
@@ -2749,7 +3155,7 @@ object Main {
               countOccurrences(result.llvmIr,
                                "call void "
                                "@__scalanative_throw_array_index_out_of_bounds()") ==
-                  9 &&
+                  11 &&
               contains(result.llvmIr, "; Scala Native runtime resource: lifecycle") &&
               contains(result.llvmIr, "; Scala Native runtime resource: exceptions") &&
               contains(result.llvmIr,
@@ -3013,6 +3419,99 @@ object Main {
     return code;
   }
 
+  constexpr const char* fillOnlySource = R"(package demo.fillonly
+object Main {
+  def make(rows: Int, columns: Int): Array[Array[Int]] =
+    Array.fill[Int](rows, columns)(4)
+  def main = println(make(2, 2)(1)(1))
+}
+)";
+  scalanative::tools::build::BuildOptions fillOnlyOptions;
+  fillOnlyOptions.optimize = true;
+  scalanative::support::DiagnosticEngine fillOnlyDiagnostics;
+  const scalanative::tools::build::BuildResult fillOnly = driver.buildSource(
+      "FillOnly.scala", fillOnlySource, fillOnlyOptions, fillOnlyDiagnostics);
+  if (int code = expect(
+          fillOnly.ok &&
+              contains(fillOnly.llvmIr,
+                       "@__type_java_lang_NegativeArraySizeException =") &&
+              countOccurrences(fillOnly.llvmIr,
+                               "call ptr @__scalanative_array_alloc(i32 ") >= 2 &&
+              contains(fillOnly.llvmIr, ", i64 4)") &&
+              contains(fillOnly.llvmIr, ", i64 8)") &&
+              countOccurrences(fillOnly.llvmIr, "array_fill_loop_") >= 2 &&
+              contains(fillOnly.llvmIr, "store i32 4, ptr %") &&
+              contains(fillOnly.llvmIr, "store ptr %"),
+          "optimized multidimensional Array.fill did not retain its nested "
+          "allocation and loop path")) {
+    if (!fillOnly.ok) {
+      std::cerr << fillOnly.diagnosticsText;
+    }
+    return code;
+  }
+
+  constexpr const char* rangeOnlySource = R"(package demo.rangeonly
+object Main {
+  def make(start: Int, end: Int, step: Int): Array[Int] =
+    Array.range(start, end, step)
+  def main = println(make(1, 8, 2)(3))
+}
+)";
+  scalanative::tools::build::BuildOptions rangeOnlyOptions;
+  rangeOnlyOptions.optimize = true;
+  scalanative::support::DiagnosticEngine rangeOnlyDiagnostics;
+  const scalanative::tools::build::BuildResult rangeOnly = driver.buildSource(
+      "RangeOnly.scala", rangeOnlySource, rangeOnlyOptions, rangeOnlyDiagnostics);
+  if (int code = expect(
+          rangeOnly.ok &&
+              contains(rangeOnly.llvmIr,
+                       "@__type_java_lang_IllegalArgumentException =") &&
+              contains(rangeOnly.llvmIr,
+                       "call void @__scalanative_throw_array_range_zero_step()") &&
+              contains(rangeOnly.llvmIr, "call ptr @__scalanative_array_alloc(i32 %") &&
+              contains(rangeOnly.llvmIr, ", i64 4)") &&
+              contains(rangeOnly.llvmIr, "array_range_loop_") &&
+              contains(rangeOnly.llvmIr, "store i32 %"),
+          "optimized Array.range did not retain its checked allocation and loop "
+          "path")) {
+    if (!rangeOnly.ok) {
+      std::cerr << rangeOnly.diagnosticsText;
+    }
+    return code;
+  }
+
+  constexpr const char* concatOnlySource = R"(package demo.concatonly
+object Main {
+  def join(left: Array[Int], right: Array[Int]): Array[Int] =
+    Array.concat[Int](left, right)
+  def main = println(join(Array(1), Array(2, 3))(2))
+}
+)";
+  scalanative::tools::build::BuildOptions concatOnlyOptions;
+  concatOnlyOptions.optimize = true;
+  scalanative::support::DiagnosticEngine concatOnlyDiagnostics;
+  const scalanative::tools::build::BuildResult concatOnly = driver.buildSource(
+      "ConcatOnly.scala", concatOnlySource, concatOnlyOptions, concatOnlyDiagnostics);
+  if (int code = expect(
+          concatOnly.ok &&
+              contains(concatOnly.llvmIr, "@__type_java_lang_NullPointerException =") &&
+              contains(concatOnly.llvmIr,
+                       "@__type_java_lang_IllegalArgumentException =") &&
+              contains(concatOnly.llvmIr,
+                       "call void @__scalanative_throw_array_concat_too_large()") &&
+              contains(concatOnly.llvmIr,
+                       "call ptr @__scalanative_array_alloc(i32 %") &&
+              contains(concatOnly.llvmIr, ", i64 4)") &&
+              countOccurrences(concatOnly.llvmIr,
+                               "call void @llvm.memcpy.p0.p0.i64(ptr %") >= 2,
+          "optimized Array.concat did not retain its checked width-aware bulk-copy "
+          "path")) {
+    if (!concatOnly.ok) {
+      std::cerr << concatOnly.diagnosticsText;
+    }
+    return code;
+  }
+
   constexpr const char* invalidDynamicArraySource =
       R"(package demo.invaliddynamicarray
 object Broken {
@@ -3022,6 +3521,19 @@ object Broken {
   def wrongOfDimLength = Array.ofDim[Int]("three")
   def missingOfDimLength = Array.ofDim[String]()
   def unsupportedNestedElement = Array.ofDim[Array[Unit]](1)
+  def unsupportedEmptyElement = Array.empty[Unit]
+  def unsupportedFillElement = Array.fill[Unit](1)({})
+  def wrongFillLength = Array.fill[Int]("one")(1)
+  def wrongInnerFillLength = Array.fill[Int](1, "two")(1)
+  def wrongFillElement = Array.fill[Int](1)("one")
+  def missingFillDimensions = Array.fill[Int]()(0)
+  def tooManyFillElements = Array.fill[Int](1)(0, 1)
+  def missingRangeEnd = Array.range(1)
+  def tooManyRangeArguments = Array.range(1, 2, 3, 4)
+  def wrongRangeArgument = Array.range(1, "end")
+  def unsupportedConcatElement = Array.concat[Unit]()
+  def nonArrayConcatArgument = Array.concat[Int](1)
+  def wrongConcatArrayType = Array.concat[Int](Array(1L))
   def cloneWithArgument = Array(1).clone(2)
   def copyMissingLength = Array.copy(Array(1), 0, Array(0), 0)
   def copyNonArraySource = Array.copy(1, 0, Array(0), 0, 1)
@@ -3056,6 +3568,29 @@ object Broken {
               contains(invalidDynamicArray.diagnosticsText,
                        "Array.ofDim type argument must be a supported scalar, "
                        "reference, or nested array type in this subset") &&
+              contains(invalidDynamicArray.diagnosticsText,
+                       "Array.empty type argument must be a supported scalar, "
+                       "reference, or nested array type in this subset") &&
+              contains(invalidDynamicArray.diagnosticsText,
+                       "Array.fill type argument must be a supported scalar, "
+                       "reference, or nested array type in this subset") &&
+              contains(invalidDynamicArray.diagnosticsText,
+                       "Array.fill dimensions must have type Int") &&
+              contains(invalidDynamicArray.diagnosticsText,
+                       "Array.fill element does not conform to its declared type") &&
+              contains(invalidDynamicArray.diagnosticsText,
+                       "Array.fill requires at least one Int dimension") &&
+              contains(invalidDynamicArray.diagnosticsText,
+                       "Array.fill requires exactly one element expression") &&
+              contains(invalidDynamicArray.diagnosticsText,
+                       "Array.range requires start, end, and an optional step") &&
+              contains(invalidDynamicArray.diagnosticsText,
+                       "Array.range arguments must have type Int") &&
+              contains(invalidDynamicArray.diagnosticsText,
+                       "Array.concat type argument must be a supported scalar, "
+                       "reference, or nested array type in this subset") &&
+              contains(invalidDynamicArray.diagnosticsText,
+                       "Array.concat arguments must match its declared array type") &&
               contains(invalidDynamicArray.diagnosticsText,
                        "array clone does not accept arguments") &&
               contains(invalidDynamicArray.diagnosticsText,
@@ -3543,6 +4078,23 @@ object Main {
               !contains(output, "missed upper array index") &&
               !contains(output, "missed reference array index") &&
               contains(output, "3|0|9|false|0|0.000000|0.000000|z|true|true|true\n") &&
+              contains(output, "0|0|0|0|0|0|0|0|0|0\n") &&
+              contains(output, "1,2,3|3|0|1|9|true|q|true|8|true|filled|false|7|9|1|"
+                               "false\n") &&
+              contains(output, "2|3|20|2|4|6|2|false|cell|false|false|false|0|"
+                               "Array size cannot be negative|0\n") &&
+              !contains(output, "missed negative inner fill dimension") &&
+              contains(output, "4|1|3|5|7|3|2|4|3|7|4|1|0|0|2|2147483647|-1|3\n") &&
+              contains(output, "zero step|Array range is too large\n") &&
+              !contains(output, "missed zero range step") &&
+              !contains(output, "missed oversized array range") &&
+              contains(output, "4|1|2|3|4|3|0|false|b|true|8|true|right|true|7|9|"
+                               "2|true\n") &&
+              contains(output, "Array cannot be null|3\n") &&
+              !contains(output, "missed null concat input") &&
+              contains(output, "true|7|8|true|true|z|after|retained|trigger\n") &&
+              contains(output, "Array size cannot be negative|0\n") &&
+              !contains(output, "missed negative fill length") &&
               contains(output, "2|true|3|0|7|7\n") &&
               contains(output, "2|3|0|11|0|2|2|2|deep\n") &&
               contains(output, "2|9|false|4|true|true|b|right|true|8|5|false\n") &&
@@ -4187,7 +4739,7 @@ object Invalid {
       driver.buildSource("TryCatchStage.scala", source, llvmOptions, llvmDiagnostics);
   if (int code = expect(
           llvm.ok &&
-              contains(llvm.llvmIr, "Runtime ABI = 'cpp-scalanative-runtime-47'") &&
+              contains(llvm.llvmIr, "Runtime ABI = 'cpp-scalanative-runtime-52'") &&
               contains(llvm.llvmIr, "%scalanative.exception_handler = type { ptr, ptr, "
                                     "ptr, ptr, ptr }") &&
               contains(llvm.llvmIr, "declare i32 @_setjmp(ptr) returns_twice") &&
@@ -4247,6 +4799,127 @@ object Invalid {
                 "try/catch native execution produced the wrong control flow "
                 "(status=" +
                     std::to_string(status) + ", output='" + output + "')");
+}
+
+int smokeByteAndShortNativeRuntime() {
+  constexpr const char* source = R"(package demo.narrow
+
+object Main {
+  def byteValue(seed: Int): Byte = (seed + 130).toByte
+  def shortValue(seed: Int): Short = (seed + 40000).toShort
+
+  def main = {
+    val byte = byteValue(0)
+    val short = shortValue(0)
+    val bytes = Array[Byte](byte, 1.toByte)
+    val shorts = Array.fill[Short](2)(short)
+    val joined = Array.concat[Byte](bytes, Array[Byte](3.toByte))
+    val copied = Array.fill[Short](2)(0.toShort)
+    Array.copy(shorts, 0, copied, 0, 2)
+    val values = Array[Any](byte, short)
+
+    println(byte + "|" + short + "|" + byte.toInt + "|" + short.toInt)
+    println((byte + short) + "|" + (-byte) + "|" + (short * 2))
+    println(joined.length + "|" + joined(0) + "|" + joined(2) + "|" +
+      copied(0) + "|" + copied(1))
+    println(values(0).isInstanceOf[Byte] + "|" +
+      values(1).isInstanceOf[Short] + "|" +
+      values(0).asInstanceOf[Byte] + "|" +
+      values(1).asInstanceOf[Short])
+    println(byte.hashCode + "|" + short.hashCode + "|" +
+      byte.toString + "|" + short.toString)
+    println(sizeof[Byte] + "|" + sizeof[Short])
+  }
+}
+)";
+  constexpr const char* invalidSource = R"(object InvalidNarrowing {
+  val byte: Byte = 1
+  val short: Short = 2
+}
+)";
+
+  const std::filesystem::path temporary = std::filesystem::temp_directory_path();
+  const std::filesystem::path binary = temporary / "cpp-scalanative-smoke-byte-short";
+  const std::filesystem::path output =
+      temporary / "cpp-scalanative-smoke-byte-short.out";
+  std::filesystem::remove(binary);
+  std::filesystem::remove(output);
+
+  scalanative::tools::build::BuildDriver driver;
+  scalanative::support::DiagnosticEngine diagnostics;
+  scalanative::tools::build::BuildOptions options;
+  options.action = scalanative::tools::build::BuildAction::BuildBinary;
+  options.optimize = true;
+  options.outputPath = binary;
+  const scalanative::tools::build::BuildResult result =
+      driver.buildSource("ByteShort.scala", source, options, diagnostics);
+
+  scalanative::support::DiagnosticEngine invalidDiagnostics;
+  const scalanative::tools::build::BuildResult invalid = driver.buildSource(
+      "InvalidNarrowing.scala", invalidSource, {}, invalidDiagnostics);
+
+  if (!result.ok) {
+    if (contains(result.diagnosticsText, "clang toolchain not found")) {
+      return 0;
+    }
+    return fail("Byte/Short native build failed: " + result.diagnosticsText);
+  }
+
+  const std::string command = binary.string() + " > " + output.string();
+  const int status = std::system(command.c_str());
+  const std::string text = readTextFile(output);
+  std::filesystem::remove(binary);
+  std::filesystem::remove(output);
+
+  return expect(
+      status == 0 &&
+          text == "-126|-25536|-126|-25536\n"
+                  "-25662|126|-51072\n"
+                  "3|-126|3|-25536|-25536\n"
+                  "true|true|-126|-25536\n"
+                  "-126|-25536|-126|-25536\n"
+                  "1|2\n" &&
+          !invalid.ok &&
+          contains(invalid.diagnosticsText,
+                   "initializer type Int does not conform to declared type Byte") &&
+          contains(invalid.diagnosticsText,
+                   "initializer type Int does not conform to declared type Short") &&
+          contains(result.nirText,
+                   "declare @scala.scalanative.runtime.intToByte : (Int)Byte") &&
+          contains(result.nirText,
+                   "declare @scala.scalanative.runtime.intToShort : (Int)Short") &&
+          contains(result.nirText,
+                   "declare @scala.scalanative.runtime.byteArrayApply : "
+                   "(Array [ Byte ],Int)Byte") &&
+          contains(result.nirText,
+                   "declare @scala.scalanative.runtime.shortArrayApply : "
+                   "(Array [ Short ],Int)Short") &&
+          contains(result.llvmIr, "Runtime ABI = 'cpp-scalanative-runtime-52'") &&
+          contains(result.llvmIr, "@__scalanative_boxed_Byte =") &&
+          contains(result.llvmIr, "@__scalanative_boxed_Short =") &&
+          contains(result.llvmIr, "define internal i8 @__scalanative_array_byte_at") &&
+          contains(result.llvmIr,
+                   "define internal i16 @__scalanative_array_short_at") &&
+          contains(result.llvmIr, "trunc i32 %") &&
+          contains(result.llvmIr, "sext i8 %") && contains(result.llvmIr, "sext i16 %"),
+      "Byte/Short typing, conversion, storage, boxing, optimization, or native "
+      "runtime behavior diverged (status=" +
+          std::to_string(status) + ", output='" + text + "', diagnostics='" +
+          invalid.diagnosticsText + "', nir-conversions=" +
+          std::to_string(
+              contains(result.nirText,
+                       "declare @scala.scalanative.runtime.intToByte : (Int)Byte")) +
+          ", nir-byte-array=" +
+          std::to_string(contains(result.nirText,
+                                  "declare @scala.scalanative.runtime.byteArrayApply : "
+                                  "(Array [ Byte ],Int)Byte")) +
+          ", llvm-byte-box=" +
+          std::to_string(contains(result.llvmIr, "@__scalanative_boxed_Byte =")) +
+          ", llvm-byte-array=" +
+          std::to_string(contains(result.llvmIr,
+                                  "define internal i8 @__scalanative_array_byte_at")) +
+          ", llvm-trunc=" + std::to_string(contains(result.llvmIr, "trunc i32 %")) +
+          ")");
 }
 
 int smokeOptimizedNativeEquivalence() {
@@ -9832,6 +10505,9 @@ int main() {
     return code;
   }
   if (int code = smokeBuildReportJson()) {
+    return code;
+  }
+  if (int code = smokeByteAndShortNativeRuntime()) {
     return code;
   }
   if (int code = smokeBuildDriverEmitNir()) {

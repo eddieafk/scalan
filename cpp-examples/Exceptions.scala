@@ -206,6 +206,22 @@ object ExceptionExamples {
         "error branch: " + error.getMessage + "|" + error.getCause
     }
 
+  def preserveMutableLocals(): String = {
+    var attempts = 0
+    var status = "before"
+    var retained: AppFailure = null
+    try {
+      attempts = 3
+      status = "after"
+      retained = new AppFailure("retained")
+      throw new AppFailure("trigger")
+    } catch {
+      case caught: AppFailure =>
+        attempts + "|" + status + "|" + retained.getMessage + "|" +
+          caught.getMessage
+    }
+  }
+
   def printHandledDiagnostic(): String = {
     val failure = new AppFailure("handled diagnostic")
     failure.initCause(new Exception("diagnostic cause"))
@@ -259,6 +275,7 @@ object Main {
     println(ExceptionExamples.catchNotImplemented())
     println(ExceptionExamples.catchRequirement())
     println(ExceptionExamples.catchErrorBranch())
+    println(ExceptionExamples.preserveMutableLocals())
     println(ExceptionExamples.printHandledDiagnostic())
 
     println("throwing uncaught failure")
