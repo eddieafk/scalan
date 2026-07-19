@@ -119,6 +119,64 @@ bool isZoneScopedCall(const AstExpression& expression) {
          callee.children.front().text == support::StdNames::Zone;
 }
 
+bool isZoneAllocBytesCall(const AstExpression& expression) {
+  if (expression.kind != AstExpressionKind::Call || expression.children.empty()) {
+    return false;
+  }
+  const AstExpression& callee = expression.children.front();
+  return callee.kind == AstExpressionKind::Select && callee.children.size() == 1 &&
+         callee.text == support::StdNames::ZoneAllocBytes &&
+         callee.children.front().kind == AstExpressionKind::Identifier &&
+         callee.children.front().text == support::StdNames::Zone;
+}
+
+std::string_view nativeBytesOperation(const AstExpression& expression) {
+  if (expression.kind != AstExpressionKind::Call || expression.children.empty()) {
+    return {};
+  }
+  const AstExpression& callee = expression.children.front();
+  if (callee.kind != AstExpressionKind::Select || callee.children.size() != 1 ||
+      callee.children.front().kind != AstExpressionKind::Identifier ||
+      callee.children.front().text != support::StdNames::NativeBytes) {
+    return {};
+  }
+  if (callee.text == support::StdNames::NativeBytesGetShortBe ||
+      callee.text == support::StdNames::NativeBytesGetShortLe ||
+      callee.text == support::StdNames::NativeBytesPutShortBe ||
+      callee.text == support::StdNames::NativeBytesPutShortLe) {
+    return callee.text;
+  }
+  return {};
+}
+
+bool isByteBufferWrapCall(const AstExpression& expression) {
+  if (expression.kind != AstExpressionKind::Call || expression.children.empty()) {
+    return false;
+  }
+  const AstExpression& callee = expression.children.front();
+  return callee.kind == AstExpressionKind::Select && callee.children.size() == 1 &&
+         callee.text == support::StdNames::ByteBufferWrap &&
+         callee.children.front().kind == AstExpressionKind::Identifier &&
+         callee.children.front().text == support::StdNames::ByteBuffer;
+}
+
+bool isByteBufferOperationName(std::string_view operation) {
+  return operation == support::StdNames::ByteBufferCapacity ||
+         operation == support::StdNames::ByteBufferPosition ||
+         operation == support::StdNames::ByteBufferLimit ||
+         operation == support::StdNames::ByteBufferRemaining ||
+         operation == support::StdNames::ByteBufferHasRemaining ||
+         operation == support::StdNames::ByteBufferClear ||
+         operation == support::StdNames::ByteBufferFlip ||
+         operation == support::StdNames::ByteBufferRewind;
+}
+
+bool isByteBufferType(const TypeInfo& type) {
+  const std::string& name = type.runtimeName.empty() ? type.name : type.runtimeName;
+  return type.kind == SimpleTypeKind::Object &&
+         name == support::StdNames::JavaNioByteBuffer;
+}
+
 bool canEscapeZone(SimpleTypeKind kind) {
   return kind != SimpleTypeKind::Unknown && kind != SimpleTypeKind::Unit &&
          kind != SimpleTypeKind::Boolean && kind != SimpleTypeKind::Byte &&
@@ -718,6 +776,7 @@ TypedModule Typechecker::typecheck(const AstModule& module) {
   receiverMethodCallSites_.clear();
   implicitReceiverMethodNames_.clear();
   zoneBodiesToAnalyze_.clear();
+  zoneInferenceDepth_ = 0;
   TypedModule typed;
   typed.packageName = module.packageName;
   Scope scope;
@@ -2026,7 +2085,9 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
       if (body.kind != AstExpressionKind::Block) {
         diagnostics_.error(body.span, "Zone.scoped requires a block argument");
       }
+      ++zoneInferenceDepth_;
       TypeInfo result = inferExpressionType(body, scope);
+      --zoneInferenceDepth_;
       zoneBodiesToAnalyze_.push_back(body);
       if (canEscapeZone(result.kind)) {
         diagnostics_.error(
@@ -2035,6 +2096,133 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
             "cannot escape the zone");
       }
       return result;
+    }
+    if (isZoneAllocBytesCall(expression)) {
+      if (zoneInferenceDepth_ == 0) {
+        diagnostics_.error(expression.span,
+                           "Zone.allocBytes is only valid inside a Zone.scoped body");
+      }
+      if (expression.children.size() != 2) {
+        diagnostics_.error(expression.span,
+                           "Zone.allocBytes requires exactly one Int length");
+        for (std::size_t i = 1; i < expression.children.size(); ++i) {
+          (void)inferExpressionType(expression.children[i], scope);
+        }
+        return TypeInfo{SimpleTypeKind::Object, "Array [ Byte ]"};
+      }
+      const TypeInfo length = inferExpressionType(expression.children[1], scope);
+      if (length.kind != SimpleTypeKind::Int &&
+          length.kind != SimpleTypeKind::Unknown) {
+        diagnostics_.error(expression.children[1].span,
+                           "Zone.allocBytes length must have type Int");
+      }
+      return TypeInfo{SimpleTypeKind::Object, "Array [ Byte ]"};
+    }
+    if (isByteBufferWrapCall(expression)) {
+      if (expression.children.size() != 2) {
+        diagnostics_.error(expression.span,
+                           "ByteBuffer.wrap requires exactly one Array[Byte]");
+        for (std::size_t i = 1; i < expression.children.size(); ++i) {
+          (void)inferExpressionType(expression.children[i], scope);
+        }
+        return TypeInfo{SimpleTypeKind::Object,
+                        std::string(support::StdNames::JavaNioByteBuffer)};
+      }
+      const TypeInfo bytes = inferExpressionType(expression.children[1], scope);
+      if (bytes.kind != SimpleTypeKind::Unknown &&
+          (bytes.kind != SimpleTypeKind::Object ||
+           arrayElementTypeName(bytes.name) != "Byte")) {
+        diagnostics_.error(expression.children[1].span,
+                           "ByteBuffer.wrap storage must have type Array[Byte]");
+      }
+      return TypeInfo{SimpleTypeKind::Object,
+                      std::string(support::StdNames::JavaNioByteBuffer)};
+    }
+    {
+      const AstExpression& selected = expression.children.front();
+      if (selected.kind == AstExpressionKind::Select && selected.children.size() == 1 &&
+          isByteBufferOperationName(selected.text)) {
+        const TypeInfo receiver = inferExpressionType(selected.children.front(), scope);
+        if (isByteBufferType(receiver)) {
+          const std::size_t argumentCount = expression.children.size() - 1;
+          const bool positionOrLimit =
+              selected.text == support::StdNames::ByteBufferPosition ||
+              selected.text == support::StdNames::ByteBufferLimit;
+          if ((positionOrLimit && argumentCount > 1) ||
+              (!positionOrLimit && argumentCount != 0)) {
+            diagnostics_.error(
+                expression.span,
+                selected.text + (positionOrLimit ? " accepts zero or one Int argument"
+                                                 : " does not accept arguments"));
+            for (std::size_t i = 1; i < expression.children.size(); ++i) {
+              (void)inferExpressionType(expression.children[i], scope);
+            }
+          } else if (argumentCount == 1) {
+            const TypeInfo value = inferExpressionType(expression.children[1], scope);
+            if (value.kind != SimpleTypeKind::Int &&
+                value.kind != SimpleTypeKind::Unknown) {
+              diagnostics_.error(expression.children[1].span,
+                                 selected.text + " value must have type Int");
+            }
+          }
+
+          const bool returnsInt =
+              selected.text == support::StdNames::ByteBufferCapacity ||
+              selected.text == support::StdNames::ByteBufferRemaining ||
+              ((selected.text == support::StdNames::ByteBufferPosition ||
+                selected.text == support::StdNames::ByteBufferLimit) &&
+               argumentCount == 0);
+          if (returnsInt) {
+            return TypeInfo{SimpleTypeKind::Int, "Int"};
+          }
+          if (selected.text == support::StdNames::ByteBufferHasRemaining) {
+            return TypeInfo{SimpleTypeKind::Boolean, "Boolean"};
+          }
+          return TypeInfo{SimpleTypeKind::Object,
+                          std::string(support::StdNames::JavaNioByteBuffer)};
+        }
+      }
+    }
+    if (const std::string_view operation = nativeBytesOperation(expression);
+        !operation.empty()) {
+      const bool isGet = operation == support::StdNames::NativeBytesGetShortBe ||
+                         operation == support::StdNames::NativeBytesGetShortLe;
+      const std::size_t expectedChildren = isGet ? 3 : 4;
+      if (expression.children.size() != expectedChildren) {
+        diagnostics_.error(
+            expression.span,
+            std::string(operation) +
+                (isGet ? " requires an Array[Byte] and Int index"
+                       : " requires an Array[Byte], Int index, and Short value"));
+        for (std::size_t i = 1; i < expression.children.size(); ++i) {
+          (void)inferExpressionType(expression.children[i], scope);
+        }
+        return TypeInfo{isGet ? SimpleTypeKind::Short : SimpleTypeKind::Unit,
+                        isGet ? "Short" : "Unit"};
+      }
+      const TypeInfo bytes = inferExpressionType(expression.children[1], scope);
+      const TypeInfo index = inferExpressionType(expression.children[2], scope);
+      if (bytes.kind != SimpleTypeKind::Unknown &&
+          (bytes.kind != SimpleTypeKind::Object ||
+           arrayElementTypeName(bytes.name) != "Byte")) {
+        diagnostics_.error(expression.children[1].span,
+                           std::string(operation) +
+                               " storage must have type Array[Byte]");
+      }
+      if (index.kind != SimpleTypeKind::Int && index.kind != SimpleTypeKind::Unknown) {
+        diagnostics_.error(expression.children[2].span,
+                           std::string(operation) + " index must have type Int");
+      }
+      if (!isGet) {
+        const TypeInfo stored = inferExpressionType(expression.children[3], scope);
+        if (stored.kind != SimpleTypeKind::Short &&
+            stored.kind != SimpleTypeKind::Unknown) {
+          diagnostics_.error(expression.children[3].span,
+                             std::string(operation) + " value must have type Short");
+        }
+      }
+      return TypeInfo{isGet ? SimpleTypeKind::Short : SimpleTypeKind::Unit,
+                      isGet ? "Short" : "Unit"};
     }
     const AstExpression& callee = expression.children.front();
     const bool inferredArrayLiteral =
@@ -3416,6 +3604,71 @@ bool Typechecker::analyzeZoneExpression(
     if (isZoneScopedCall(expression)) {
       return false;
     }
+    if (isZoneAllocBytesCall(expression)) {
+      for (std::size_t i = 1; i < expression.children.size(); ++i) {
+        if (analyzeZoneExpression(expression.children[i], arenaReferences,
+                                  zoneLocals)) {
+          diagnostics_.error(expression.children[i].span,
+                             "Zone.allocBytes length cannot reference zone-owned "
+                             "storage");
+        }
+      }
+      return true;
+    }
+    if (isByteBufferWrapCall(expression)) {
+      for (std::size_t i = 1; i < expression.children.size(); ++i) {
+        (void)analyzeZoneExpression(expression.children[i], arenaReferences,
+                                    zoneLocals);
+      }
+      return true;
+    }
+    const AstExpression& selected = expression.children.front();
+    if (selected.kind == AstExpressionKind::Select && selected.children.size() == 1 &&
+        isByteBufferOperationName(selected.text)) {
+      bool byteBufferReceiver = false;
+      const AstExpression& receiver = selected.children.front();
+      for (auto info = expressionTypes_.rbegin(); info != expressionTypes_.rend();
+           ++info) {
+        if (info->span.source == receiver.span.source &&
+            info->span.start == receiver.span.start &&
+            info->span.length == receiver.span.length) {
+          byteBufferReceiver = isByteBufferType(info->type);
+          break;
+        }
+      }
+      if (byteBufferReceiver) {
+        const bool receiverIsArenaReference =
+            analyzeZoneExpression(receiver, arenaReferences, zoneLocals);
+        for (std::size_t i = 1; i < expression.children.size(); ++i) {
+          if (analyzeZoneExpression(expression.children[i], arenaReferences,
+                                    zoneLocals)) {
+            diagnostics_.error(
+                expression.children[i].span,
+                "ByteBuffer state arguments cannot reference zone-owned storage");
+          }
+        }
+        const bool returnsBuffer =
+            selected.text == support::StdNames::ByteBufferClear ||
+            selected.text == support::StdNames::ByteBufferFlip ||
+            selected.text == support::StdNames::ByteBufferRewind ||
+            ((selected.text == support::StdNames::ByteBufferPosition ||
+              selected.text == support::StdNames::ByteBufferLimit) &&
+             expression.children.size() == 2);
+        return returnsBuffer && receiverIsArenaReference;
+      }
+    }
+    if (!nativeBytesOperation(expression).empty()) {
+      for (std::size_t i = 1; i < expression.children.size(); ++i) {
+        const bool argumentIsArenaReference =
+            analyzeZoneExpression(expression.children[i], arenaReferences, zoneLocals);
+        if (argumentIsArenaReference && i != 1) {
+          diagnostics_.error(
+              expression.children[i].span,
+              "NativeBytes value arguments cannot reference zone-owned storage");
+        }
+      }
+      return false;
+    }
     const AstExpression& callee = expression.children.front();
     if (callee.kind == AstExpressionKind::New) {
       for (std::size_t i = 1; i < expression.children.size(); ++i) {
@@ -4412,6 +4665,11 @@ TypeInfo Typechecker::typeFromDeclaredName(const std::string& name, const Scope*
   if (normalized == "String" || normalized == "java.lang.String" ||
       normalized == "scala.Predef.String") {
     return TypeInfo{SimpleTypeKind::String, "String"};
+  }
+  if (normalized == support::StdNames::ByteBuffer ||
+      normalized == support::StdNames::JavaNioByteBuffer) {
+    return TypeInfo{SimpleTypeKind::Object,
+                    std::string(support::StdNames::JavaNioByteBuffer)};
   }
   if (normalized == "Char") {
     return TypeInfo{SimpleTypeKind::Char, "Char"};

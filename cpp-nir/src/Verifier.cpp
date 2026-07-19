@@ -98,6 +98,32 @@ bool isSizeOfPrimitiveType(const std::string& type) {
          type == "Char";
 }
 
+bool isZoneByteArrayAccess(std::string_view target) {
+  return target == support::StdNames::RuntimeByteArrayLength ||
+         target == support::StdNames::RuntimeByteArrayApply ||
+         target == support::StdNames::RuntimeByteArrayUpdate ||
+         target == support::StdNames::RuntimeNativeBytesGetShortBe ||
+         target == support::StdNames::RuntimeNativeBytesGetShortLe ||
+         target == support::StdNames::RuntimeNativeBytesPutShortBe ||
+         target == support::StdNames::RuntimeNativeBytesPutShortLe;
+}
+
+bool isByteBufferQuery(std::string_view target) {
+  return target == support::StdNames::RuntimeByteBufferCapacity ||
+         target == support::StdNames::RuntimeByteBufferPosition ||
+         target == support::StdNames::RuntimeByteBufferLimit ||
+         target == support::StdNames::RuntimeByteBufferRemaining ||
+         target == support::StdNames::RuntimeByteBufferHasRemaining;
+}
+
+bool isByteBufferMutation(std::string_view target) {
+  return target == support::StdNames::RuntimeByteBufferSetPosition ||
+         target == support::StdNames::RuntimeByteBufferSetLimit ||
+         target == support::StdNames::RuntimeByteBufferClear ||
+         target == support::StdNames::RuntimeByteBufferFlip ||
+         target == support::StdNames::RuntimeByteBufferRewind;
+}
+
 std::string compactTypeName(std::string_view typeName) {
   std::string compact;
   compact.reserve(typeName.size());
@@ -1468,6 +1494,47 @@ private:
       if (value.operands.empty()) {
         return false;
       }
+      const std::string_view target =
+          value.operands.front().kind == ValueKind::Local
+              ? std::string_view(value.operands.front().text)
+              : std::string_view{};
+      if (target == support::StdNames::RuntimeZoneAllocBytes) {
+        for (std::size_t i = 1; i < value.operands.size(); ++i) {
+          (void)verifyZoneEscapeValue(value.operands[i], state);
+        }
+        return true;
+      }
+      if (target == support::StdNames::RuntimeByteBufferWrap) {
+        for (std::size_t i = 1; i < value.operands.size(); ++i) {
+          (void)verifyZoneEscapeValue(value.operands[i], state);
+        }
+        return true;
+      }
+      if (isByteBufferQuery(target) || isByteBufferMutation(target)) {
+        bool receiver = false;
+        for (std::size_t i = 1; i < value.operands.size(); ++i) {
+          const bool argument = verifyZoneEscapeValue(value.operands[i], state);
+          if (i == 1) {
+            receiver = argument;
+          } else if (argument) {
+            addError("NIR function definition '" + definition_.name +
+                     "' passes a scoped-zone reference to a ByteBuffer state "
+                     "argument");
+          }
+        }
+        return isByteBufferMutation(target) && receiver;
+      }
+      if (isZoneByteArrayAccess(target)) {
+        for (std::size_t i = 1; i < value.operands.size(); ++i) {
+          const bool argument = verifyZoneEscapeValue(value.operands[i], state);
+          if (argument && i != 1) {
+            addError("NIR function definition '" + definition_.name +
+                     "' passes a scoped-zone reference to a byte-array value "
+                     "argument");
+          }
+        }
+        return false;
+      }
       const bool callee = verifyZoneEscapeValue(value.operands.front(), state);
       for (std::size_t i = 1; i < value.operands.size(); ++i) {
         if (verifyZoneEscapeValue(value.operands[i], state)) {
@@ -1736,7 +1803,9 @@ private:
                  "' has malformed zone-scoped value");
         return ValueInfo{false, "Unknown", {}};
       }
+      ++zoneDepth_;
       ValueInfo result = verifyValue(value.operands.front());
+      --zoneDepth_;
       ZoneEscapeState escapeState;
       escapeState.localTypes = localTypes_;
       (void)verifyZoneEscapeValue(value.operands.front(), escapeState);
@@ -1908,6 +1977,11 @@ private:
     ValueInfo callee = verifyValue(value.operands.front());
     if (!callee.resolved || callee.globalName.empty()) {
       return ValueInfo{callee.resolved, "Unknown", {}};
+    }
+    if (callee.globalName == support::StdNames::RuntimeZoneAllocBytes &&
+        zoneDepth_ == 0) {
+      addError("NIR function definition '" + definition_.name +
+               "' calls zoneAllocBytes outside a zone-scoped value");
     }
 
     auto calleeDefinition = globals_.find(callee.globalName);
@@ -2400,6 +2474,7 @@ private:
   std::unordered_set<std::string> mutableLocals_;
   std::unordered_map<std::string, std::string> localTypes_;
   const std::unordered_set<std::string>* escapingReceiverMethods_ = nullptr;
+  std::size_t zoneDepth_ = 0;
 };
 
 } // namespace

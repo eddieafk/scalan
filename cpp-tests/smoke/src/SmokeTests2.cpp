@@ -3049,7 +3049,7 @@ object Main {
                        "declare @scala.scalanative.runtime.referenceArrayUpdate."
                        "java.lang.StackTraceElement") &&
               contains(result.nirText, "throw %failure") &&
-              contains(result.llvmIr, "Runtime ABI = 'cpp-scalanative-runtime-52'") &&
+              contains(result.llvmIr, "Runtime ABI = 'cpp-scalanative-runtime-55'") &&
               contains(result.llvmIr, "@__type_java_lang_ArrayStoreException =") &&
               contains(result.llvmIr,
                        "define internal void @__scalanative_throw_array_store() "
@@ -3155,7 +3155,7 @@ object Main {
               countOccurrences(result.llvmIr,
                                "call void "
                                "@__scalanative_throw_array_index_out_of_bounds()") ==
-                  11 &&
+                  12 &&
               contains(result.llvmIr, "; Scala Native runtime resource: lifecycle") &&
               contains(result.llvmIr, "; Scala Native runtime resource: exceptions") &&
               contains(result.llvmIr,
@@ -4739,7 +4739,7 @@ object Invalid {
       driver.buildSource("TryCatchStage.scala", source, llvmOptions, llvmDiagnostics);
   if (int code = expect(
           llvm.ok &&
-              contains(llvm.llvmIr, "Runtime ABI = 'cpp-scalanative-runtime-52'") &&
+              contains(llvm.llvmIr, "Runtime ABI = 'cpp-scalanative-runtime-55'") &&
               contains(llvm.llvmIr, "%scalanative.exception_handler = type { ptr, ptr, "
                                     "ptr, ptr, ptr }") &&
               contains(llvm.llvmIr, "declare i32 @_setjmp(ptr) returns_twice") &&
@@ -4894,7 +4894,7 @@ object Main {
           contains(result.nirText,
                    "declare @scala.scalanative.runtime.shortArrayApply : "
                    "(Array [ Short ],Int)Short") &&
-          contains(result.llvmIr, "Runtime ABI = 'cpp-scalanative-runtime-52'") &&
+          contains(result.llvmIr, "Runtime ABI = 'cpp-scalanative-runtime-55'") &&
           contains(result.llvmIr, "@__scalanative_boxed_Byte =") &&
           contains(result.llvmIr, "@__scalanative_boxed_Short =") &&
           contains(result.llvmIr, "define internal i8 @__scalanative_array_byte_at") &&
@@ -4920,6 +4920,451 @@ object Main {
                                   "define internal i8 @__scalanative_array_byte_at")) +
           ", llvm-trunc=" + std::to_string(contains(result.llvmIr, "trunc i32 %")) +
           ")");
+}
+
+int smokeZoneAllocatedBytesNativeRuntime() {
+  constexpr const char* source = R"(package demo.zonebytes
+
+object Main {
+  def checksum(): Int =
+    Zone.scoped({
+      val bytes = Zone.allocBytes(6)
+      var index = 0
+      var total = 0
+      while (index < bytes.length) {
+        bytes(index) = (index * 17 - 20).toByte
+        total = total + bytes(index).toInt
+        index = index + 1
+      }
+      total
+    })
+
+  def zeroedFacts(): Int =
+    Zone.scoped({
+      val bytes = Zone.allocBytes(4)
+      bytes.length * 100 + bytes(0).toInt + bytes(3).toInt
+    })
+
+  def rejectNegativeLength(): String =
+    try {
+      Zone.scoped({
+        Zone.allocBytes(0 - 1).length
+      })
+      "negative length was accepted"
+    } catch {
+      case failure: NegativeArraySizeException =>
+        "negative length: " + failure.getMessage
+    }
+
+  def bigEndianRoundTrip(): Int =
+    Zone.scoped({
+      val bytes = Zone.allocBytes(2)
+      NativeBytes.putShortBE(bytes, 0, 4660.toShort)
+      NativeBytes.getShortBE(bytes, 0).toInt
+    })
+
+  def littleEndianRoundTrip(): Int =
+    Zone.scoped({
+      val bytes = Zone.allocBytes(2)
+      NativeBytes.putShortLE(bytes, 0, (0 - 292).toShort)
+      NativeBytes.getShortLE(bytes, 0).toInt
+    })
+
+  def crossEndianRead(): Int =
+    Zone.scoped({
+      val bytes = Zone.allocBytes(2)
+      NativeBytes.putShortBE(bytes, 0, 4660.toShort)
+      NativeBytes.getShortLE(bytes, 0).toInt
+    })
+
+  def rejectPartialWrite(): Int =
+    Zone.scoped({
+      val bytes = Zone.allocBytes(2)
+      bytes(0) = 7.toByte
+      bytes(1) = 9.toByte
+      try {
+        NativeBytes.putShortBE(bytes, 1, 4660.toShort)
+        0 - 1
+      } catch {
+        case failure: ArrayIndexOutOfBoundsException =>
+          bytes(0).toInt * 100 + bytes(1).toInt
+      }
+    })
+
+  def ordinaryArrayRoundTrip(): Int = {
+    val bytes = Array[Byte](0.toByte, 0.toByte)
+    NativeBytes.putShortLE(bytes, 0, 4660.toShort)
+    NativeBytes.getShortLE(bytes, 0).toInt
+  }
+
+  def main = {
+    println(checksum())
+    println(zeroedFacts())
+    println(rejectNegativeLength())
+    println(bigEndianRoundTrip())
+    println(littleEndianRoundTrip())
+    println(crossEndianRead())
+    println(rejectPartialWrite())
+    println(ordinaryArrayRoundTrip())
+  }
+}
+)";
+  constexpr const char* outsideZone = R"(object OutsideZone {
+  val bytes = Zone.allocBytes(4)
+}
+)";
+  constexpr const char* escapingZone = R"(object EscapingZone {
+  def run(): Int = {
+    var escaped: Array[Byte] = null
+    Zone.scoped({
+      escaped = Zone.allocBytes(4)
+      0
+    })
+  }
+}
+)";
+  constexpr const char* invalidNativeBytes = R"(object InvalidNativeBytes {
+  val ints = Array[Int](1, 2)
+  val bytes = Array[Byte](1.toByte, 2.toByte)
+  val wrongStorage = NativeBytes.getShortBE(ints, 0)
+  NativeBytes.putShortLE(bytes, 0, 1)
+}
+)";
+
+  const std::filesystem::path temporary = std::filesystem::temp_directory_path();
+  const std::filesystem::path binary = temporary / "cpp-scalanative-smoke-zone-bytes";
+  const std::filesystem::path output =
+      temporary / "cpp-scalanative-smoke-zone-bytes.out";
+  std::error_code ignored;
+  std::filesystem::remove(binary, ignored);
+  std::filesystem::remove(output, ignored);
+
+  scalanative::tools::build::BuildDriver driver;
+  scalanative::support::DiagnosticEngine diagnostics;
+  scalanative::tools::build::BuildOptions options;
+  options.action = scalanative::tools::build::BuildAction::BuildBinary;
+  options.optimize = true;
+  options.outputPath = binary;
+  const scalanative::tools::build::BuildResult result =
+      driver.buildSource("ZoneBytes.scala", source, options, diagnostics);
+
+  scalanative::support::DiagnosticEngine outsideDiagnostics;
+  const scalanative::tools::build::BuildResult outside =
+      driver.buildSource("OutsideZone.scala", outsideZone, {}, outsideDiagnostics);
+  scalanative::support::DiagnosticEngine escapeDiagnostics;
+  const scalanative::tools::build::BuildResult escape =
+      driver.buildSource("EscapingZone.scala", escapingZone, {}, escapeDiagnostics);
+  scalanative::support::DiagnosticEngine invalidNativeDiagnostics;
+  const scalanative::tools::build::BuildResult invalidNative = driver.buildSource(
+      "InvalidNativeBytes.scala", invalidNativeBytes, {}, invalidNativeDiagnostics);
+
+  const scalanative::support::SourceSpan noSpan =
+      scalanative::support::SourceSpan::none();
+  scalanative::nir::FunctionBodyBuilder outsideNirBody;
+  (void)outsideNirBody.addReturn(
+      "Array [ Byte ]",
+      scalanative::nir::callValue(
+          scalanative::nir::localValue(
+              std::string(scalanative::support::StdNames::RuntimeZoneAllocBytes),
+              noSpan),
+          {scalanative::nir::literalValue("4", "Int", noSpan)}, noSpan),
+      noSpan);
+  scalanative::nir::Module outsideNir;
+  outsideNir.name = "demo.OutsideZoneBytesNir";
+  outsideNir.definitions.push_back(
+      {scalanative::nir::DefinitionKind::FunctionDecl,
+       std::string(scalanative::support::StdNames::RuntimeZoneAllocBytes),
+       "(Int)Array [ Byte ]",
+       {},
+       noSpan});
+  outsideNir.definitions.push_back({scalanative::nir::DefinitionKind::FunctionDef,
+                                    "demo.OutsideZoneBytesNir.run", "()Array [ Byte ]",
+                                    std::move(outsideNirBody).build(), noSpan});
+  const scalanative::nir::VerifyResult outsideNirResult =
+      scalanative::nir::Verifier().verify(outsideNir);
+  const bool nirRejectedOutsideAllocation =
+      !outsideNirResult.ok &&
+      std::any_of(outsideNirResult.errors.begin(), outsideNirResult.errors.end(),
+                  [](const std::string& error) {
+                    return contains(error,
+                                    "calls zoneAllocBytes outside a zone-scoped value");
+                  });
+
+  if (!result.ok) {
+    if (contains(result.diagnosticsText, "clang toolchain not found")) {
+      return 0;
+    }
+    return fail("zone-owned Byte storage build failed: " + result.diagnosticsText);
+  }
+
+  const std::string command = binary.string() + " > " + output.string();
+  const int status = std::system(command.c_str());
+  const std::string text = readTextFile(output);
+  std::filesystem::remove(binary, ignored);
+  std::filesystem::remove(output, ignored);
+
+  return expect(
+      status == 0 &&
+          text == "135\n"
+                  "400\n"
+                  "negative length: Array size cannot be negative\n"
+                  "4660\n"
+                  "-292\n"
+                  "13330\n"
+                  "709\n"
+                  "4660\n" &&
+          !outside.ok &&
+          contains(outside.diagnosticsText,
+                   "Zone.allocBytes is only valid inside a Zone.scoped body") &&
+          !escape.ok &&
+          contains(escape.diagnosticsText,
+                   "Zone.scoped reference cannot be assigned to an outer variable") &&
+          !invalidNative.ok &&
+          contains(invalidNative.diagnosticsText,
+                   "getShortBE storage must have type Array[Byte]") &&
+          contains(invalidNative.diagnosticsText,
+                   "putShortLE value must have type Short") &&
+          nirRejectedOutsideAllocation &&
+          contains(result.nirText,
+                   "declare @scala.scalanative.runtime.zoneAllocBytes : "
+                   "(Int)Array [ Byte ]") &&
+          contains(result.nirText,
+                   "call %scala.scalanative.runtime.zoneAllocBytes(6)") &&
+          contains(result.nirText,
+                   "declare @scala.scalanative.runtime.nativeBytesGetShortBE : "
+                   "(Array [ Byte ],Int)Short") &&
+          contains(result.nirText,
+                   "declare @scala.scalanative.runtime.nativeBytesPutShortLE : "
+                   "(Array [ Byte ],Int,Short)Unit") &&
+          contains(result.llvmIr, "Runtime ABI = 'cpp-scalanative-runtime-55'") &&
+          contains(result.llvmIr, "load ptr, ptr @__scalanative_current_zone") &&
+          contains(result.llvmIr, "call ptr @__scalanative_arena_alloc(ptr %") &&
+          contains(result.llvmIr,
+                   "call void @__scalanative_throw_negative_array_size()") &&
+          contains(result.llvmIr, "define internal ptr "
+                                  "@__scalanative_native_bytes_short_slot") &&
+          contains(result.llvmIr, "define internal i16 "
+                                  "@__scalanative_native_bytes_get_short") &&
+          contains(result.llvmIr, "define internal void "
+                                  "@__scalanative_native_bytes_put_short") &&
+          contains(result.llvmIr, "%range_fits = icmp ule i64 %end, %length"),
+      "Zone.allocBytes typing, lifetime validation, arena lowering, or native "
+      "behavior diverged (status=" +
+          std::to_string(status) + ", output='" + text + "', outside='" +
+          outside.diagnosticsText + "', escape='" + escape.diagnosticsText + "')");
+}
+
+int smokeByteBufferStateNativeRuntime() {
+  constexpr const char* source = R"(package demo.bytebuffer
+
+object Main {
+  def initialState(): Int = {
+    val buffer = ByteBuffer.wrap(Array[Byte](0.toByte, 0.toByte, 0.toByte, 0.toByte,
+      0.toByte, 0.toByte, 0.toByte, 0.toByte))
+    buffer.capacity() * 10000 +
+      buffer.position() * 1000 +
+      buffer.limit() * 100 +
+      buffer.remaining() * 10 +
+      (if (buffer.hasRemaining()) 1 else 0)
+  }
+
+  def zoneTransitions(): Int =
+    Zone.scoped({
+      val buffer = ByteBuffer.wrap(Zone.allocBytes(8))
+      buffer.position(6)
+      buffer.flip()
+      buffer.position(2).limit(4)
+      buffer.capacity() * 10000 +
+        buffer.position() * 1000 +
+        buffer.limit() * 100 +
+        buffer.remaining() * 10 +
+        (if (buffer.hasRemaining()) 1 else 0)
+    })
+
+  def controlState(): Int = {
+    val buffer = ByteBuffer.wrap(Array[Byte](0.toByte, 0.toByte, 0.toByte, 0.toByte,
+      0.toByte, 0.toByte, 0.toByte, 0.toByte))
+    buffer.limit(6).position(5).rewind()
+    val rewindState = buffer.position() * 10 + buffer.limit()
+    buffer.clear()
+    rewindState * 10000 + buffer.position() * 100 + buffer.limit()
+  }
+
+  def clampedPosition(): Int = {
+    val buffer = ByteBuffer.wrap(Array[Byte](0.toByte, 0.toByte, 0.toByte, 0.toByte,
+      0.toByte, 0.toByte, 0.toByte, 0.toByte))
+    buffer.position(7)
+    buffer.limit(3)
+    buffer.position() * 100 +
+      buffer.limit() * 10 +
+      buffer.remaining() +
+      (if (buffer.hasRemaining()) 1 else 0)
+  }
+
+  def emptyState(): Int = {
+    val buffer = ByteBuffer.wrap(Array[Byte]())
+    buffer.capacity() * 100 +
+      buffer.remaining() * 10 +
+      (if (buffer.hasRemaining()) 1 else 0)
+  }
+
+  def rejectPosition(): String =
+    try {
+      ByteBuffer.wrap(Array[Byte](0.toByte, 0.toByte)).position(3)
+      "position was accepted"
+    } catch {
+      case failure: IllegalArgumentException =>
+        "position: " + failure.getMessage
+    }
+
+  def rejectLimit(): String =
+    try {
+      ByteBuffer.wrap(Array[Byte](0.toByte, 0.toByte)).limit(3)
+      "limit was accepted"
+    } catch {
+      case failure: IllegalArgumentException =>
+        "limit: " + failure.getMessage
+    }
+
+  def rejectNullStorage(): String =
+    try {
+      val bytes: Array[Byte] = null
+      ByteBuffer.wrap(bytes)
+      "null storage was accepted"
+    } catch {
+      case failure: NullPointerException =>
+        "null storage: " + failure.getMessage
+    }
+
+  def rejectNullReceiver(): String =
+    try {
+      val buffer: ByteBuffer = null
+      buffer.remaining()
+      "null receiver was accepted"
+    } catch {
+      case failure: NullPointerException =>
+        "null receiver: " + failure.getMessage
+    }
+
+  def main = {
+    println(initialState())
+    println(zoneTransitions())
+    println(controlState())
+    println(clampedPosition())
+    println(emptyState())
+    println(rejectPosition())
+    println(rejectLimit())
+    println(rejectNullStorage())
+    println(rejectNullReceiver())
+  }
+}
+)";
+  constexpr const char* escapingBuffer = R"(object EscapingBuffer {
+  def run(): Int = {
+    var escaped: ByteBuffer = null
+    Zone.scoped({
+      escaped = ByteBuffer.wrap(Zone.allocBytes(4))
+      0
+    })
+  }
+}
+)";
+  constexpr const char* invalidBuffer = R"(object InvalidBuffer {
+  val wrongStorage = ByteBuffer.wrap(Array[Int](1, 2))
+  val buffer = ByteBuffer.wrap(Array[Byte](0.toByte, 0.toByte))
+  buffer.position(1.toShort)
+  buffer.clear(1)
+}
+)";
+
+  const std::filesystem::path temporary = std::filesystem::temp_directory_path();
+  const std::filesystem::path binary =
+      temporary / "cpp-scalanative-smoke-byte-buffer-state";
+  const std::filesystem::path output =
+      temporary / "cpp-scalanative-smoke-byte-buffer-state.out";
+  std::error_code ignored;
+  std::filesystem::remove(binary, ignored);
+  std::filesystem::remove(output, ignored);
+
+  scalanative::tools::build::BuildDriver driver;
+  scalanative::support::DiagnosticEngine diagnostics;
+  scalanative::tools::build::BuildOptions options;
+  options.action = scalanative::tools::build::BuildAction::BuildBinary;
+  options.optimize = true;
+  options.outputPath = binary;
+  const scalanative::tools::build::BuildResult result =
+      driver.buildSource("ByteBufferState.scala", source, options, diagnostics);
+
+  scalanative::support::DiagnosticEngine escapeDiagnostics;
+  const scalanative::tools::build::BuildResult escape =
+      driver.buildSource("EscapingBuffer.scala", escapingBuffer, {}, escapeDiagnostics);
+  scalanative::support::DiagnosticEngine invalidDiagnostics;
+  const scalanative::tools::build::BuildResult invalid =
+      driver.buildSource("InvalidBuffer.scala", invalidBuffer, {}, invalidDiagnostics);
+
+  if (!result.ok) {
+    if (contains(result.diagnosticsText, "clang toolchain not found")) {
+      return 0;
+    }
+    return fail("ByteBuffer state build failed: " + result.diagnosticsText);
+  }
+
+  const std::string command = binary.string() + " > " + output.string();
+  const int status = std::system(command.c_str());
+  const std::string text = readTextFile(output);
+  std::filesystem::remove(binary, ignored);
+  std::filesystem::remove(output, ignored);
+
+  return expect(
+      status == 0 &&
+          text == "80881\n"
+                  "82421\n"
+                  "60008\n"
+                  "330\n"
+                  "0\n"
+                  "position: ByteBuffer position is out of bounds\n"
+                  "limit: ByteBuffer limit is out of bounds\n"
+                  "null storage: Array cannot be null\n"
+                  "null receiver: Receiver cannot be null\n" &&
+          !escape.ok &&
+          contains(escape.diagnosticsText,
+                   "Zone.scoped reference cannot be assigned to an outer variable") &&
+          !invalid.ok &&
+          contains(invalid.diagnosticsText,
+                   "ByteBuffer.wrap storage must have type Array[Byte]") &&
+          contains(invalid.diagnosticsText, "position value must have type Int") &&
+          contains(invalid.diagnosticsText, "clear does not accept arguments") &&
+          contains(result.nirText,
+                   "declare @scala.scalanative.runtime.byteBufferWrap : "
+                   "(Array [ Byte ])java.nio.ByteBuffer") &&
+          contains(result.nirText,
+                   "declare @scala.scalanative.runtime.byteBufferSetPosition : "
+                   "(java.nio.ByteBuffer,Int)java.nio.ByteBuffer") &&
+          contains(result.nirText,
+                   "declare @scala.scalanative.runtime.byteBufferHasRemaining : "
+                   "(java.nio.ByteBuffer)Boolean") &&
+          contains(result.nirText, "call %scala.scalanative.runtime.byteBufferWrap(") &&
+          contains(result.nirText, "call %scala.scalanative.runtime.byteBufferFlip(") &&
+          contains(result.llvmIr, "Runtime ABI = 'cpp-scalanative-runtime-55'") &&
+          contains(result.llvmIr,
+                   "define internal ptr @__scalanative_byte_buffer_wrap") &&
+          contains(result.llvmIr,
+                   "call ptr @__scalanative_box_alloc(i64 32, ptr null)") &&
+          contains(result.llvmIr,
+                   "define internal ptr @__scalanative_byte_buffer_set_position") &&
+          contains(result.llvmIr,
+                   "define internal ptr @__scalanative_byte_buffer_set_limit") &&
+          contains(result.llvmIr,
+                   "define internal i32 @__scalanative_byte_buffer_remaining") &&
+          contains(result.llvmIr,
+                   "define internal i1 @__scalanative_byte_buffer_has_remaining") &&
+          contains(result.llvmIr,
+                   "call void @__scalanative_throw_byte_buffer_position()") &&
+          contains(result.llvmIr, "call void @__scalanative_throw_byte_buffer_limit()"),
+      "ByteBuffer typing, ownership, NIR lowering, state transitions, or native "
+      "behavior diverged (status=" +
+          std::to_string(status) + ", output='" + text + "', escape='" +
+          escape.diagnosticsText + "', invalid='" + invalid.diagnosticsText + "')");
 }
 
 int smokeOptimizedNativeEquivalence() {
@@ -10508,6 +10953,12 @@ int main() {
     return code;
   }
   if (int code = smokeByteAndShortNativeRuntime()) {
+    return code;
+  }
+  if (int code = smokeZoneAllocatedBytesNativeRuntime()) {
+    return code;
+  }
+  if (int code = smokeByteBufferStateNativeRuntime()) {
     return code;
   }
   if (int code = smokeBuildDriverEmitNir()) {

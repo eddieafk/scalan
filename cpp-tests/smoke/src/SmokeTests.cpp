@@ -3602,167 +3602,200 @@ object Main extends Labeled {
 }
 
 int smokeRuntimeTypeTestsMvp() {
-  if (int code =
-          expect(scalanative::support::StdNames::JavaLangObject == "java.lang.Object" &&
-                     scalanative::support::StdNames::JavaLangClassCastException ==
-                         "java.lang.ClassCastException" &&
-                     scalanative::support::StdNames::JavaLangArrayStoreException ==
-                         "java.lang.ArrayStoreException" &&
-                     scalanative::support::StdNames::Constructor == "$init" &&
-                     scalanative::support::StdNames::IsInstanceOf == "isInstanceOf" &&
-                     scalanative::support::StdNames::AsInstanceOf == "asInstanceOf" &&
-                     scalanative::support::StdNames::SizeOf == "sizeof" &&
-                     scalanative::support::StdNames::StringLength == "length" &&
-                     scalanative::support::StdNames::ToString == "toString" &&
-                     scalanative::support::StdNames::Equals == "equals" &&
-                     scalanative::support::StdNames::HashCode == "hashCode" &&
-                     scalanative::support::StdNames::RuntimePrintln ==
-                         "scala.scalanative.runtime.println" &&
-                     scalanative::support::StdNames::GcCollect == "gcCollect" &&
-                     scalanative::support::StdNames::GcLiveObjectCount ==
-                         "gcLiveObjectCount" &&
-                     scalanative::support::StdNames::GcCollectionCount ==
-                         "gcCollectionCount" &&
-                     scalanative::support::StdNames::GcSetCollectionThreshold ==
-                         "gcSetCollectionThreshold" &&
-                     scalanative::support::StdNames::Zone == "Zone" &&
-                     scalanative::support::StdNames::ZoneScoped == "scoped" &&
-                     scalanative::support::StdNames::ArrayEmpty == "empty" &&
-                     scalanative::support::StdNames::ArrayFill == "fill" &&
-                     scalanative::support::StdNames::ArrayRange == "range" &&
-                     scalanative::support::StdNames::RuntimeGcCollect ==
-                         "scala.scalanative.runtime.gcCollect" &&
-                     scalanative::support::StdNames::RuntimeStringLength ==
-                         "scala.scalanative.runtime.stringLength" &&
-                     scalanative::support::StdNames::RuntimeStringToString ==
-                         "scala.scalanative.runtime.stringToString" &&
-                     scalanative::support::StdNames::RuntimeStringEquals ==
-                         "scala.scalanative.runtime.stringEquals" &&
-                     scalanative::support::StdNames::RuntimeArrayLength ==
-                         "scala.scalanative.runtime.arrayLength" &&
-                     scalanative::support::StdNames::RuntimeArrayApply ==
-                         "scala.scalanative.runtime.arrayApply" &&
-                     scalanative::support::StdNames::RuntimeArrayUpdate ==
-                         "scala.scalanative.runtime.arrayUpdate" &&
-                     scalanative::support::StdNames::RuntimeIntArrayLength ==
-                         "scala.scalanative.runtime.intArrayLength" &&
-                     scalanative::support::StdNames::RuntimeIntArrayApply ==
-                         "scala.scalanative.runtime.intArrayApply" &&
-                     scalanative::support::StdNames::RuntimeIntArrayUpdate ==
-                         "scala.scalanative.runtime.intArrayUpdate" &&
-                     scalanative::support::StdNames::RuntimeByteArrayLength ==
-                         "scala.scalanative.runtime.byteArrayLength" &&
-                     scalanative::support::StdNames::RuntimeByteArrayApply ==
-                         "scala.scalanative.runtime.byteArrayApply" &&
-                     scalanative::support::StdNames::RuntimeByteArrayUpdate ==
-                         "scala.scalanative.runtime.byteArrayUpdate" &&
-                     scalanative::support::StdNames::RuntimeShortArrayLength ==
-                         "scala.scalanative.runtime.shortArrayLength" &&
-                     scalanative::support::StdNames::RuntimeShortArrayApply ==
-                         "scala.scalanative.runtime.shortArrayApply" &&
-                     scalanative::support::StdNames::RuntimeShortArrayUpdate ==
-                         "scala.scalanative.runtime.shortArrayUpdate" &&
-                     scalanative::support::StdNames::RuntimeBooleanArrayLength ==
-                         "scala.scalanative.runtime.booleanArrayLength" &&
-                     scalanative::support::StdNames::RuntimeBooleanArrayApply ==
-                         "scala.scalanative.runtime.booleanArrayApply" &&
-                     scalanative::support::StdNames::RuntimeBooleanArrayUpdate ==
-                         "scala.scalanative.runtime.booleanArrayUpdate" &&
-                     scalanative::support::StdNames::RuntimeLongArrayLength ==
-                         "scala.scalanative.runtime.longArrayLength" &&
-                     scalanative::support::StdNames::RuntimeLongArrayApply ==
-                         "scala.scalanative.runtime.longArrayApply" &&
-                     scalanative::support::StdNames::RuntimeLongArrayUpdate ==
-                         "scala.scalanative.runtime.longArrayUpdate" &&
-                     scalanative::support::StdNames::RuntimeDoubleArrayLength ==
-                         "scala.scalanative.runtime.doubleArrayLength" &&
-                     scalanative::support::StdNames::RuntimeDoubleArrayApply ==
-                         "scala.scalanative.runtime.doubleArrayApply" &&
-                     scalanative::support::StdNames::RuntimeDoubleArrayUpdate ==
-                         "scala.scalanative.runtime.doubleArrayUpdate" &&
-                     scalanative::support::StdNames::RuntimeFloatArrayLength ==
-                         "scala.scalanative.runtime.floatArrayLength" &&
-                     scalanative::support::StdNames::RuntimeFloatArrayApply ==
-                         "scala.scalanative.runtime.floatArrayApply" &&
-                     scalanative::support::StdNames::RuntimeFloatArrayUpdate ==
-                         "scala.scalanative.runtime.floatArrayUpdate" &&
-                     scalanative::support::StdNames::RuntimeCharArrayLength ==
-                         "scala.scalanative.runtime.charArrayLength" &&
-                     scalanative::support::StdNames::RuntimeCharArrayApply ==
-                         "scala.scalanative.runtime.charArrayApply" &&
-                     scalanative::support::StdNames::RuntimeCharArrayUpdate ==
-                         "scala.scalanative.runtime.charArrayUpdate" &&
-                     scalanative::support::StdNames::RuntimeReferenceArrayLength ==
-                         "scala.scalanative.runtime.referenceArrayLength" &&
-                     scalanative::support::StdNames::RuntimeReferenceArrayApply ==
-                         "scala.scalanative.runtime.referenceArrayApply" &&
-                     scalanative::support::StdNames::RuntimeReferenceArrayUpdate ==
-                         "scala.scalanative.runtime.referenceArrayUpdate" &&
-                     scalanative::support::StdNames::RuntimeReferenceArrayCopy ==
-                         "scala.scalanative.runtime.referenceArrayCopy" &&
-                     scalanative::support::StdNames::RuntimeArrayFill ==
-                         "scala.scalanative.runtime.arrayFill" &&
-                     scalanative::support::StdNames::RuntimeArrayRange ==
-                         "scala.scalanative.runtime.arrayRange" &&
-                     scalanative::support::StdNames::RuntimeBooleanToString ==
-                         "scala.scalanative.runtime.booleanToString" &&
-                     scalanative::support::StdNames::RuntimeByteToString ==
-                         "scala.scalanative.runtime.byteToString" &&
-                     scalanative::support::StdNames::RuntimeShortToString ==
-                         "scala.scalanative.runtime.shortToString" &&
-                     scalanative::support::StdNames::RuntimeIntToString ==
-                         "scala.scalanative.runtime.intToString" &&
-                     scalanative::support::StdNames::RuntimeLongToString ==
-                         "scala.scalanative.runtime.longToString" &&
-                     scalanative::support::StdNames::RuntimeFloatToString ==
-                         "scala.scalanative.runtime.floatToString" &&
-                     scalanative::support::StdNames::RuntimeDoubleToString ==
-                         "scala.scalanative.runtime.doubleToString" &&
-                     scalanative::support::StdNames::RuntimeCharToString ==
-                         "scala.scalanative.runtime.charToString" &&
-                     scalanative::support::StdNames::RuntimeAnyToString ==
-                         "scala.scalanative.runtime.anyToString" &&
-                     scalanative::support::StdNames::RuntimeAnyReceiverToString ==
-                         "scala.scalanative.runtime.anyReceiverToString" &&
-                     scalanative::support::StdNames::RuntimeAnyEquals ==
-                         "scala.scalanative.runtime.anyEquals" &&
-                     scalanative::support::StdNames::RuntimeAnyReceiverEquals ==
-                         "scala.scalanative.runtime.anyReceiverEquals" &&
-                     scalanative::support::StdNames::RuntimeIntToByte ==
-                         "scala.scalanative.runtime.intToByte" &&
-                     scalanative::support::StdNames::RuntimeIntToShort ==
-                         "scala.scalanative.runtime.intToShort" &&
-                     scalanative::support::StdNames::RuntimeByteToInt ==
-                         "scala.scalanative.runtime.byteToInt" &&
-                     scalanative::support::StdNames::RuntimeShortToInt ==
-                         "scala.scalanative.runtime.shortToInt" &&
-                     scalanative::support::StdNames::RuntimeByteHashCode ==
-                         "scala.scalanative.runtime.byteHashCode" &&
-                     scalanative::support::StdNames::RuntimeShortHashCode ==
-                         "scala.scalanative.runtime.shortHashCode" &&
-                     scalanative::support::StdNames::RuntimeBooleanHashCode ==
-                         "scala.scalanative.runtime.booleanHashCode" &&
-                     scalanative::support::StdNames::RuntimeLongHashCode ==
-                         "scala.scalanative.runtime.longHashCode" &&
-                     scalanative::support::StdNames::RuntimeFloatHashCode ==
-                         "scala.scalanative.runtime.floatHashCode" &&
-                     scalanative::support::StdNames::RuntimeDoubleHashCode ==
-                         "scala.scalanative.runtime.doubleHashCode" &&
-                     scalanative::support::StdNames::RuntimeCharHashCode ==
-                         "scala.scalanative.runtime.charHashCode" &&
-                     scalanative::support::StdNames::RuntimeStringHashCode ==
-                         "scala.scalanative.runtime.stringHashCode" &&
-                     scalanative::support::StdNames::RuntimeSymbolHashCode ==
-                         "scala.scalanative.runtime.symbolHashCode" &&
-                     scalanative::support::StdNames::RuntimeAnyHashCode ==
-                         "scala.scalanative.runtime.anyHashCode" &&
-                     scalanative::support::StdNames::RuntimeAnyReceiverHashCode ==
-                         "scala.scalanative.runtime.anyReceiverHashCode" &&
-                     scalanative::support::StdNames::RuntimeFormat ==
-                         "scala.scalanative.runtime.format" &&
-                     scalanative::support::StdNames::RuntimeFormatBoolean ==
-                         "scala.scalanative.runtime.formatBoolean",
-                 "StdNames does not expose stable compiler-known names")) {
+  if (int code = expect(
+          scalanative::support::StdNames::JavaLangObject == "java.lang.Object" &&
+              scalanative::support::StdNames::JavaLangClassCastException ==
+                  "java.lang.ClassCastException" &&
+              scalanative::support::StdNames::JavaLangArrayStoreException ==
+                  "java.lang.ArrayStoreException" &&
+              scalanative::support::StdNames::JavaNioByteBuffer ==
+                  "java.nio.ByteBuffer" &&
+              scalanative::support::StdNames::Constructor == "$init" &&
+              scalanative::support::StdNames::IsInstanceOf == "isInstanceOf" &&
+              scalanative::support::StdNames::AsInstanceOf == "asInstanceOf" &&
+              scalanative::support::StdNames::SizeOf == "sizeof" &&
+              scalanative::support::StdNames::StringLength == "length" &&
+              scalanative::support::StdNames::ToString == "toString" &&
+              scalanative::support::StdNames::Equals == "equals" &&
+              scalanative::support::StdNames::HashCode == "hashCode" &&
+              scalanative::support::StdNames::RuntimePrintln ==
+                  "scala.scalanative.runtime.println" &&
+              scalanative::support::StdNames::GcCollect == "gcCollect" &&
+              scalanative::support::StdNames::GcLiveObjectCount ==
+                  "gcLiveObjectCount" &&
+              scalanative::support::StdNames::GcCollectionCount ==
+                  "gcCollectionCount" &&
+              scalanative::support::StdNames::GcSetCollectionThreshold ==
+                  "gcSetCollectionThreshold" &&
+              scalanative::support::StdNames::Zone == "Zone" &&
+              scalanative::support::StdNames::ZoneScoped == "scoped" &&
+              scalanative::support::StdNames::ZoneAllocBytes == "allocBytes" &&
+              scalanative::support::StdNames::NativeBytes == "NativeBytes" &&
+              scalanative::support::StdNames::NativeBytesGetShortBe == "getShortBE" &&
+              scalanative::support::StdNames::NativeBytesGetShortLe == "getShortLE" &&
+              scalanative::support::StdNames::NativeBytesPutShortBe == "putShortBE" &&
+              scalanative::support::StdNames::NativeBytesPutShortLe == "putShortLE" &&
+              scalanative::support::StdNames::ByteBuffer == "ByteBuffer" &&
+              scalanative::support::StdNames::ByteBufferWrap == "wrap" &&
+              scalanative::support::StdNames::ByteBufferPosition == "position" &&
+              scalanative::support::StdNames::ByteBufferLimit == "limit" &&
+              scalanative::support::StdNames::ByteBufferRemaining == "remaining" &&
+              scalanative::support::StdNames::ByteBufferHasRemaining ==
+                  "hasRemaining" &&
+              scalanative::support::StdNames::ArrayEmpty == "empty" &&
+              scalanative::support::StdNames::ArrayFill == "fill" &&
+              scalanative::support::StdNames::ArrayRange == "range" &&
+              scalanative::support::StdNames::RuntimeGcCollect ==
+                  "scala.scalanative.runtime.gcCollect" &&
+              scalanative::support::StdNames::RuntimeZoneAllocBytes ==
+                  "scala.scalanative.runtime.zoneAllocBytes" &&
+              scalanative::support::StdNames::RuntimeNativeBytesGetShortBe ==
+                  "scala.scalanative.runtime.nativeBytesGetShortBE" &&
+              scalanative::support::StdNames::RuntimeNativeBytesGetShortLe ==
+                  "scala.scalanative.runtime.nativeBytesGetShortLE" &&
+              scalanative::support::StdNames::RuntimeNativeBytesPutShortBe ==
+                  "scala.scalanative.runtime.nativeBytesPutShortBE" &&
+              scalanative::support::StdNames::RuntimeNativeBytesPutShortLe ==
+                  "scala.scalanative.runtime.nativeBytesPutShortLE" &&
+              scalanative::support::StdNames::RuntimeByteBufferWrap ==
+                  "scala.scalanative.runtime.byteBufferWrap" &&
+              scalanative::support::StdNames::RuntimeByteBufferSetPosition ==
+                  "scala.scalanative.runtime.byteBufferSetPosition" &&
+              scalanative::support::StdNames::RuntimeByteBufferSetLimit ==
+                  "scala.scalanative.runtime.byteBufferSetLimit" &&
+              scalanative::support::StdNames::RuntimeByteBufferHasRemaining ==
+                  "scala.scalanative.runtime.byteBufferHasRemaining" &&
+              scalanative::support::StdNames::RuntimeStringLength ==
+                  "scala.scalanative.runtime.stringLength" &&
+              scalanative::support::StdNames::RuntimeStringToString ==
+                  "scala.scalanative.runtime.stringToString" &&
+              scalanative::support::StdNames::RuntimeStringEquals ==
+                  "scala.scalanative.runtime.stringEquals" &&
+              scalanative::support::StdNames::RuntimeArrayLength ==
+                  "scala.scalanative.runtime.arrayLength" &&
+              scalanative::support::StdNames::RuntimeArrayApply ==
+                  "scala.scalanative.runtime.arrayApply" &&
+              scalanative::support::StdNames::RuntimeArrayUpdate ==
+                  "scala.scalanative.runtime.arrayUpdate" &&
+              scalanative::support::StdNames::RuntimeIntArrayLength ==
+                  "scala.scalanative.runtime.intArrayLength" &&
+              scalanative::support::StdNames::RuntimeIntArrayApply ==
+                  "scala.scalanative.runtime.intArrayApply" &&
+              scalanative::support::StdNames::RuntimeIntArrayUpdate ==
+                  "scala.scalanative.runtime.intArrayUpdate" &&
+              scalanative::support::StdNames::RuntimeByteArrayLength ==
+                  "scala.scalanative.runtime.byteArrayLength" &&
+              scalanative::support::StdNames::RuntimeByteArrayApply ==
+                  "scala.scalanative.runtime.byteArrayApply" &&
+              scalanative::support::StdNames::RuntimeByteArrayUpdate ==
+                  "scala.scalanative.runtime.byteArrayUpdate" &&
+              scalanative::support::StdNames::RuntimeShortArrayLength ==
+                  "scala.scalanative.runtime.shortArrayLength" &&
+              scalanative::support::StdNames::RuntimeShortArrayApply ==
+                  "scala.scalanative.runtime.shortArrayApply" &&
+              scalanative::support::StdNames::RuntimeShortArrayUpdate ==
+                  "scala.scalanative.runtime.shortArrayUpdate" &&
+              scalanative::support::StdNames::RuntimeBooleanArrayLength ==
+                  "scala.scalanative.runtime.booleanArrayLength" &&
+              scalanative::support::StdNames::RuntimeBooleanArrayApply ==
+                  "scala.scalanative.runtime.booleanArrayApply" &&
+              scalanative::support::StdNames::RuntimeBooleanArrayUpdate ==
+                  "scala.scalanative.runtime.booleanArrayUpdate" &&
+              scalanative::support::StdNames::RuntimeLongArrayLength ==
+                  "scala.scalanative.runtime.longArrayLength" &&
+              scalanative::support::StdNames::RuntimeLongArrayApply ==
+                  "scala.scalanative.runtime.longArrayApply" &&
+              scalanative::support::StdNames::RuntimeLongArrayUpdate ==
+                  "scala.scalanative.runtime.longArrayUpdate" &&
+              scalanative::support::StdNames::RuntimeDoubleArrayLength ==
+                  "scala.scalanative.runtime.doubleArrayLength" &&
+              scalanative::support::StdNames::RuntimeDoubleArrayApply ==
+                  "scala.scalanative.runtime.doubleArrayApply" &&
+              scalanative::support::StdNames::RuntimeDoubleArrayUpdate ==
+                  "scala.scalanative.runtime.doubleArrayUpdate" &&
+              scalanative::support::StdNames::RuntimeFloatArrayLength ==
+                  "scala.scalanative.runtime.floatArrayLength" &&
+              scalanative::support::StdNames::RuntimeFloatArrayApply ==
+                  "scala.scalanative.runtime.floatArrayApply" &&
+              scalanative::support::StdNames::RuntimeFloatArrayUpdate ==
+                  "scala.scalanative.runtime.floatArrayUpdate" &&
+              scalanative::support::StdNames::RuntimeCharArrayLength ==
+                  "scala.scalanative.runtime.charArrayLength" &&
+              scalanative::support::StdNames::RuntimeCharArrayApply ==
+                  "scala.scalanative.runtime.charArrayApply" &&
+              scalanative::support::StdNames::RuntimeCharArrayUpdate ==
+                  "scala.scalanative.runtime.charArrayUpdate" &&
+              scalanative::support::StdNames::RuntimeReferenceArrayLength ==
+                  "scala.scalanative.runtime.referenceArrayLength" &&
+              scalanative::support::StdNames::RuntimeReferenceArrayApply ==
+                  "scala.scalanative.runtime.referenceArrayApply" &&
+              scalanative::support::StdNames::RuntimeReferenceArrayUpdate ==
+                  "scala.scalanative.runtime.referenceArrayUpdate" &&
+              scalanative::support::StdNames::RuntimeReferenceArrayCopy ==
+                  "scala.scalanative.runtime.referenceArrayCopy" &&
+              scalanative::support::StdNames::RuntimeArrayFill ==
+                  "scala.scalanative.runtime.arrayFill" &&
+              scalanative::support::StdNames::RuntimeArrayRange ==
+                  "scala.scalanative.runtime.arrayRange" &&
+              scalanative::support::StdNames::RuntimeBooleanToString ==
+                  "scala.scalanative.runtime.booleanToString" &&
+              scalanative::support::StdNames::RuntimeByteToString ==
+                  "scala.scalanative.runtime.byteToString" &&
+              scalanative::support::StdNames::RuntimeShortToString ==
+                  "scala.scalanative.runtime.shortToString" &&
+              scalanative::support::StdNames::RuntimeIntToString ==
+                  "scala.scalanative.runtime.intToString" &&
+              scalanative::support::StdNames::RuntimeLongToString ==
+                  "scala.scalanative.runtime.longToString" &&
+              scalanative::support::StdNames::RuntimeFloatToString ==
+                  "scala.scalanative.runtime.floatToString" &&
+              scalanative::support::StdNames::RuntimeDoubleToString ==
+                  "scala.scalanative.runtime.doubleToString" &&
+              scalanative::support::StdNames::RuntimeCharToString ==
+                  "scala.scalanative.runtime.charToString" &&
+              scalanative::support::StdNames::RuntimeAnyToString ==
+                  "scala.scalanative.runtime.anyToString" &&
+              scalanative::support::StdNames::RuntimeAnyReceiverToString ==
+                  "scala.scalanative.runtime.anyReceiverToString" &&
+              scalanative::support::StdNames::RuntimeAnyEquals ==
+                  "scala.scalanative.runtime.anyEquals" &&
+              scalanative::support::StdNames::RuntimeAnyReceiverEquals ==
+                  "scala.scalanative.runtime.anyReceiverEquals" &&
+              scalanative::support::StdNames::RuntimeIntToByte ==
+                  "scala.scalanative.runtime.intToByte" &&
+              scalanative::support::StdNames::RuntimeIntToShort ==
+                  "scala.scalanative.runtime.intToShort" &&
+              scalanative::support::StdNames::RuntimeByteToInt ==
+                  "scala.scalanative.runtime.byteToInt" &&
+              scalanative::support::StdNames::RuntimeShortToInt ==
+                  "scala.scalanative.runtime.shortToInt" &&
+              scalanative::support::StdNames::RuntimeByteHashCode ==
+                  "scala.scalanative.runtime.byteHashCode" &&
+              scalanative::support::StdNames::RuntimeShortHashCode ==
+                  "scala.scalanative.runtime.shortHashCode" &&
+              scalanative::support::StdNames::RuntimeBooleanHashCode ==
+                  "scala.scalanative.runtime.booleanHashCode" &&
+              scalanative::support::StdNames::RuntimeLongHashCode ==
+                  "scala.scalanative.runtime.longHashCode" &&
+              scalanative::support::StdNames::RuntimeFloatHashCode ==
+                  "scala.scalanative.runtime.floatHashCode" &&
+              scalanative::support::StdNames::RuntimeDoubleHashCode ==
+                  "scala.scalanative.runtime.doubleHashCode" &&
+              scalanative::support::StdNames::RuntimeCharHashCode ==
+                  "scala.scalanative.runtime.charHashCode" &&
+              scalanative::support::StdNames::RuntimeStringHashCode ==
+                  "scala.scalanative.runtime.stringHashCode" &&
+              scalanative::support::StdNames::RuntimeSymbolHashCode ==
+                  "scala.scalanative.runtime.symbolHashCode" &&
+              scalanative::support::StdNames::RuntimeAnyHashCode ==
+                  "scala.scalanative.runtime.anyHashCode" &&
+              scalanative::support::StdNames::RuntimeAnyReceiverHashCode ==
+                  "scala.scalanative.runtime.anyReceiverHashCode" &&
+              scalanative::support::StdNames::RuntimeFormat ==
+                  "scala.scalanative.runtime.format" &&
+              scalanative::support::StdNames::RuntimeFormatBoolean ==
+                  "scala.scalanative.runtime.formatBoolean",
+          "StdNames does not expose stable compiler-known names")) {
     return code;
   }
 
@@ -7095,7 +7128,7 @@ int smokeBoxedDependentScalarsMvp() {
                   scalanative::runtime::ObjectOwnership::Arena) == 1 &&
               std::string_view(scalanative::runtime::objectOwnershipName(
                   scalanative::runtime::ObjectOwnership::Immortal)) == "immortal" &&
-              scalanative::runtime::runtimeAbiName() == "cpp-scalanative-runtime-52",
+              scalanative::runtime::runtimeAbiName() == "cpp-scalanative-runtime-55",
           "boxed primitive runtime metadata is not stable")) {
     return code;
   }
@@ -7178,7 +7211,7 @@ object Main {
     return code;
   }
   if (int code = expect(
-          contains(result.llvmIr, "Runtime ABI = 'cpp-scalanative-runtime-52'") &&
+          contains(result.llvmIr, "Runtime ABI = 'cpp-scalanative-runtime-55'") &&
               contains(result.llvmIr,
                        "@__scalanative_boxed_Unit = private constant "
                        "%scalanative.type_descriptor { i32 2, i32 7, i64 8, i32 8, "
@@ -11720,6 +11753,44 @@ int smokeNirVerifier() {
                                             "outer local");
                           }),
           "NIR verifier accepted a scoped-zone reference stored in an outer local")) {
+    return code;
+  }
+
+  scalanative::nir::FunctionBodyBuilder outsideZoneBytesBody;
+  (void)outsideZoneBytesBody.addReturn(
+      "Array [ Byte ]",
+      scalanative::nir::callValue(
+          scalanative::nir::localValue(
+              std::string(scalanative::support::StdNames::RuntimeZoneAllocBytes),
+              scalanative::support::SourceSpan::none()),
+          {scalanative::nir::literalValue("4", "Int",
+                                          scalanative::support::SourceSpan::none())},
+          scalanative::support::SourceSpan::none()),
+      scalanative::support::SourceSpan::none());
+  scalanative::nir::Module outsideZoneBytes;
+  outsideZoneBytes.name = "demo.OutsideZoneBytes";
+  outsideZoneBytes.definitions.push_back(
+      {scalanative::nir::DefinitionKind::FunctionDecl,
+       std::string(scalanative::support::StdNames::RuntimeZoneAllocBytes),
+       "(Int)Array [ Byte ]",
+       {},
+       scalanative::support::SourceSpan::none()});
+  outsideZoneBytes.definitions.push_back(
+      {scalanative::nir::DefinitionKind::FunctionDef, "demo.OutsideZoneBytes.run",
+       "()Array [ Byte ]", std::move(outsideZoneBytesBody).build(),
+       scalanative::support::SourceSpan::none()});
+  const scalanative::nir::VerifyResult outsideZoneBytesResult =
+      verifier.verify(outsideZoneBytes);
+  if (int code = expect(
+          !outsideZoneBytesResult.ok &&
+              std::any_of(outsideZoneBytesResult.errors.begin(),
+                          outsideZoneBytesResult.errors.end(),
+                          [](const std::string& error) {
+                            return contains(
+                                error,
+                                "calls zoneAllocBytes outside a zone-scoped value");
+                          }),
+          "NIR verifier accepted zoneAllocBytes outside zone-scoped ownership")) {
     return code;
   }
 

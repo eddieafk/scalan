@@ -150,6 +150,12 @@ void emitSourceLocation(support::SourceSpan span, const LoweringState& state,
 }
 
 constexpr std::size_t ObjectHeaderSize = 8;
+constexpr std::size_t ByteBufferSize = 32;
+constexpr std::size_t ByteBufferBackingOffset = 8;
+constexpr std::size_t ByteBufferCapacityOffset = 16;
+constexpr std::size_t ByteBufferPositionOffset = 20;
+constexpr std::size_t ByteBufferLimitOffset = 24;
+constexpr std::size_t ByteBufferMarkOffset = 28;
 constexpr std::size_t SuppressedExceptionCapacity = 64;
 constexpr std::size_t SuppressedArrayOwnerOffset =
     ObjectHeaderSize + 8 + SuppressedExceptionCapacity * 8;
@@ -1083,6 +1089,252 @@ void emitRuntimeTypeHelpers(std::ostringstream& out,
   };
   emitNarrowArrayAccessors("byte", "i8");
   emitNarrowArrayAccessors("short", "i16");
+
+  out << "define internal ptr @__scalanative_native_bytes_short_slot(ptr %array, "
+         "i32 %index) {\n";
+  out << "entry:\n";
+  out << "  %is_null = icmp eq ptr %array, null\n";
+  out << "  br i1 %is_null, label %null_array, label %check_index\n";
+  out << "check_index:\n";
+  out << "  %wide_index = sext i32 %index to i64\n";
+  out << "  %is_nonnegative = icmp sge i64 %wide_index, 0\n";
+  out << "  %end = add i64 %wide_index, 2\n";
+  out << "  %length_slot = getelementptr i8, ptr %array, i64 " << ObjectHeaderSize
+      << "\n";
+  out << "  %length = load i64, ptr %length_slot\n";
+  out << "  %range_fits = icmp ule i64 %end, %length\n";
+  out << "  %in_bounds = and i1 %is_nonnegative, %range_fits\n";
+  out << "  br i1 %in_bounds, label %ready, label %trap\n";
+  out << "ready:\n";
+  out << "  %elements = getelementptr i8, ptr %array, i64 " << ObjectHeaderSize + 8
+      << "\n";
+  out << "  %slot = getelementptr i8, ptr %elements, i64 %wide_index\n";
+  out << "  ret ptr %slot\n";
+  out << "trap:\n";
+  out << "  call void @__scalanative_throw_array_index_out_of_bounds()\n";
+  out << "  unreachable\n";
+  out << "null_array:\n";
+  out << "  call void @__scalanative_throw_null_array()\n";
+  out << "  unreachable\n";
+  out << "}\n\n";
+
+  out << "define internal i16 @__scalanative_native_bytes_get_short(ptr %array, "
+         "i32 %index, i1 %little_endian) {\n";
+  out << "entry:\n";
+  out << "  %slot = call ptr @__scalanative_native_bytes_short_slot(ptr %array, "
+         "i32 %index)\n";
+  out << "  %second_slot = getelementptr i8, ptr %slot, i64 1\n";
+  out << "  %first = load i8, ptr %slot\n";
+  out << "  %second = load i8, ptr %second_slot\n";
+  out << "  %wide_first = zext i8 %first to i16\n";
+  out << "  %wide_second = zext i8 %second to i16\n";
+  out << "  %big_high = shl i16 %wide_first, 8\n";
+  out << "  %big = or i16 %big_high, %wide_second\n";
+  out << "  %little_high = shl i16 %wide_second, 8\n";
+  out << "  %little = or i16 %little_high, %wide_first\n";
+  out << "  %result = select i1 %little_endian, i16 %little, i16 %big\n";
+  out << "  ret i16 %result\n";
+  out << "}\n\n";
+
+  out << "define internal void @__scalanative_native_bytes_put_short(ptr %array, "
+         "i32 %index, i16 %value, i1 %little_endian) {\n";
+  out << "entry:\n";
+  out << "  %slot = call ptr @__scalanative_native_bytes_short_slot(ptr %array, "
+         "i32 %index)\n";
+  out << "  %second_slot = getelementptr i8, ptr %slot, i64 1\n";
+  out << "  %low = trunc i16 %value to i8\n";
+  out << "  %shifted = lshr i16 %value, 8\n";
+  out << "  %high = trunc i16 %shifted to i8\n";
+  out << "  %first = select i1 %little_endian, i8 %low, i8 %high\n";
+  out << "  %second = select i1 %little_endian, i8 %high, i8 %low\n";
+  out << "  store i8 %first, ptr %slot\n";
+  out << "  store i8 %second, ptr %second_slot\n";
+  out << "  ret void\n";
+  out << "}\n\n";
+
+  out << "define internal void @__scalanative_byte_buffer_require(ptr %buffer) {\n";
+  out << "entry:\n";
+  out << "  %is_null = icmp eq ptr %buffer, null\n";
+  out << "  br i1 %is_null, label %null_buffer, label %ready\n";
+  out << "ready:\n";
+  out << "  ret void\n";
+  out << "null_buffer:\n";
+  out << "  call void @__scalanative_throw_null_receiver()\n";
+  out << "  unreachable\n";
+  out << "}\n\n";
+
+  out << "define internal ptr @__scalanative_byte_buffer_wrap(ptr %array) {\n";
+  out << "entry:\n";
+  out << "  %is_null = icmp eq ptr %array, null\n";
+  out << "  br i1 %is_null, label %null_array, label %allocate\n";
+  out << "allocate:\n";
+  out << "  %length_slot = getelementptr i8, ptr %array, i64 " << ObjectHeaderSize
+      << "\n";
+  out << "  %wide_length = load i64, ptr %length_slot\n";
+  out << "  %length = trunc i64 %wide_length to i32\n";
+  out << "  %buffer = call ptr @__scalanative_box_alloc(i64 " << ByteBufferSize
+      << ", ptr null)\n";
+  out << "  %backing_slot = getelementptr i8, ptr %buffer, i64 "
+      << ByteBufferBackingOffset << "\n";
+  out << "  %capacity_slot = getelementptr i8, ptr %buffer, i64 "
+      << ByteBufferCapacityOffset << "\n";
+  out << "  %position_slot = getelementptr i8, ptr %buffer, i64 "
+      << ByteBufferPositionOffset << "\n";
+  out << "  %limit_slot = getelementptr i8, ptr %buffer, i64 " << ByteBufferLimitOffset
+      << "\n";
+  out << "  %mark_slot = getelementptr i8, ptr %buffer, i64 " << ByteBufferMarkOffset
+      << "\n";
+  out << "  store ptr %array, ptr %backing_slot\n";
+  out << "  store i32 %length, ptr %capacity_slot\n";
+  out << "  store i32 0, ptr %position_slot\n";
+  out << "  store i32 %length, ptr %limit_slot\n";
+  out << "  store i32 -1, ptr %mark_slot\n";
+  out << "  ret ptr %buffer\n";
+  out << "null_array:\n";
+  out << "  call void @__scalanative_throw_null_array()\n";
+  out << "  unreachable\n";
+  out << "}\n\n";
+
+  const auto emitByteBufferIntQuery = [&](std::string_view name, std::size_t offset) {
+    out << "define internal i32 @__scalanative_byte_buffer_" << name
+        << "(ptr %buffer) {\n";
+    out << "entry:\n";
+    out << "  call void @__scalanative_byte_buffer_require(ptr %buffer)\n";
+    out << "  %slot = getelementptr i8, ptr %buffer, i64 " << offset << "\n";
+    out << "  %value = load i32, ptr %slot\n";
+    out << "  ret i32 %value\n";
+    out << "}\n\n";
+  };
+  emitByteBufferIntQuery("capacity", ByteBufferCapacityOffset);
+  emitByteBufferIntQuery("position", ByteBufferPositionOffset);
+  emitByteBufferIntQuery("limit", ByteBufferLimitOffset);
+
+  out << "define internal i32 @__scalanative_byte_buffer_remaining(ptr %buffer) {\n";
+  out << "entry:\n";
+  out << "  call void @__scalanative_byte_buffer_require(ptr %buffer)\n";
+  out << "  %position_slot = getelementptr i8, ptr %buffer, i64 "
+      << ByteBufferPositionOffset << "\n";
+  out << "  %limit_slot = getelementptr i8, ptr %buffer, i64 " << ByteBufferLimitOffset
+      << "\n";
+  out << "  %position = load i32, ptr %position_slot\n";
+  out << "  %limit = load i32, ptr %limit_slot\n";
+  out << "  %remaining = sub i32 %limit, %position\n";
+  out << "  ret i32 %remaining\n";
+  out << "}\n\n";
+
+  out << "define internal i1 @__scalanative_byte_buffer_has_remaining(ptr %buffer) "
+         "{\n";
+  out << "entry:\n";
+  out << "  %remaining = call i32 @__scalanative_byte_buffer_remaining(ptr %buffer)\n";
+  out << "  %has_remaining = icmp sgt i32 %remaining, 0\n";
+  out << "  ret i1 %has_remaining\n";
+  out << "}\n\n";
+
+  out << "define internal ptr @__scalanative_byte_buffer_set_position(ptr %buffer, "
+         "i32 %value) {\n";
+  out << "entry:\n";
+  out << "  call void @__scalanative_byte_buffer_require(ptr %buffer)\n";
+  out << "  %limit_slot = getelementptr i8, ptr %buffer, i64 " << ByteBufferLimitOffset
+      << "\n";
+  out << "  %limit = load i32, ptr %limit_slot\n";
+  out << "  %nonnegative = icmp sge i32 %value, 0\n";
+  out << "  %within_limit = icmp sle i32 %value, %limit\n";
+  out << "  %valid = and i1 %nonnegative, %within_limit\n";
+  out << "  br i1 %valid, label %update, label %invalid\n";
+  out << "update:\n";
+  out << "  %position_slot = getelementptr i8, ptr %buffer, i64 "
+      << ByteBufferPositionOffset << "\n";
+  out << "  %mark_slot = getelementptr i8, ptr %buffer, i64 " << ByteBufferMarkOffset
+      << "\n";
+  out << "  %mark = load i32, ptr %mark_slot\n";
+  out << "  %invalidate_mark = icmp sgt i32 %mark, %value\n";
+  out << "  %next_mark = select i1 %invalidate_mark, i32 -1, i32 %mark\n";
+  out << "  store i32 %value, ptr %position_slot\n";
+  out << "  store i32 %next_mark, ptr %mark_slot\n";
+  out << "  ret ptr %buffer\n";
+  out << "invalid:\n";
+  out << "  call void @__scalanative_throw_byte_buffer_position()\n";
+  out << "  unreachable\n";
+  out << "}\n\n";
+
+  out << "define internal ptr @__scalanative_byte_buffer_set_limit(ptr %buffer, "
+         "i32 %value) {\n";
+  out << "entry:\n";
+  out << "  call void @__scalanative_byte_buffer_require(ptr %buffer)\n";
+  out << "  %capacity_slot = getelementptr i8, ptr %buffer, i64 "
+      << ByteBufferCapacityOffset << "\n";
+  out << "  %capacity = load i32, ptr %capacity_slot\n";
+  out << "  %nonnegative = icmp sge i32 %value, 0\n";
+  out << "  %within_capacity = icmp sle i32 %value, %capacity\n";
+  out << "  %valid = and i1 %nonnegative, %within_capacity\n";
+  out << "  br i1 %valid, label %update, label %invalid\n";
+  out << "update:\n";
+  out << "  %position_slot = getelementptr i8, ptr %buffer, i64 "
+      << ByteBufferPositionOffset << "\n";
+  out << "  %mark_slot = getelementptr i8, ptr %buffer, i64 " << ByteBufferMarkOffset
+      << "\n";
+  out << "  %position = load i32, ptr %position_slot\n";
+  out << "  %mark = load i32, ptr %mark_slot\n";
+  out << "  %clamp_position = icmp sgt i32 %position, %value\n";
+  out << "  %next_position = select i1 %clamp_position, i32 %value, i32 %position\n";
+  out << "  %invalidate_mark = icmp sgt i32 %mark, %value\n";
+  out << "  %next_mark = select i1 %invalidate_mark, i32 -1, i32 %mark\n";
+  out << "  %limit_slot = getelementptr i8, ptr %buffer, i64 " << ByteBufferLimitOffset
+      << "\n";
+  out << "  store i32 %value, ptr %limit_slot\n";
+  out << "  store i32 %next_position, ptr %position_slot\n";
+  out << "  store i32 %next_mark, ptr %mark_slot\n";
+  out << "  ret ptr %buffer\n";
+  out << "invalid:\n";
+  out << "  call void @__scalanative_throw_byte_buffer_limit()\n";
+  out << "  unreachable\n";
+  out << "}\n\n";
+
+  out << "define internal ptr @__scalanative_byte_buffer_clear(ptr %buffer) {\n";
+  out << "entry:\n";
+  out << "  call void @__scalanative_byte_buffer_require(ptr %buffer)\n";
+  out << "  %capacity_slot = getelementptr i8, ptr %buffer, i64 "
+      << ByteBufferCapacityOffset << "\n";
+  out << "  %position_slot = getelementptr i8, ptr %buffer, i64 "
+      << ByteBufferPositionOffset << "\n";
+  out << "  %limit_slot = getelementptr i8, ptr %buffer, i64 " << ByteBufferLimitOffset
+      << "\n";
+  out << "  %mark_slot = getelementptr i8, ptr %buffer, i64 " << ByteBufferMarkOffset
+      << "\n";
+  out << "  %capacity = load i32, ptr %capacity_slot\n";
+  out << "  store i32 0, ptr %position_slot\n";
+  out << "  store i32 %capacity, ptr %limit_slot\n";
+  out << "  store i32 -1, ptr %mark_slot\n";
+  out << "  ret ptr %buffer\n";
+  out << "}\n\n";
+
+  out << "define internal ptr @__scalanative_byte_buffer_flip(ptr %buffer) {\n";
+  out << "entry:\n";
+  out << "  call void @__scalanative_byte_buffer_require(ptr %buffer)\n";
+  out << "  %position_slot = getelementptr i8, ptr %buffer, i64 "
+      << ByteBufferPositionOffset << "\n";
+  out << "  %limit_slot = getelementptr i8, ptr %buffer, i64 " << ByteBufferLimitOffset
+      << "\n";
+  out << "  %mark_slot = getelementptr i8, ptr %buffer, i64 " << ByteBufferMarkOffset
+      << "\n";
+  out << "  %position = load i32, ptr %position_slot\n";
+  out << "  store i32 %position, ptr %limit_slot\n";
+  out << "  store i32 0, ptr %position_slot\n";
+  out << "  store i32 -1, ptr %mark_slot\n";
+  out << "  ret ptr %buffer\n";
+  out << "}\n\n";
+
+  out << "define internal ptr @__scalanative_byte_buffer_rewind(ptr %buffer) {\n";
+  out << "entry:\n";
+  out << "  call void @__scalanative_byte_buffer_require(ptr %buffer)\n";
+  out << "  %position_slot = getelementptr i8, ptr %buffer, i64 "
+      << ByteBufferPositionOffset << "\n";
+  out << "  %mark_slot = getelementptr i8, ptr %buffer, i64 " << ByteBufferMarkOffset
+      << "\n";
+  out << "  store i32 0, ptr %position_slot\n";
+  out << "  store i32 -1, ptr %mark_slot\n";
+  out << "  ret ptr %buffer\n";
+  out << "}\n\n";
 
   out << "define internal ptr @__scalanative_array_int_slot(ptr %array, i32 %index) "
          "{\n";
@@ -2687,6 +2939,10 @@ void emitExceptionRuntimeHelpers(
                      ".str.array_range_too_large", 25);
   emitRuntimeFailure("__scalanative_throw_array_concat_too_large", illegalArgument,
                      ".str.array_concat_too_large", 33);
+  emitRuntimeFailure("__scalanative_throw_byte_buffer_position", illegalArgument,
+                     ".str.byte_buffer_position", 37);
+  emitRuntimeFailure("__scalanative_throw_byte_buffer_limit", illegalArgument,
+                     ".str.byte_buffer_limit", 34);
 
   const auto emitCheckedCondition = [&](std::string_view helperName,
                                         std::string_view failureHelper) {
@@ -5872,6 +6128,45 @@ std::string lowerCall(const nir::Value& value, const std::string& expectedType,
   const bool isRuntimeStringToString =
       target == support::StdNames::RuntimeStringToString;
   const bool isRuntimeStringEquals = target == support::StdNames::RuntimeStringEquals;
+  const bool isRuntimeZoneAllocBytes =
+      target == support::StdNames::RuntimeZoneAllocBytes;
+  const bool isRuntimeNativeBytesGetShort =
+      target == support::StdNames::RuntimeNativeBytesGetShortBe ||
+      target == support::StdNames::RuntimeNativeBytesGetShortLe;
+  const bool isRuntimeNativeBytesPutShort =
+      target == support::StdNames::RuntimeNativeBytesPutShortBe ||
+      target == support::StdNames::RuntimeNativeBytesPutShortLe;
+  const bool isRuntimeNativeBytesLittleEndian =
+      target == support::StdNames::RuntimeNativeBytesGetShortLe ||
+      target == support::StdNames::RuntimeNativeBytesPutShortLe;
+  const bool isRuntimeByteBufferWrap =
+      target == support::StdNames::RuntimeByteBufferWrap;
+  const bool isRuntimeByteBufferCapacity =
+      target == support::StdNames::RuntimeByteBufferCapacity;
+  const bool isRuntimeByteBufferPosition =
+      target == support::StdNames::RuntimeByteBufferPosition;
+  const bool isRuntimeByteBufferSetPosition =
+      target == support::StdNames::RuntimeByteBufferSetPosition;
+  const bool isRuntimeByteBufferLimit =
+      target == support::StdNames::RuntimeByteBufferLimit;
+  const bool isRuntimeByteBufferSetLimit =
+      target == support::StdNames::RuntimeByteBufferSetLimit;
+  const bool isRuntimeByteBufferRemaining =
+      target == support::StdNames::RuntimeByteBufferRemaining;
+  const bool isRuntimeByteBufferHasRemaining =
+      target == support::StdNames::RuntimeByteBufferHasRemaining;
+  const bool isRuntimeByteBufferClear =
+      target == support::StdNames::RuntimeByteBufferClear;
+  const bool isRuntimeByteBufferFlip =
+      target == support::StdNames::RuntimeByteBufferFlip;
+  const bool isRuntimeByteBufferRewind =
+      target == support::StdNames::RuntimeByteBufferRewind;
+  const bool isRuntimeByteBufferOperation =
+      isRuntimeByteBufferCapacity || isRuntimeByteBufferPosition ||
+      isRuntimeByteBufferSetPosition || isRuntimeByteBufferLimit ||
+      isRuntimeByteBufferSetLimit || isRuntimeByteBufferRemaining ||
+      isRuntimeByteBufferHasRemaining || isRuntimeByteBufferClear ||
+      isRuntimeByteBufferFlip || isRuntimeByteBufferRewind;
   const bool isRuntimeArrayAlloc = target == support::StdNames::RuntimeArrayAlloc;
   const bool isRuntimeArrayLength = target == support::StdNames::RuntimeArrayLength;
   const bool isRuntimeArrayApply = target == support::StdNames::RuntimeArrayApply;
@@ -6883,6 +7178,196 @@ std::string lowerCall(const nir::Value& value, const std::string& expectedType,
 
     supported = true;
     return emitArrayOfDimAllocation(0, lengths, signature->returnType, state, out);
+  }
+  if (isRuntimeByteBufferWrap) {
+    if (value.operands.size() != 2 ||
+        signature->parameterTypes != std::vector<std::string>{"Array [ Byte ]"} ||
+        signature->returnType != support::StdNames::JavaNioByteBuffer ||
+        expectedType != signature->returnType) {
+      supported = false;
+      return defaultValue(expectedType);
+    }
+    bool storageSupported = false;
+    const std::string storage =
+        lowerValue(value.operands[1], "Array [ Byte ]", state, out, storageSupported);
+    if (!storageSupported) {
+      supported = false;
+      return defaultValue(expectedType);
+    }
+    const std::string result = nextTemporary(state);
+    out << "  %" << result << " = call ptr @__scalanative_byte_buffer_wrap(ptr "
+        << storage << ")\n";
+    state.values[result] = "ptr";
+    state.simpleTypes[result] = std::string(support::StdNames::JavaNioByteBuffer);
+    supported = true;
+    return "%" + result;
+  }
+  if (isRuntimeByteBufferOperation) {
+    const bool takesValue =
+        isRuntimeByteBufferSetPosition || isRuntimeByteBufferSetLimit;
+    const bool returnsBuffer = takesValue || isRuntimeByteBufferClear ||
+                               isRuntimeByteBufferFlip || isRuntimeByteBufferRewind;
+    const bool returnsBoolean = isRuntimeByteBufferHasRemaining;
+    const std::vector<std::string> expectedParameters =
+        takesValue ? std::vector<std::string>{std::string(
+                                                  support::StdNames::JavaNioByteBuffer),
+                                              "Int"}
+                   : std::vector<std::string>{
+                         std::string(support::StdNames::JavaNioByteBuffer)};
+    const std::string expectedReturn =
+        returnsBuffer ? std::string(support::StdNames::JavaNioByteBuffer)
+                      : (returnsBoolean ? "Boolean" : "Int");
+    if (value.operands.size() != expectedParameters.size() + 1 ||
+        signature->parameterTypes != expectedParameters ||
+        signature->returnType != expectedReturn || expectedType != expectedReturn) {
+      supported = false;
+      return defaultValue(expectedType);
+    }
+
+    bool bufferSupported = false;
+    const std::string buffer =
+        lowerValue(value.operands[1], std::string(support::StdNames::JavaNioByteBuffer),
+                   state, out, bufferSupported);
+    if (!bufferSupported) {
+      supported = false;
+      return defaultValue(expectedType);
+    }
+    std::string helper;
+    if (isRuntimeByteBufferCapacity) {
+      helper = "__scalanative_byte_buffer_capacity";
+    } else if (isRuntimeByteBufferPosition) {
+      helper = "__scalanative_byte_buffer_position";
+    } else if (isRuntimeByteBufferSetPosition) {
+      helper = "__scalanative_byte_buffer_set_position";
+    } else if (isRuntimeByteBufferLimit) {
+      helper = "__scalanative_byte_buffer_limit";
+    } else if (isRuntimeByteBufferSetLimit) {
+      helper = "__scalanative_byte_buffer_set_limit";
+    } else if (isRuntimeByteBufferRemaining) {
+      helper = "__scalanative_byte_buffer_remaining";
+    } else if (isRuntimeByteBufferHasRemaining) {
+      helper = "__scalanative_byte_buffer_has_remaining";
+    } else if (isRuntimeByteBufferClear) {
+      helper = "__scalanative_byte_buffer_clear";
+    } else if (isRuntimeByteBufferFlip) {
+      helper = "__scalanative_byte_buffer_flip";
+    } else {
+      helper = "__scalanative_byte_buffer_rewind";
+    }
+
+    std::string valueArgument;
+    if (takesValue) {
+      bool valueSupported = false;
+      valueArgument = lowerValue(value.operands[2], "Int", state, out, valueSupported);
+      if (!valueSupported) {
+        supported = false;
+        return defaultValue(expectedType);
+      }
+    }
+    const std::string result = nextTemporary(state);
+    const std::string llvmReturn =
+        returnsBuffer ? "ptr" : (returnsBoolean ? "i1" : "i32");
+    out << "  %" << result << " = call " << llvmReturn << " @" << helper << "(ptr "
+        << buffer;
+    if (takesValue) {
+      out << ", i32 " << valueArgument;
+    }
+    out << ")\n";
+    state.values[result] = llvmReturn;
+    state.simpleTypes[result] = expectedReturn;
+    supported = true;
+    return "%" + result;
+  }
+  if (isRuntimeNativeBytesGetShort || isRuntimeNativeBytesPutShort) {
+    const std::vector<std::string> expectedParameters =
+        isRuntimeNativeBytesGetShort
+            ? std::vector<std::string>{"Array [ Byte ]", "Int"}
+            : std::vector<std::string>{"Array [ Byte ]", "Int", "Short"};
+    const std::string expectedReturn = isRuntimeNativeBytesGetShort ? "Short" : "Unit";
+    if (value.operands.size() != expectedParameters.size() + 1 ||
+        signature->parameterTypes != expectedParameters ||
+        signature->returnType != expectedReturn || expectedType != expectedReturn) {
+      supported = false;
+      return defaultValue(expectedType);
+    }
+
+    bool bytesSupported = false;
+    bool indexSupported = false;
+    const std::string bytes =
+        lowerValue(value.operands[1], "Array [ Byte ]", state, out, bytesSupported);
+    const std::string index =
+        lowerValue(value.operands[2], "Int", state, out, indexSupported);
+    if (!bytesSupported || !indexSupported) {
+      supported = false;
+      return defaultValue(expectedType);
+    }
+    const std::string littleEndian =
+        isRuntimeNativeBytesLittleEndian ? "true" : "false";
+    if (isRuntimeNativeBytesGetShort) {
+      const std::string result = nextTemporary(state);
+      out << "  %" << result << " = call i16 @__scalanative_native_bytes_get_short(ptr "
+          << bytes << ", i32 " << index << ", i1 " << littleEndian << ")\n";
+      state.values[result] = "i16";
+      state.simpleTypes[result] = "Short";
+      supported = true;
+      return "%" + result;
+    }
+
+    bool valueSupported = false;
+    const std::string stored =
+        lowerValue(value.operands[3], "Short", state, out, valueSupported);
+    if (!valueSupported) {
+      supported = false;
+      return defaultValue(expectedType);
+    }
+    out << "  call void @__scalanative_native_bytes_put_short(ptr " << bytes << ", i32 "
+        << index << ", i16 " << stored << ", i1 " << littleEndian << ")\n";
+    supported = true;
+    return {};
+  }
+  if (isRuntimeZoneAllocBytes) {
+    if (value.operands.size() != 2 ||
+        signature->parameterTypes != std::vector<std::string>{"Int"} ||
+        signature->returnType != "Array [ Byte ]" ||
+        expectedType != signature->returnType) {
+      supported = false;
+      return defaultValue(expectedType);
+    }
+    bool lengthSupported = false;
+    const std::string length =
+        lowerValue(value.operands[1], "Int", state, out, lengthSupported);
+    if (!lengthSupported) {
+      supported = false;
+      return defaultValue(expectedType);
+    }
+    emitArrayDimensionCheck(length, state, out);
+
+    const std::string wideLength = nextTemporary(state);
+    const std::string allocationSize = nextTemporary(state);
+    const std::string zone = nextTemporary(state);
+    const std::string array = nextTemporary(state);
+    const std::string lengthSlot = nextTemporary(state);
+    out << "  %" << wideLength << " = zext i32 " << length << " to i64\n";
+    out << "  %" << allocationSize << " = add i64 %" << wideLength << ", "
+        << ObjectHeaderSize + 8 << "\n";
+    out << "  %" << zone << " = load ptr, ptr @__scalanative_current_zone\n";
+    out << "  %" << array << " = call ptr @__scalanative_arena_alloc(ptr %" << zone
+        << ", i64 %" << allocationSize << ", ptr null)\n";
+    out << "  %" << lengthSlot << " = getelementptr i8, ptr %" << array << ", i64 "
+        << ObjectHeaderSize << "\n";
+    out << "  store i64 %" << wideLength << ", ptr %" << lengthSlot << "\n";
+    state.values[wideLength] = "i64";
+    state.simpleTypes[wideLength] = "Long";
+    state.values[allocationSize] = "i64";
+    state.simpleTypes[allocationSize] = "Long";
+    state.values[zone] = "ptr";
+    state.simpleTypes[zone] = "Object";
+    state.values[array] = "ptr";
+    state.simpleTypes[array] = "Array [ Byte ]";
+    state.values[lengthSlot] = "ptr";
+    state.simpleTypes[lengthSlot] = "Object";
+    supported = true;
+    return "%" + array;
   }
   if (isRuntimeArrayAlloc || isRuntimeIntArrayAlloc || isRuntimeByteArrayAlloc ||
       isRuntimeShortArrayAlloc || isRuntimeBooleanArrayAlloc ||
@@ -9587,6 +10072,10 @@ CodegenResult LlvmCodegen::emit(const linker::LinkedProgram& program,
          "c\"Array range is too large\\00\"\n";
   out << "@.str.array_concat_too_large = private unnamed_addr constant [33 x i8] "
          "c\"Array concatenation is too large\\00\"\n\n";
+  out << "@.str.byte_buffer_position = private unnamed_addr constant [37 x i8] "
+         "c\"ByteBuffer position is out of bounds\\00\"\n";
+  out << "@.str.byte_buffer_limit = private unnamed_addr constant [34 x i8] "
+         "c\"ByteBuffer limit is out of bounds\\00\"\n\n";
   out << "@.str.stack_trace_unknown = private unnamed_addr constant [10 x i8] "
          "c\"<unknown>\\00\"\n";
   out << "@.str.stack_trace_element_unknown = private unnamed_addr constant [25 x "

@@ -51,6 +51,63 @@ bool isZoneScopedCall(const frontend::AstExpression& expression) {
          callee.children.front().text == support::StdNames::Zone;
 }
 
+bool isZoneAllocBytesCall(const frontend::AstExpression& expression) {
+  using frontend::AstExpressionKind;
+  if (expression.kind != AstExpressionKind::Call || expression.children.empty()) {
+    return false;
+  }
+  const frontend::AstExpression& callee = expression.children.front();
+  return callee.kind == AstExpressionKind::Select && callee.children.size() == 1 &&
+         callee.text == support::StdNames::ZoneAllocBytes &&
+         callee.children.front().kind == AstExpressionKind::Identifier &&
+         callee.children.front().text == support::StdNames::Zone;
+}
+
+bool isByteBufferWrapCall(const frontend::AstExpression& expression) {
+  using frontend::AstExpressionKind;
+  if (expression.kind != AstExpressionKind::Call || expression.children.empty()) {
+    return false;
+  }
+  const frontend::AstExpression& callee = expression.children.front();
+  return callee.kind == AstExpressionKind::Select && callee.children.size() == 1 &&
+         callee.text == support::StdNames::ByteBufferWrap &&
+         callee.children.front().kind == AstExpressionKind::Identifier &&
+         callee.children.front().text == support::StdNames::ByteBuffer;
+}
+
+std::string_view nativeBytesOperation(const frontend::AstExpression& expression) {
+  using frontend::AstExpressionKind;
+  if (expression.kind != AstExpressionKind::Call || expression.children.empty()) {
+    return {};
+  }
+  const frontend::AstExpression& callee = expression.children.front();
+  if (callee.kind != AstExpressionKind::Select || callee.children.size() != 1 ||
+      callee.children.front().kind != AstExpressionKind::Identifier ||
+      callee.children.front().text != support::StdNames::NativeBytes) {
+    return {};
+  }
+  if (callee.text == support::StdNames::NativeBytesGetShortBe ||
+      callee.text == support::StdNames::NativeBytesGetShortLe ||
+      callee.text == support::StdNames::NativeBytesPutShortBe ||
+      callee.text == support::StdNames::NativeBytesPutShortLe) {
+    return callee.text;
+  }
+  return {};
+}
+
+std::string nativeBytesRuntimeName(std::string_view operation) {
+  if (operation == support::StdNames::NativeBytesGetShortBe) {
+    return std::string(support::StdNames::RuntimeNativeBytesGetShortBe);
+  }
+  if (operation == support::StdNames::NativeBytesGetShortLe) {
+    return std::string(support::StdNames::RuntimeNativeBytesGetShortLe);
+  }
+  if (operation == support::StdNames::NativeBytesPutShortBe) {
+    return std::string(support::StdNames::RuntimeNativeBytesPutShortBe);
+  }
+  return std::string(support::StdNames::RuntimeNativeBytesPutShortLe);
+}
+
 std::string trim(std::string_view text) {
   while (!text.empty() && text.front() == ' ') {
     text.remove_prefix(1);
@@ -498,6 +555,10 @@ std::string qualifyTypeName(const std::string& name, const ValueContext& context
   if (name == "NegativeArraySizeException") {
     return std::string(support::StdNames::JavaLangNegativeArraySizeException);
   }
+  if (name == support::StdNames::ByteBuffer ||
+      name == support::StdNames::JavaNioByteBuffer) {
+    return std::string(support::StdNames::JavaNioByteBuffer);
+  }
   if (name.empty() || name.find('.') != std::string::npos ||
       context.packageName.empty()) {
     return name;
@@ -523,6 +584,53 @@ const frontend::TypeInfo* annotatedTypeFor(const frontend::AstExpression& expres
     }
   }
   return nullptr;
+}
+
+std::string byteBufferRuntimeName(const frontend::AstExpression& expression,
+                                  const ValueContext& context) {
+  using frontend::AstExpressionKind;
+  if (expression.kind != AstExpressionKind::Call || expression.children.empty()) {
+    return {};
+  }
+  const frontend::AstExpression& callee = expression.children.front();
+  if (callee.kind != AstExpressionKind::Select || callee.children.size() != 1) {
+    return {};
+  }
+  const frontend::TypeInfo* receiverType =
+      annotatedTypeFor(callee.children.front(), context);
+  if (receiverType == nullptr ||
+      runtimeTypeName(*receiverType) != support::StdNames::JavaNioByteBuffer) {
+    return {};
+  }
+  if (callee.text == support::StdNames::ByteBufferCapacity) {
+    return std::string(support::StdNames::RuntimeByteBufferCapacity);
+  }
+  if (callee.text == support::StdNames::ByteBufferPosition) {
+    return std::string(expression.children.size() == 1
+                           ? support::StdNames::RuntimeByteBufferPosition
+                           : support::StdNames::RuntimeByteBufferSetPosition);
+  }
+  if (callee.text == support::StdNames::ByteBufferLimit) {
+    return std::string(expression.children.size() == 1
+                           ? support::StdNames::RuntimeByteBufferLimit
+                           : support::StdNames::RuntimeByteBufferSetLimit);
+  }
+  if (callee.text == support::StdNames::ByteBufferRemaining) {
+    return std::string(support::StdNames::RuntimeByteBufferRemaining);
+  }
+  if (callee.text == support::StdNames::ByteBufferHasRemaining) {
+    return std::string(support::StdNames::RuntimeByteBufferHasRemaining);
+  }
+  if (callee.text == support::StdNames::ByteBufferClear) {
+    return std::string(support::StdNames::RuntimeByteBufferClear);
+  }
+  if (callee.text == support::StdNames::ByteBufferFlip) {
+    return std::string(support::StdNames::RuntimeByteBufferFlip);
+  }
+  if (callee.text == support::StdNames::ByteBufferRewind) {
+    return std::string(support::StdNames::RuntimeByteBufferRewind);
+  }
+  return {};
 }
 
 std::string primitiveTypeName(frontend::SimpleTypeKind kind) {
@@ -2157,6 +2265,45 @@ nir::Value valueFor(const frontend::AstExpression& expression,
       return nir::zoneScopedValue(scopedBodyValueFor(expression.children[1], context),
                                   expression.span);
     }
+    if (isZoneAllocBytesCall(expression)) {
+      if (expression.children.size() != 2) {
+        return nir::unknownValue("malformed Zone.allocBytes", expression.span);
+      }
+      return nir::callValue(
+          nir::localValue(std::string(support::StdNames::RuntimeZoneAllocBytes),
+                          expression.span),
+          {expressionValueFor(expression.children[1], context)}, expression.span);
+    }
+    if (isByteBufferWrapCall(expression)) {
+      if (expression.children.size() != 2) {
+        return nir::unknownValue("malformed ByteBuffer.wrap", expression.span);
+      }
+      return nir::callValue(
+          nir::localValue(std::string(support::StdNames::RuntimeByteBufferWrap),
+                          expression.span),
+          {expressionValueFor(expression.children[1], context)}, expression.span);
+    }
+    if (const std::string runtimeName = byteBufferRuntimeName(expression, context);
+        !runtimeName.empty()) {
+      const frontend::AstExpression& callee = expression.children.front();
+      std::vector<nir::Value> arguments{
+          expressionValueFor(callee.children.front(), context)};
+      for (std::size_t i = 1; i < expression.children.size(); ++i) {
+        arguments.push_back(expressionValueFor(expression.children[i], context));
+      }
+      return nir::callValue(nir::localValue(runtimeName, expression.span),
+                            std::move(arguments), expression.span);
+    }
+    if (const std::string_view operation = nativeBytesOperation(expression);
+        !operation.empty()) {
+      std::vector<nir::Value> arguments;
+      for (std::size_t i = 1; i < expression.children.size(); ++i) {
+        arguments.push_back(expressionValueFor(expression.children[i], context));
+      }
+      return nir::callValue(
+          nir::localValue(nativeBytesRuntimeName(operation), expression.span),
+          std::move(arguments), expression.span);
+    }
     const frontend::AstExpression& arrayCallee = expression.children.front();
     const bool inferredArrayLiteral =
         arrayCallee.kind == AstExpressionKind::Identifier &&
@@ -3346,6 +3493,46 @@ nir::Module NirEmitter::emit(const frontend::TypedModule& module) const {
   builder.addFunctionDecl(
       std::string(support::StdNames::RuntimeGcSetCollectionThreshold), "(Long)Unit",
       support::SourceSpan::none());
+  builder.addFunctionDecl(std::string(support::StdNames::RuntimeZoneAllocBytes),
+                          "(Int)Array [ Byte ]", support::SourceSpan::none());
+  builder.addFunctionDecl(std::string(support::StdNames::RuntimeNativeBytesGetShortBe),
+                          "(Array [ Byte ],Int)Short", support::SourceSpan::none());
+  builder.addFunctionDecl(std::string(support::StdNames::RuntimeNativeBytesGetShortLe),
+                          "(Array [ Byte ],Int)Short", support::SourceSpan::none());
+  builder.addFunctionDecl(std::string(support::StdNames::RuntimeNativeBytesPutShortBe),
+                          "(Array [ Byte ],Int,Short)Unit",
+                          support::SourceSpan::none());
+  builder.addFunctionDecl(std::string(support::StdNames::RuntimeNativeBytesPutShortLe),
+                          "(Array [ Byte ],Int,Short)Unit",
+                          support::SourceSpan::none());
+  builder.addFunctionDecl(std::string(support::StdNames::RuntimeByteBufferWrap),
+                          "(Array [ Byte ])java.nio.ByteBuffer",
+                          support::SourceSpan::none());
+  builder.addFunctionDecl(std::string(support::StdNames::RuntimeByteBufferCapacity),
+                          "(java.nio.ByteBuffer)Int", support::SourceSpan::none());
+  builder.addFunctionDecl(std::string(support::StdNames::RuntimeByteBufferPosition),
+                          "(java.nio.ByteBuffer)Int", support::SourceSpan::none());
+  builder.addFunctionDecl(std::string(support::StdNames::RuntimeByteBufferSetPosition),
+                          "(java.nio.ByteBuffer,Int)java.nio.ByteBuffer",
+                          support::SourceSpan::none());
+  builder.addFunctionDecl(std::string(support::StdNames::RuntimeByteBufferLimit),
+                          "(java.nio.ByteBuffer)Int", support::SourceSpan::none());
+  builder.addFunctionDecl(std::string(support::StdNames::RuntimeByteBufferSetLimit),
+                          "(java.nio.ByteBuffer,Int)java.nio.ByteBuffer",
+                          support::SourceSpan::none());
+  builder.addFunctionDecl(std::string(support::StdNames::RuntimeByteBufferRemaining),
+                          "(java.nio.ByteBuffer)Int", support::SourceSpan::none());
+  builder.addFunctionDecl(std::string(support::StdNames::RuntimeByteBufferHasRemaining),
+                          "(java.nio.ByteBuffer)Boolean", support::SourceSpan::none());
+  builder.addFunctionDecl(std::string(support::StdNames::RuntimeByteBufferClear),
+                          "(java.nio.ByteBuffer)java.nio.ByteBuffer",
+                          support::SourceSpan::none());
+  builder.addFunctionDecl(std::string(support::StdNames::RuntimeByteBufferFlip),
+                          "(java.nio.ByteBuffer)java.nio.ByteBuffer",
+                          support::SourceSpan::none());
+  builder.addFunctionDecl(std::string(support::StdNames::RuntimeByteBufferRewind),
+                          "(java.nio.ByteBuffer)java.nio.ByteBuffer",
+                          support::SourceSpan::none());
   builder.addFunctionDecl(std::string(support::StdNames::RuntimeStringLength),
                           "(String)Int", support::SourceSpan::none());
   builder.addFunctionDecl(std::string(support::StdNames::RuntimeStringToString),

@@ -206,6 +206,7 @@ private:
   std::unordered_map<std::string, std::unordered_set<std::string>>
       implicitReceiverMethodNames_;
   std::vector<AstExpression> zoneBodiesToAnalyze_;
+  std::size_t zoneInferenceDepth_ = 0;
 };
 
 [[nodiscard]] const char* simpleTypeKindName(SimpleTypeKind kind);

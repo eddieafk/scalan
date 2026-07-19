@@ -38,6 +38,7 @@ struct StdNames final {
       "java.lang.ArrayIndexOutOfBoundsException";
   inline static constexpr std::string_view JavaLangNegativeArraySizeException =
       "java.lang.NegativeArraySizeException";
+  inline static constexpr std::string_view JavaNioByteBuffer = "java.nio.ByteBuffer";
   inline static constexpr std::string_view ThrowableMessage = "message";
   inline static constexpr std::string_view ThrowableCause = "cause";
   inline static constexpr std::string_view ThrowableTrace = "stackTrace";
@@ -83,6 +84,22 @@ struct StdNames final {
   inline static constexpr std::string_view HashCode = "hashCode";
   inline static constexpr std::string_view Zone = "Zone";
   inline static constexpr std::string_view ZoneScoped = "scoped";
+  inline static constexpr std::string_view ZoneAllocBytes = "allocBytes";
+  inline static constexpr std::string_view NativeBytes = "NativeBytes";
+  inline static constexpr std::string_view NativeBytesGetShortBe = "getShortBE";
+  inline static constexpr std::string_view NativeBytesGetShortLe = "getShortLE";
+  inline static constexpr std::string_view NativeBytesPutShortBe = "putShortBE";
+  inline static constexpr std::string_view NativeBytesPutShortLe = "putShortLE";
+  inline static constexpr std::string_view ByteBuffer = "ByteBuffer";
+  inline static constexpr std::string_view ByteBufferWrap = "wrap";
+  inline static constexpr std::string_view ByteBufferCapacity = "capacity";
+  inline static constexpr std::string_view ByteBufferPosition = "position";
+  inline static constexpr std::string_view ByteBufferLimit = "limit";
+  inline static constexpr std::string_view ByteBufferRemaining = "remaining";
+  inline static constexpr std::string_view ByteBufferHasRemaining = "hasRemaining";
+  inline static constexpr std::string_view ByteBufferClear = "clear";
+  inline static constexpr std::string_view ByteBufferFlip = "flip";
+  inline static constexpr std::string_view ByteBufferRewind = "rewind";
   inline static constexpr std::string_view ArrayEmpty = "empty";
   inline static constexpr std::string_view ArrayFill = "fill";
   inline static constexpr std::string_view ArrayRange = "range";
@@ -108,6 +125,38 @@ struct StdNames final {
       "scala.scalanative.runtime.gcCollectionCount";
   inline static constexpr std::string_view RuntimeGcSetCollectionThreshold =
       "scala.scalanative.runtime.gcSetCollectionThreshold";
+  inline static constexpr std::string_view RuntimeZoneAllocBytes =
+      "scala.scalanative.runtime.zoneAllocBytes";
+  inline static constexpr std::string_view RuntimeNativeBytesGetShortBe =
+      "scala.scalanative.runtime.nativeBytesGetShortBE";
+  inline static constexpr std::string_view RuntimeNativeBytesGetShortLe =
+      "scala.scalanative.runtime.nativeBytesGetShortLE";
+  inline static constexpr std::string_view RuntimeNativeBytesPutShortBe =
+      "scala.scalanative.runtime.nativeBytesPutShortBE";
+  inline static constexpr std::string_view RuntimeNativeBytesPutShortLe =
+      "scala.scalanative.runtime.nativeBytesPutShortLE";
+  inline static constexpr std::string_view RuntimeByteBufferWrap =
+      "scala.scalanative.runtime.byteBufferWrap";
+  inline static constexpr std::string_view RuntimeByteBufferCapacity =
+      "scala.scalanative.runtime.byteBufferCapacity";
+  inline static constexpr std::string_view RuntimeByteBufferPosition =
+      "scala.scalanative.runtime.byteBufferPosition";
+  inline static constexpr std::string_view RuntimeByteBufferSetPosition =
+      "scala.scalanative.runtime.byteBufferSetPosition";
+  inline static constexpr std::string_view RuntimeByteBufferLimit =
+      "scala.scalanative.runtime.byteBufferLimit";
+  inline static constexpr std::string_view RuntimeByteBufferSetLimit =
+      "scala.scalanative.runtime.byteBufferSetLimit";
+  inline static constexpr std::string_view RuntimeByteBufferRemaining =
+      "scala.scalanative.runtime.byteBufferRemaining";
+  inline static constexpr std::string_view RuntimeByteBufferHasRemaining =
+      "scala.scalanative.runtime.byteBufferHasRemaining";
+  inline static constexpr std::string_view RuntimeByteBufferClear =
+      "scala.scalanative.runtime.byteBufferClear";
+  inline static constexpr std::string_view RuntimeByteBufferFlip =
+      "scala.scalanative.runtime.byteBufferFlip";
+  inline static constexpr std::string_view RuntimeByteBufferRewind =
+      "scala.scalanative.runtime.byteBufferRewind";
   inline static constexpr std::string_view RuntimeStringLength =
       "scala.scalanative.runtime.stringLength";
   inline static constexpr std::string_view RuntimeStringToString =

@@ -79,6 +79,10 @@ bool isRuntimeArrayOperation(std::string_view name) {
          name == support::StdNames::RuntimeByteArrayApply ||
          name == support::StdNames::RuntimeByteArrayUpdate ||
          name == support::StdNames::RuntimeByteArrayClone ||
+         name == support::StdNames::RuntimeNativeBytesGetShortBe ||
+         name == support::StdNames::RuntimeNativeBytesGetShortLe ||
+         name == support::StdNames::RuntimeNativeBytesPutShortBe ||
+         name == support::StdNames::RuntimeNativeBytesPutShortLe ||
          name == support::StdNames::RuntimeShortArrayLength ||
          name == support::StdNames::RuntimeShortArrayApply ||
          name == support::StdNames::RuntimeShortArrayUpdate ||
@@ -120,6 +124,7 @@ bool isRuntimeArrayAllocationOperation(std::string_view name) {
       std::string(support::StdNames::RuntimeArrayConcat) + ".";
   return name == support::StdNames::RuntimeArrayAlloc ||
          name == support::StdNames::RuntimeIntArrayAlloc ||
+         name == support::StdNames::RuntimeZoneAllocBytes ||
          name == support::StdNames::RuntimeByteArrayAlloc ||
          name == support::StdNames::RuntimeShortArrayAlloc ||
          name == support::StdNames::RuntimeBooleanArrayAlloc ||
@@ -148,7 +153,10 @@ bool isRuntimeIllegalArgumentOperation(std::string_view name) {
   const std::string concatPrefix =
       std::string(support::StdNames::RuntimeArrayConcat) + ".";
   return isRuntimeRequireOperation(name) ||
-         name == support::StdNames::RuntimeArrayRange || name.starts_with(concatPrefix);
+         name == support::StdNames::RuntimeArrayRange ||
+         name == support::StdNames::RuntimeByteBufferSetPosition ||
+         name == support::StdNames::RuntimeByteBufferSetLimit ||
+         name.starts_with(concatPrefix);
 }
 
 bool isRuntimeNullReceiverOperation(std::string_view name) {
@@ -158,7 +166,18 @@ bool isRuntimeNullReceiverOperation(std::string_view name) {
          name == support::StdNames::RuntimeStringHashCode ||
          name == support::StdNames::RuntimeAnyReceiverToString ||
          name == support::StdNames::RuntimeAnyReceiverEquals ||
-         name == support::StdNames::RuntimeAnyReceiverHashCode;
+         name == support::StdNames::RuntimeAnyReceiverHashCode ||
+         name == support::StdNames::RuntimeByteBufferWrap ||
+         name == support::StdNames::RuntimeByteBufferCapacity ||
+         name == support::StdNames::RuntimeByteBufferPosition ||
+         name == support::StdNames::RuntimeByteBufferSetPosition ||
+         name == support::StdNames::RuntimeByteBufferLimit ||
+         name == support::StdNames::RuntimeByteBufferSetLimit ||
+         name == support::StdNames::RuntimeByteBufferRemaining ||
+         name == support::StdNames::RuntimeByteBufferHasRemaining ||
+         name == support::StdNames::RuntimeByteBufferClear ||
+         name == support::StdNames::RuntimeByteBufferFlip ||
+         name == support::StdNames::RuntimeByteBufferRewind;
 }
 
 std::string ownerNameOf(const std::string& definitionName) {

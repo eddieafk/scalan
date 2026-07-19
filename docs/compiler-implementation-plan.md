@@ -580,6 +580,25 @@ Current scaffold status:
 - CTest now exercises the verifier directly and runs basic source fixtures
   through the CLI/NIR path.
 
+### Future Scala 3 artifact interoperability: TASTy
+
+TASTy is a frontend input and library-interoperability concern, not a replacement
+for NIR. Once the internal symbol/type model and Scala 3 language surface are
+stable enough, add a version-gated TASTy reader that unpickles names, symbols,
+types, ownership, annotations, and supported typed trees into the same internal
+typed AST consumed by Phase 7. Source-compiled and TASTy-loaded definitions must
+therefore share erasure, intrinsic recognition, linking, optimization, codegen,
+and diagnostics after the import boundary.
+
+The first milestone should consume a pinned Scala 3 TASTy version, reject newer
+or malformed files with located compatibility diagnostics, resolve external
+classpaths deterministically, and compile fixtures that mix source units with
+precompiled Scala 3 libraries. Generic signatures, traits, inline-expanded
+artifacts, and Scala Native annotations need explicit round-trip tests. TASTy
+emission, full minor-version compatibility, quoted code, staging, macros, and
+tooling APIs remain separate later milestones rather than implicit reader
+requirements.
+
 ## Phase 7: nscplugin Equivalent - Typed AST to NIR
 
 Goal: Lower typed Scala AST into NIR.
@@ -2591,6 +2610,66 @@ Current scaffold status:
   future native-memory and `ByteBuffer` surface. It does not yet add buffer
   ownership, byte order, indexed bounds contracts, bulk buffer operations, or
   off-heap allocation.
+- Runtime ABI 53 adds the first explicit scoped native-byte allocation surface:
+  `Zone.allocBytes(length): Array[Byte]`. The operation is valid only within a
+  lexical `Zone.scoped` body. LLVM computes the exact array header plus payload
+  size, obtains zeroed storage from the active arena, records arena ownership in
+  the existing tagged header, and stores the requested length. Negative lengths
+  throw `NegativeArraySizeException`; reads and writes reuse the ordinary
+  `Array[Byte]` null and index checks.
+
+  Frontend provenance analysis treats the result as a zone-owned reference and
+  rejects assignment to outer locals or fields, ordinary escaping arguments,
+  and reference-valued zone results. The NIR verifier independently requires
+  the allocation call to remain nested beneath a `zone-scoped` value and allows
+  the owned reference through only the non-escaping Byte-array length, apply,
+  and update operations. Normal scope exit and exception unwinding therefore
+  release the payload with its arena.
+
+  This is a low-level ownership and storage bootstrap, not yet the stateful
+  `ByteBuffer` API. Position/limit/mark state, slicing, byte-order selection,
+  multibyte typed access, bulk transfers, and independently releasable native
+  allocations remain later layers.
+- Runtime ABI 54 adds portable two-byte access over `Array[Byte]` through
+  `NativeBytes.getShortBE`, `getShortLE`, `putShortBE`, and `putShortLE`.
+  Each operation validates nullability, a nonnegative index, and the complete
+  two-byte range before reading or writing. An out-of-range store therefore
+  throws `ArrayIndexOutOfBoundsException` without modifying either byte.
+
+  LLVM composes and separates the two bytes explicitly rather than relying on
+  an unaligned native `i16` load or the host byte order. Reads preserve all
+  sixteen bits in the signed `Short` result, and writes preserve the two's
+  complement representation of negative values. The operations accept ordinary
+  and zone-owned Byte arrays; frontend and NIR lifetime analyses recognize them
+  as non-escaping accesses when the storage belongs to `Zone.scoped`.
+
+  These primitives are the endian and typed-access substrate for a future
+  stateful `ByteBuffer`. Buffer position, limit, mark, relative operations, and
+  views remain separate higher-level contracts.
+- Runtime ABI 55 begins the stateful `ByteBuffer` surface with
+  `ByteBuffer.wrap(Array[Byte])`. A compact runtime object records the backing
+  array, immutable capacity, mutable position and limit, and an internal
+  invalidated mark. The initial state is position zero and limit equal to
+  capacity. `capacity()`, both `position` forms, both `limit` forms,
+  `remaining()`, `hasRemaining()`, `clear()`, `flip()`, and `rewind()` now lower
+  to typed NIR intrinsics and dedicated LLVM helpers.
+
+  Position changes require `0 <= position <= limit`; limit changes require
+  `0 <= limit <= capacity`, clamp the current position when necessary, and
+  invalidate an out-of-range mark. Violations throw catchable
+  `IllegalArgumentException` instances with concise buffer-specific messages.
+  Null storage and null receivers retain the existing catchable null contracts.
+  Mutating operations return the same buffer so state transitions can be
+  chained.
+
+  Buffer state follows the lightweight ownership policy: wrapping inside
+  `Zone.scoped` allocates the state in the active arena and provenance analysis
+  prevents it from escaping, while wrapping outside a zone uses the
+  program-lifetime arena. Zone-backed Byte storage can therefore be wrapped
+  without weakening ABI 53's lifetime checks. This first slice does not yet add
+  relative or indexed get/put, underflow/overflow exceptions, byte-order state,
+  mark/reset, slicing, duplication, read-only views, bulk transfer, or a complete
+  `java.nio` compatibility layer.
 - The frontend seeds a tiny runtime builtin, `println(value): Unit`, for the
   currently supported literal/value subset.
 - `cpp-nscplugin` emits `scala.scalanative.runtime.println : (Unknown)Unit` as a
