@@ -555,6 +555,12 @@ std::string qualifyTypeName(const std::string& name, const ValueContext& context
   if (name == "NegativeArraySizeException") {
     return std::string(support::StdNames::JavaLangNegativeArraySizeException);
   }
+  if (name == "BufferUnderflowException") {
+    return std::string(support::StdNames::JavaNioBufferUnderflowException);
+  }
+  if (name == "BufferOverflowException") {
+    return std::string(support::StdNames::JavaNioBufferOverflowException);
+  }
   if (name == support::StdNames::ByteBuffer ||
       name == support::StdNames::JavaNioByteBuffer) {
     return std::string(support::StdNames::JavaNioByteBuffer);
@@ -620,6 +626,12 @@ std::string byteBufferRuntimeName(const frontend::AstExpression& expression,
   }
   if (callee.text == support::StdNames::ByteBufferHasRemaining) {
     return std::string(support::StdNames::RuntimeByteBufferHasRemaining);
+  }
+  if (callee.text == support::StdNames::ByteBufferGet) {
+    return std::string(support::StdNames::RuntimeByteBufferGet);
+  }
+  if (callee.text == support::StdNames::ByteBufferPut) {
+    return std::string(support::StdNames::RuntimeByteBufferPut);
   }
   if (callee.text == support::StdNames::ByteBufferClear) {
     return std::string(support::StdNames::RuntimeByteBufferClear);
@@ -3461,6 +3473,10 @@ nir::Module NirEmitter::emit(const frontend::TypedModule& module) const {
                    support::StdNames::JavaLangArrayIndexOutOfBoundsException &&
                declaration.symbolName !=
                    support::StdNames::JavaLangNegativeArraySizeException &&
+               declaration.symbolName !=
+                   support::StdNames::JavaNioBufferUnderflowException &&
+               declaration.symbolName !=
+                   support::StdNames::JavaNioBufferOverflowException &&
                declaration.symbolName != support::StdNames::JavaLangStackTraceElement;
       });
   if (!hasUserDeclarations) {
@@ -3524,6 +3540,11 @@ nir::Module NirEmitter::emit(const frontend::TypedModule& module) const {
                           "(java.nio.ByteBuffer)Int", support::SourceSpan::none());
   builder.addFunctionDecl(std::string(support::StdNames::RuntimeByteBufferHasRemaining),
                           "(java.nio.ByteBuffer)Boolean", support::SourceSpan::none());
+  builder.addFunctionDecl(std::string(support::StdNames::RuntimeByteBufferGet),
+                          "(java.nio.ByteBuffer)Byte", support::SourceSpan::none());
+  builder.addFunctionDecl(std::string(support::StdNames::RuntimeByteBufferPut),
+                          "(java.nio.ByteBuffer,Byte)java.nio.ByteBuffer",
+                          support::SourceSpan::none());
   builder.addFunctionDecl(std::string(support::StdNames::RuntimeByteBufferClear),
                           "(java.nio.ByteBuffer)java.nio.ByteBuffer",
                           support::SourceSpan::none());

@@ -3049,7 +3049,7 @@ object Main {
                        "declare @scala.scalanative.runtime.referenceArrayUpdate."
                        "java.lang.StackTraceElement") &&
               contains(result.nirText, "throw %failure") &&
-              contains(result.llvmIr, "Runtime ABI = 'cpp-scalanative-runtime-55'") &&
+              contains(result.llvmIr, "Runtime ABI = 'cpp-scalanative-runtime-56'") &&
               contains(result.llvmIr, "@__type_java_lang_ArrayStoreException =") &&
               contains(result.llvmIr,
                        "define internal void @__scalanative_throw_array_store() "
@@ -4739,7 +4739,7 @@ object Invalid {
       driver.buildSource("TryCatchStage.scala", source, llvmOptions, llvmDiagnostics);
   if (int code = expect(
           llvm.ok &&
-              contains(llvm.llvmIr, "Runtime ABI = 'cpp-scalanative-runtime-55'") &&
+              contains(llvm.llvmIr, "Runtime ABI = 'cpp-scalanative-runtime-56'") &&
               contains(llvm.llvmIr, "%scalanative.exception_handler = type { ptr, ptr, "
                                     "ptr, ptr, ptr }") &&
               contains(llvm.llvmIr, "declare i32 @_setjmp(ptr) returns_twice") &&
@@ -4894,7 +4894,7 @@ object Main {
           contains(result.nirText,
                    "declare @scala.scalanative.runtime.shortArrayApply : "
                    "(Array [ Short ],Int)Short") &&
-          contains(result.llvmIr, "Runtime ABI = 'cpp-scalanative-runtime-55'") &&
+          contains(result.llvmIr, "Runtime ABI = 'cpp-scalanative-runtime-56'") &&
           contains(result.llvmIr, "@__scalanative_boxed_Byte =") &&
           contains(result.llvmIr, "@__scalanative_boxed_Short =") &&
           contains(result.llvmIr, "define internal i8 @__scalanative_array_byte_at") &&
@@ -5136,7 +5136,7 @@ object Main {
           contains(result.nirText,
                    "declare @scala.scalanative.runtime.nativeBytesPutShortLE : "
                    "(Array [ Byte ],Int,Short)Unit") &&
-          contains(result.llvmIr, "Runtime ABI = 'cpp-scalanative-runtime-55'") &&
+          contains(result.llvmIr, "Runtime ABI = 'cpp-scalanative-runtime-56'") &&
           contains(result.llvmIr, "load ptr, ptr @__scalanative_current_zone") &&
           contains(result.llvmIr, "call ptr @__scalanative_arena_alloc(ptr %") &&
           contains(result.llvmIr,
@@ -5208,6 +5208,52 @@ object Main {
       (if (buffer.hasRemaining()) 1 else 0)
   }
 
+  def relativeRoundTrip(): Int = {
+    val buffer = ByteBuffer.wrap(Array[Byte](0.toByte, 0.toByte, 0.toByte))
+    buffer.put(7.toByte).put((0 - 2).toByte)
+    val writePosition = buffer.position()
+    buffer.flip()
+    val first = buffer.get().toInt
+    val second = buffer.get().toInt
+    first * 10000 + (second + 128) * 100 +
+      writePosition * 10 + buffer.position()
+  }
+
+  def zoneRelativeAccess(): Int =
+    Zone.scoped({
+      val buffer = ByteBuffer.wrap(Zone.allocBytes(2))
+      buffer.put(12.toByte).put(34.toByte).flip()
+      buffer.get().toInt * 1000 +
+        buffer.get().toInt * 10 +
+        buffer.position()
+    })
+
+  def rejectUnderflow(): String = {
+    val buffer = ByteBuffer.wrap(Array[Byte](1.toByte))
+    buffer.position(1)
+    try {
+      buffer.get()
+      "underflow was accepted"
+    } catch {
+      case failure: BufferUnderflowException =>
+        "underflow: " + failure.getMessage + " @" + buffer.position()
+    }
+  }
+
+  def rejectOverflow(): String = {
+    val bytes = Array[Byte](9.toByte)
+    val buffer = ByteBuffer.wrap(bytes)
+    buffer.limit(0)
+    try {
+      buffer.put(3.toByte)
+      "overflow was accepted"
+    } catch {
+      case failure: BufferOverflowException =>
+        "overflow: " + failure.getMessage + " @" +
+          buffer.position() + "/" + bytes(0).toInt
+    }
+  }
+
   def rejectPosition(): String =
     try {
       ByteBuffer.wrap(Array[Byte](0.toByte, 0.toByte)).position(3)
@@ -5252,6 +5298,10 @@ object Main {
     println(controlState())
     println(clampedPosition())
     println(emptyState())
+    println(relativeRoundTrip())
+    println(zoneRelativeAccess())
+    println(rejectUnderflow())
+    println(rejectOverflow())
     println(rejectPosition())
     println(rejectLimit())
     println(rejectNullStorage())
@@ -5274,6 +5324,8 @@ object Main {
   val buffer = ByteBuffer.wrap(Array[Byte](0.toByte, 0.toByte))
   buffer.position(1.toShort)
   buffer.clear(1)
+  buffer.get(1)
+  buffer.put(1)
 }
 )";
 
@@ -5322,6 +5374,10 @@ object Main {
                   "60008\n"
                   "330\n"
                   "0\n"
+                  "82622\n"
+                  "12342\n"
+                  "underflow: ByteBuffer underflow @1\n"
+                  "overflow: ByteBuffer overflow @0/9\n"
                   "position: ByteBuffer position is out of bounds\n"
                   "limit: ByteBuffer limit is out of bounds\n"
                   "null storage: Array cannot be null\n"
@@ -5334,6 +5390,8 @@ object Main {
                    "ByteBuffer.wrap storage must have type Array[Byte]") &&
           contains(invalid.diagnosticsText, "position value must have type Int") &&
           contains(invalid.diagnosticsText, "clear does not accept arguments") &&
+          contains(invalid.diagnosticsText, "get does not accept arguments") &&
+          contains(invalid.diagnosticsText, "put value must have type Byte") &&
           contains(result.nirText,
                    "declare @scala.scalanative.runtime.byteBufferWrap : "
                    "(Array [ Byte ])java.nio.ByteBuffer") &&
@@ -5343,9 +5401,15 @@ object Main {
           contains(result.nirText,
                    "declare @scala.scalanative.runtime.byteBufferHasRemaining : "
                    "(java.nio.ByteBuffer)Boolean") &&
+          contains(result.nirText, "declare @scala.scalanative.runtime.byteBufferGet : "
+                                   "(java.nio.ByteBuffer)Byte") &&
+          contains(result.nirText, "declare @scala.scalanative.runtime.byteBufferPut : "
+                                   "(java.nio.ByteBuffer,Byte)java.nio.ByteBuffer") &&
           contains(result.nirText, "call %scala.scalanative.runtime.byteBufferWrap(") &&
           contains(result.nirText, "call %scala.scalanative.runtime.byteBufferFlip(") &&
-          contains(result.llvmIr, "Runtime ABI = 'cpp-scalanative-runtime-55'") &&
+          contains(result.nirText, "call %scala.scalanative.runtime.byteBufferGet(") &&
+          contains(result.nirText, "call %scala.scalanative.runtime.byteBufferPut(") &&
+          contains(result.llvmIr, "Runtime ABI = 'cpp-scalanative-runtime-56'") &&
           contains(result.llvmIr,
                    "define internal ptr @__scalanative_byte_buffer_wrap") &&
           contains(result.llvmIr,
@@ -5358,6 +5422,16 @@ object Main {
                    "define internal i32 @__scalanative_byte_buffer_remaining") &&
           contains(result.llvmIr,
                    "define internal i1 @__scalanative_byte_buffer_has_remaining") &&
+          contains(result.llvmIr,
+                   "define internal i8 @__scalanative_byte_buffer_get") &&
+          contains(result.llvmIr,
+                   "define internal ptr @__scalanative_byte_buffer_put") &&
+          contains(result.llvmIr, "@__type_java_nio_BufferUnderflowException =") &&
+          contains(result.llvmIr, "@__type_java_nio_BufferOverflowException =") &&
+          contains(result.llvmIr,
+                   "call void @__scalanative_throw_byte_buffer_underflow()") &&
+          contains(result.llvmIr,
+                   "call void @__scalanative_throw_byte_buffer_overflow()") &&
           contains(result.llvmIr,
                    "call void @__scalanative_throw_byte_buffer_position()") &&
           contains(result.llvmIr, "call void @__scalanative_throw_byte_buffer_limit()"),

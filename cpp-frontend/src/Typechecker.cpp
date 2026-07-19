@@ -166,6 +166,8 @@ bool isByteBufferOperationName(std::string_view operation) {
          operation == support::StdNames::ByteBufferLimit ||
          operation == support::StdNames::ByteBufferRemaining ||
          operation == support::StdNames::ByteBufferHasRemaining ||
+         operation == support::StdNames::ByteBufferGet ||
+         operation == support::StdNames::ByteBufferPut ||
          operation == support::StdNames::ByteBufferClear ||
          operation == support::StdNames::ByteBufferFlip ||
          operation == support::StdNames::ByteBufferRewind;
@@ -721,6 +723,14 @@ std::vector<TypedDeclaration> standardExceptionDeclarations() {
       "NegativeArraySizeException",
       std::string(support::StdNames::JavaLangNegativeArraySizeException),
       runtimeException.symbolName);
+  TypedDeclaration bufferUnderflow =
+      exceptionSubclass("BufferUnderflowException",
+                        std::string(support::StdNames::JavaNioBufferUnderflowException),
+                        runtimeException.symbolName);
+  TypedDeclaration bufferOverflow =
+      exceptionSubclass("BufferOverflowException",
+                        std::string(support::StdNames::JavaNioBufferOverflowException),
+                        runtimeException.symbolName);
   TypedDeclaration stackTraceElement;
   stackTraceElement.kind = AstDeclarationKind::Class;
   stackTraceElement.name = "StackTraceElement";
@@ -759,7 +769,8 @@ std::vector<TypedDeclaration> standardExceptionDeclarations() {
           std::move(illegalState),        std::move(nullPointer),
           std::move(classCast),           std::move(arrayStore),
           std::move(indexOutOfBounds),    std::move(arrayIndexOutOfBounds),
-          std::move(negativeArraySize),   std::move(stackTraceElement)};
+          std::move(negativeArraySize),   std::move(bufferUnderflow),
+          std::move(bufferOverflow),      std::move(stackTraceElement)};
 }
 
 } // namespace
@@ -1610,6 +1621,12 @@ void Typechecker::addRuntimeBuiltins(Scope& scope) {
       "NegativeArraySizeException",
       std::string(support::StdNames::JavaLangNegativeArraySizeException),
       std::string(support::StdNames::JavaLangRuntimeException));
+  addExceptionSubclass("BufferUnderflowException",
+                       std::string(support::StdNames::JavaNioBufferUnderflowException),
+                       std::string(support::StdNames::JavaLangRuntimeException));
+  addExceptionSubclass("BufferOverflowException",
+                       std::string(support::StdNames::JavaNioBufferOverflowException),
+                       std::string(support::StdNames::JavaLangRuntimeException));
 
   SymbolInfo stackTraceElement;
   stackTraceElement.kind = AstDeclarationKind::Class;
@@ -2148,21 +2165,25 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
           const bool positionOrLimit =
               selected.text == support::StdNames::ByteBufferPosition ||
               selected.text == support::StdNames::ByteBufferLimit;
-          if ((positionOrLimit && argumentCount > 1) ||
-              (!positionOrLimit && argumentCount != 0)) {
-            diagnostics_.error(
-                expression.span,
-                selected.text + (positionOrLimit ? " accepts zero or one Int argument"
-                                                 : " does not accept arguments"));
+          const bool put = selected.text == support::StdNames::ByteBufferPut;
+          if ((positionOrLimit && argumentCount > 1) || (put && argumentCount != 1) ||
+              (!positionOrLimit && !put && argumentCount != 0)) {
+            const std::string argumentContract =
+                positionOrLimit ? " accepts zero or one Int argument"
+                                : (put ? " requires exactly one Byte argument"
+                                       : " does not accept arguments");
+            diagnostics_.error(expression.span, selected.text + argumentContract);
             for (std::size_t i = 1; i < expression.children.size(); ++i) {
               (void)inferExpressionType(expression.children[i], scope);
             }
           } else if (argumentCount == 1) {
             const TypeInfo value = inferExpressionType(expression.children[1], scope);
-            if (value.kind != SimpleTypeKind::Int &&
-                value.kind != SimpleTypeKind::Unknown) {
+            const SimpleTypeKind expectedKind =
+                put ? SimpleTypeKind::Byte : SimpleTypeKind::Int;
+            if (value.kind != expectedKind && value.kind != SimpleTypeKind::Unknown) {
               diagnostics_.error(expression.children[1].span,
-                                 selected.text + " value must have type Int");
+                                 selected.text + " value must have type " +
+                                     (put ? "Byte" : "Int"));
             }
           }
 
@@ -2177,6 +2198,9 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
           }
           if (selected.text == support::StdNames::ByteBufferHasRemaining) {
             return TypeInfo{SimpleTypeKind::Boolean, "Boolean"};
+          }
+          if (selected.text == support::StdNames::ByteBufferGet) {
+            return TypeInfo{SimpleTypeKind::Byte, "Byte"};
           }
           return TypeInfo{SimpleTypeKind::Object,
                           std::string(support::StdNames::JavaNioByteBuffer)};
@@ -3648,6 +3672,7 @@ bool Typechecker::analyzeZoneExpression(
           }
         }
         const bool returnsBuffer =
+            selected.text == support::StdNames::ByteBufferPut ||
             selected.text == support::StdNames::ByteBufferClear ||
             selected.text == support::StdNames::ByteBufferFlip ||
             selected.text == support::StdNames::ByteBufferRewind ||

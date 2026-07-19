@@ -113,12 +113,14 @@ bool isByteBufferQuery(std::string_view target) {
          target == support::StdNames::RuntimeByteBufferPosition ||
          target == support::StdNames::RuntimeByteBufferLimit ||
          target == support::StdNames::RuntimeByteBufferRemaining ||
-         target == support::StdNames::RuntimeByteBufferHasRemaining;
+         target == support::StdNames::RuntimeByteBufferHasRemaining ||
+         target == support::StdNames::RuntimeByteBufferGet;
 }
 
 bool isByteBufferMutation(std::string_view target) {
   return target == support::StdNames::RuntimeByteBufferSetPosition ||
          target == support::StdNames::RuntimeByteBufferSetLimit ||
+         target == support::StdNames::RuntimeByteBufferPut ||
          target == support::StdNames::RuntimeByteBufferClear ||
          target == support::StdNames::RuntimeByteBufferFlip ||
          target == support::StdNames::RuntimeByteBufferRewind;

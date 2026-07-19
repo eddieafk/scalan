@@ -159,6 +159,14 @@ bool isRuntimeIllegalArgumentOperation(std::string_view name) {
          name.starts_with(concatPrefix);
 }
 
+bool isRuntimeBufferUnderflowOperation(std::string_view name) {
+  return name == support::StdNames::RuntimeByteBufferGet;
+}
+
+bool isRuntimeBufferOverflowOperation(std::string_view name) {
+  return name == support::StdNames::RuntimeByteBufferPut;
+}
+
 bool isRuntimeNullReceiverOperation(std::string_view name) {
   return name == support::StdNames::RuntimeStringLength ||
          name == support::StdNames::RuntimeStringToString ||
@@ -175,6 +183,8 @@ bool isRuntimeNullReceiverOperation(std::string_view name) {
          name == support::StdNames::RuntimeByteBufferSetLimit ||
          name == support::StdNames::RuntimeByteBufferRemaining ||
          name == support::StdNames::RuntimeByteBufferHasRemaining ||
+         name == support::StdNames::RuntimeByteBufferGet ||
+         name == support::StdNames::RuntimeByteBufferPut ||
          name == support::StdNames::RuntimeByteBufferClear ||
          name == support::StdNames::RuntimeByteBufferFlip ||
          name == support::StdNames::RuntimeByteBufferRewind;
@@ -985,6 +995,22 @@ collectDefinitionReferences(const nir::Definition& definition,
         support::StdNames::JavaLangIllegalArgumentException);
     if (globals.contains(illegalArgumentName)) {
       references.push_back(illegalArgumentName);
+    }
+  }
+  if (isFunction(definition.kind) &&
+      isRuntimeBufferUnderflowOperation(definition.name)) {
+    const std::string bufferUnderflowName(
+        support::StdNames::JavaNioBufferUnderflowException);
+    if (globals.contains(bufferUnderflowName)) {
+      references.push_back(bufferUnderflowName);
+    }
+  }
+  if (isFunction(definition.kind) &&
+      isRuntimeBufferOverflowOperation(definition.name)) {
+    const std::string bufferOverflowName(
+        support::StdNames::JavaNioBufferOverflowException);
+    if (globals.contains(bufferOverflowName)) {
+      references.push_back(bufferOverflowName);
     }
   }
   if (isFunction(definition.kind) && isRuntimeArrayOperation(definition.name)) {

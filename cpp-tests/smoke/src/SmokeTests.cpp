@@ -7128,7 +7128,7 @@ int smokeBoxedDependentScalarsMvp() {
                   scalanative::runtime::ObjectOwnership::Arena) == 1 &&
               std::string_view(scalanative::runtime::objectOwnershipName(
                   scalanative::runtime::ObjectOwnership::Immortal)) == "immortal" &&
-              scalanative::runtime::runtimeAbiName() == "cpp-scalanative-runtime-55",
+              scalanative::runtime::runtimeAbiName() == "cpp-scalanative-runtime-56",
           "boxed primitive runtime metadata is not stable")) {
     return code;
   }
@@ -7211,7 +7211,7 @@ object Main {
     return code;
   }
   if (int code = expect(
-          contains(result.llvmIr, "Runtime ABI = 'cpp-scalanative-runtime-55'") &&
+          contains(result.llvmIr, "Runtime ABI = 'cpp-scalanative-runtime-56'") &&
               contains(result.llvmIr,
                        "@__scalanative_boxed_Unit = private constant "
                        "%scalanative.type_descriptor { i32 2, i32 7, i64 8, i32 8, "

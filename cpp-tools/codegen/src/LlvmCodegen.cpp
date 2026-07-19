@@ -1230,6 +1230,63 @@ void emitRuntimeTypeHelpers(std::ostringstream& out,
   out << "  ret i1 %has_remaining\n";
   out << "}\n\n";
 
+  out << "define internal i8 @__scalanative_byte_buffer_get(ptr %buffer) {\n";
+  out << "entry:\n";
+  out << "  call void @__scalanative_byte_buffer_require(ptr %buffer)\n";
+  out << "  %position_slot = getelementptr i8, ptr %buffer, i64 "
+      << ByteBufferPositionOffset << "\n";
+  out << "  %limit_slot = getelementptr i8, ptr %buffer, i64 " << ByteBufferLimitOffset
+      << "\n";
+  out << "  %position = load i32, ptr %position_slot\n";
+  out << "  %limit = load i32, ptr %limit_slot\n";
+  out << "  %has_remaining = icmp slt i32 %position, %limit\n";
+  out << "  br i1 %has_remaining, label %read, label %underflow\n";
+  out << "read:\n";
+  out << "  %backing_slot = getelementptr i8, ptr %buffer, i64 "
+      << ByteBufferBackingOffset << "\n";
+  out << "  %array = load ptr, ptr %backing_slot\n";
+  out << "  %elements = getelementptr i8, ptr %array, i64 " << ObjectHeaderSize + 8
+      << "\n";
+  out << "  %wide_position = sext i32 %position to i64\n";
+  out << "  %element_slot = getelementptr i8, ptr %elements, i64 %wide_position\n";
+  out << "  %value = load i8, ptr %element_slot\n";
+  out << "  %next_position = add i32 %position, 1\n";
+  out << "  store i32 %next_position, ptr %position_slot\n";
+  out << "  ret i8 %value\n";
+  out << "underflow:\n";
+  out << "  call void @__scalanative_throw_byte_buffer_underflow()\n";
+  out << "  unreachable\n";
+  out << "}\n\n";
+
+  out << "define internal ptr @__scalanative_byte_buffer_put(ptr %buffer, i8 %value) "
+         "{\n";
+  out << "entry:\n";
+  out << "  call void @__scalanative_byte_buffer_require(ptr %buffer)\n";
+  out << "  %position_slot = getelementptr i8, ptr %buffer, i64 "
+      << ByteBufferPositionOffset << "\n";
+  out << "  %limit_slot = getelementptr i8, ptr %buffer, i64 " << ByteBufferLimitOffset
+      << "\n";
+  out << "  %position = load i32, ptr %position_slot\n";
+  out << "  %limit = load i32, ptr %limit_slot\n";
+  out << "  %has_remaining = icmp slt i32 %position, %limit\n";
+  out << "  br i1 %has_remaining, label %write, label %overflow\n";
+  out << "write:\n";
+  out << "  %backing_slot = getelementptr i8, ptr %buffer, i64 "
+      << ByteBufferBackingOffset << "\n";
+  out << "  %array = load ptr, ptr %backing_slot\n";
+  out << "  %elements = getelementptr i8, ptr %array, i64 " << ObjectHeaderSize + 8
+      << "\n";
+  out << "  %wide_position = sext i32 %position to i64\n";
+  out << "  %element_slot = getelementptr i8, ptr %elements, i64 %wide_position\n";
+  out << "  store i8 %value, ptr %element_slot\n";
+  out << "  %next_position = add i32 %position, 1\n";
+  out << "  store i32 %next_position, ptr %position_slot\n";
+  out << "  ret ptr %buffer\n";
+  out << "overflow:\n";
+  out << "  call void @__scalanative_throw_byte_buffer_overflow()\n";
+  out << "  unreachable\n";
+  out << "}\n\n";
+
   out << "define internal ptr @__scalanative_byte_buffer_set_position(ptr %buffer, "
          "i32 %value) {\n";
   out << "entry:\n";
@@ -2855,6 +2912,10 @@ void emitExceptionRuntimeHelpers(
       std::string(support::StdNames::JavaLangArrayIndexOutOfBoundsException));
   const auto negativeArraySize = classLayouts.find(
       std::string(support::StdNames::JavaLangNegativeArraySizeException));
+  const auto bufferUnderflow = classLayouts.find(
+      std::string(support::StdNames::JavaNioBufferUnderflowException));
+  const auto bufferOverflow =
+      classLayouts.find(std::string(support::StdNames::JavaNioBufferOverflowException));
   const auto message = fields.find(messageFieldName);
   const auto cause = fields.find(causeFieldName);
   const auto trace = fields.find(traceFieldName);
@@ -2943,6 +3004,10 @@ void emitExceptionRuntimeHelpers(
                      ".str.byte_buffer_position", 37);
   emitRuntimeFailure("__scalanative_throw_byte_buffer_limit", illegalArgument,
                      ".str.byte_buffer_limit", 34);
+  emitRuntimeFailure("__scalanative_throw_byte_buffer_underflow", bufferUnderflow,
+                     ".str.byte_buffer_underflow", 21);
+  emitRuntimeFailure("__scalanative_throw_byte_buffer_overflow", bufferOverflow,
+                     ".str.byte_buffer_overflow", 20);
 
   const auto emitCheckedCondition = [&](std::string_view helperName,
                                         std::string_view failureHelper) {
@@ -6155,6 +6220,8 @@ std::string lowerCall(const nir::Value& value, const std::string& expectedType,
       target == support::StdNames::RuntimeByteBufferRemaining;
   const bool isRuntimeByteBufferHasRemaining =
       target == support::StdNames::RuntimeByteBufferHasRemaining;
+  const bool isRuntimeByteBufferGet = target == support::StdNames::RuntimeByteBufferGet;
+  const bool isRuntimeByteBufferPut = target == support::StdNames::RuntimeByteBufferPut;
   const bool isRuntimeByteBufferClear =
       target == support::StdNames::RuntimeByteBufferClear;
   const bool isRuntimeByteBufferFlip =
@@ -6165,8 +6232,9 @@ std::string lowerCall(const nir::Value& value, const std::string& expectedType,
       isRuntimeByteBufferCapacity || isRuntimeByteBufferPosition ||
       isRuntimeByteBufferSetPosition || isRuntimeByteBufferLimit ||
       isRuntimeByteBufferSetLimit || isRuntimeByteBufferRemaining ||
-      isRuntimeByteBufferHasRemaining || isRuntimeByteBufferClear ||
-      isRuntimeByteBufferFlip || isRuntimeByteBufferRewind;
+      isRuntimeByteBufferHasRemaining || isRuntimeByteBufferGet ||
+      isRuntimeByteBufferPut || isRuntimeByteBufferClear || isRuntimeByteBufferFlip ||
+      isRuntimeByteBufferRewind;
   const bool isRuntimeArrayAlloc = target == support::StdNames::RuntimeArrayAlloc;
   const bool isRuntimeArrayLength = target == support::StdNames::RuntimeArrayLength;
   const bool isRuntimeArrayApply = target == support::StdNames::RuntimeArrayApply;
@@ -7203,20 +7271,22 @@ std::string lowerCall(const nir::Value& value, const std::string& expectedType,
     return "%" + result;
   }
   if (isRuntimeByteBufferOperation) {
-    const bool takesValue =
-        isRuntimeByteBufferSetPosition || isRuntimeByteBufferSetLimit;
+    const bool takesValue = isRuntimeByteBufferSetPosition ||
+                            isRuntimeByteBufferSetLimit || isRuntimeByteBufferPut;
     const bool returnsBuffer = takesValue || isRuntimeByteBufferClear ||
                                isRuntimeByteBufferFlip || isRuntimeByteBufferRewind;
     const bool returnsBoolean = isRuntimeByteBufferHasRemaining;
+    const bool returnsByte = isRuntimeByteBufferGet;
+    const std::string valueType = isRuntimeByteBufferPut ? "Byte" : "Int";
     const std::vector<std::string> expectedParameters =
         takesValue ? std::vector<std::string>{std::string(
                                                   support::StdNames::JavaNioByteBuffer),
-                                              "Int"}
+                                              valueType}
                    : std::vector<std::string>{
                          std::string(support::StdNames::JavaNioByteBuffer)};
     const std::string expectedReturn =
         returnsBuffer ? std::string(support::StdNames::JavaNioByteBuffer)
-                      : (returnsBoolean ? "Boolean" : "Int");
+                      : (returnsBoolean ? "Boolean" : (returnsByte ? "Byte" : "Int"));
     if (value.operands.size() != expectedParameters.size() + 1 ||
         signature->parameterTypes != expectedParameters ||
         signature->returnType != expectedReturn || expectedType != expectedReturn) {
@@ -7247,6 +7317,10 @@ std::string lowerCall(const nir::Value& value, const std::string& expectedType,
       helper = "__scalanative_byte_buffer_remaining";
     } else if (isRuntimeByteBufferHasRemaining) {
       helper = "__scalanative_byte_buffer_has_remaining";
+    } else if (isRuntimeByteBufferGet) {
+      helper = "__scalanative_byte_buffer_get";
+    } else if (isRuntimeByteBufferPut) {
+      helper = "__scalanative_byte_buffer_put";
     } else if (isRuntimeByteBufferClear) {
       helper = "__scalanative_byte_buffer_clear";
     } else if (isRuntimeByteBufferFlip) {
@@ -7258,7 +7332,8 @@ std::string lowerCall(const nir::Value& value, const std::string& expectedType,
     std::string valueArgument;
     if (takesValue) {
       bool valueSupported = false;
-      valueArgument = lowerValue(value.operands[2], "Int", state, out, valueSupported);
+      valueArgument =
+          lowerValue(value.operands[2], valueType, state, out, valueSupported);
       if (!valueSupported) {
         supported = false;
         return defaultValue(expectedType);
@@ -7266,11 +7341,11 @@ std::string lowerCall(const nir::Value& value, const std::string& expectedType,
     }
     const std::string result = nextTemporary(state);
     const std::string llvmReturn =
-        returnsBuffer ? "ptr" : (returnsBoolean ? "i1" : "i32");
+        returnsBuffer ? "ptr" : (returnsBoolean ? "i1" : (returnsByte ? "i8" : "i32"));
     out << "  %" << result << " = call " << llvmReturn << " @" << helper << "(ptr "
         << buffer;
     if (takesValue) {
-      out << ", i32 " << valueArgument;
+      out << ", " << llvmType(valueType) << " " << valueArgument;
     }
     out << ")\n";
     state.values[result] = llvmReturn;
@@ -10075,7 +10150,11 @@ CodegenResult LlvmCodegen::emit(const linker::LinkedProgram& program,
   out << "@.str.byte_buffer_position = private unnamed_addr constant [37 x i8] "
          "c\"ByteBuffer position is out of bounds\\00\"\n";
   out << "@.str.byte_buffer_limit = private unnamed_addr constant [34 x i8] "
-         "c\"ByteBuffer limit is out of bounds\\00\"\n\n";
+         "c\"ByteBuffer limit is out of bounds\\00\"\n";
+  out << "@.str.byte_buffer_underflow = private unnamed_addr constant [21 x i8] "
+         "c\"ByteBuffer underflow\\00\"\n";
+  out << "@.str.byte_buffer_overflow = private unnamed_addr constant [20 x i8] "
+         "c\"ByteBuffer overflow\\00\"\n\n";
   out << "@.str.stack_trace_unknown = private unnamed_addr constant [10 x i8] "
          "c\"<unknown>\\00\"\n";
   out << "@.str.stack_trace_element_unknown = private unnamed_addr constant [25 x "

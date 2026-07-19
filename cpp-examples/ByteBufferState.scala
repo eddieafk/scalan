@@ -49,6 +49,52 @@ object ByteBufferState {
       (if (buffer.hasRemaining()) 1 else 0)
   }
 
+  def relativeRoundTrip(): Int = {
+    val buffer = ByteBuffer.wrap(Array[Byte](0.toByte, 0.toByte, 0.toByte))
+    buffer.put(7.toByte).put((0 - 2).toByte)
+    val writePosition = buffer.position()
+    buffer.flip()
+    val first = buffer.get().toInt
+    val second = buffer.get().toInt
+    first * 10000 + (second + 128) * 100 +
+      writePosition * 10 + buffer.position()
+  }
+
+  def zoneRelativeAccess(): Int =
+    Zone.scoped({
+      val buffer = ByteBuffer.wrap(Zone.allocBytes(2))
+      buffer.put(12.toByte).put(34.toByte).flip()
+      buffer.get().toInt * 1000 +
+        buffer.get().toInt * 10 +
+        buffer.position()
+    })
+
+  def rejectUnderflow(): String = {
+    val buffer = ByteBuffer.wrap(Array[Byte](1.toByte))
+    buffer.position(1)
+    try {
+      buffer.get()
+      "underflow was accepted"
+    } catch {
+      case failure: BufferUnderflowException =>
+        "underflow: " + failure.getMessage + " @" + buffer.position()
+    }
+  }
+
+  def rejectOverflow(): String = {
+    val bytes = Array[Byte](9.toByte)
+    val buffer = ByteBuffer.wrap(bytes)
+    buffer.limit(0)
+    try {
+      buffer.put(3.toByte)
+      "overflow was accepted"
+    } catch {
+      case failure: BufferOverflowException =>
+        "overflow: " + failure.getMessage + " @" +
+          buffer.position() + "/" + bytes(0).toInt
+    }
+  }
+
   def rejectPosition(): String =
     try {
       ByteBuffer.wrap(Array[Byte](0.toByte, 0.toByte)).position(3)
@@ -93,6 +139,10 @@ object ByteBufferState {
     println(clearAndRewind())
     println(clampedPosition())
     println(emptyState())
+    println(relativeRoundTrip())
+    println(zoneRelativeAccess())
+    println(rejectUnderflow())
+    println(rejectOverflow())
     println(rejectPosition())
     println(rejectLimit())
     println(rejectNullStorage())

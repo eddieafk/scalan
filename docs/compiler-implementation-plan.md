@@ -2670,6 +2670,23 @@ Current scaffold status:
   relative or indexed get/put, underflow/overflow exceptions, byte-order state,
   mark/reset, slicing, duplication, read-only views, bulk transfer, or a complete
   `java.nio` compatibility layer.
+- Runtime ABI 56 adds relative byte access with `ByteBuffer.get(): Byte` and
+  `put(Byte): ByteBuffer`. Both operations require `position < limit` before
+  touching the backing storage. A successful access reads or writes exactly one
+  byte and advances position exactly once; a failed access leaves position and
+  storage unchanged. `put` remains fluent and returns the same buffer.
+
+  Exhausted reads throw a catchable `java.nio.BufferUnderflowException` with the
+  concise message `ByteBuffer underflow`; exhausted writes analogously throw
+  `java.nio.BufferOverflowException` with `ByteBuffer overflow`. The linker
+  retains the distinct exception layouts for the corresponding intrinsics, and
+  LLVM performs the state check before loading the backing-array reference.
+  Relative reads discard scoped-zone provenance because they return a primitive,
+  while relative writes preserve receiver provenance.
+
+  Indexed byte access is intentionally separate because it does not advance
+  position. Byte-order state, relative multibyte access, mark/reset, slicing,
+  duplication, read-only views, and bulk transfer remain later slices.
 - The frontend seeds a tiny runtime builtin, `println(value): Unit`, for the
   currently supported literal/value subset.
 - `cpp-nscplugin` emits `scala.scalanative.runtime.println : (Unknown)Unit` as a
