@@ -945,10 +945,17 @@ Current scaffold status:
   ordinary parameter lists. Native coverage exercises the low-priority owner
   pattern overriding result generality, the non-contextual tie-break, and a
   recursively materialized factory selected by its narrower evidence type.
-  Anonymous or local parameterized givens, recursive-candidate failure and
-  divergence fallback, `derives`/derived givens, contextual-only inference for
-  ordinary methods, nested companion declarations, and Scala 2 `implicit`
-  syntax remain later milestones.
+  Recursive factory alternatives are now probed as complete argument trees
+  without publishing speculative diagnostics. Missing, ambiguous, or divergent
+  nested evidence removes only that candidate before preference ranking, so a
+  lower-ranked finite alternative can still win. If every alternative fails,
+  one deterministically ranked path is replayed with diagnostics enabled to
+  retain the focused nested cause. Native coverage exercises fallback from all
+  three recursive failure classes and diagnostic replay for all-failed missing,
+  ambiguous, and divergent searches. Anonymous or local parameterized givens,
+  `derives`/derived givens, contextual-only inference for ordinary methods,
+  nested companion declarations, and Scala 2 `implicit` syntax remain later
+  milestones.
 - Postfix type application now supports typed `value.isInstanceOf[Target]` and
   checked `value.asInstanceOf[Target]` for known classes and traits. NIR uses
   dedicated `is-instance-of[T]` and `as-instance-of[T]` values; verification

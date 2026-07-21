@@ -5187,6 +5187,55 @@ object FactoryChoice {
     new FactoryChoice("specific-factory")
 }
 
+class MissingFallbackDependency
+class MissingFallbackChoice(val label: String)
+class ValidMissingFallbackChoice(label: String) extends MissingFallbackChoice(label)
+
+object MissingFallbackChoice {
+  given broken(using dependency: MissingFallbackDependency): MissingFallbackChoice =
+    new MissingFallbackChoice("broken-missing")
+  given valid: ValidMissingFallbackChoice =
+    new ValidMissingFallbackChoice("missing-fallback")
+}
+
+class AmbiguousFallbackDependency
+
+object AmbiguousFallbackDependency {
+  given first: AmbiguousFallbackDependency = new AmbiguousFallbackDependency
+  given second: AmbiguousFallbackDependency = new AmbiguousFallbackDependency
+}
+
+class AmbiguousFallbackChoice(val label: String)
+class ValidAmbiguousFallbackChoice(label: String)
+    extends AmbiguousFallbackChoice(label)
+
+object AmbiguousFallbackChoice {
+  given broken(
+      using dependency: AmbiguousFallbackDependency): AmbiguousFallbackChoice =
+    new AmbiguousFallbackChoice("broken-ambiguous")
+  given valid: ValidAmbiguousFallbackChoice =
+    new ValidAmbiguousFallbackChoice("ambiguous-fallback")
+}
+
+class DivergentFallbackDependency
+
+object DivergentFallbackDependency {
+  given loop(
+      using next: DivergentFallbackDependency): DivergentFallbackDependency = next
+}
+
+class DivergentFallbackChoice(val label: String)
+class ValidDivergentFallbackChoice(label: String)
+    extends DivergentFallbackChoice(label)
+
+object DivergentFallbackChoice {
+  given broken(
+      using dependency: DivergentFallbackDependency): DivergentFallbackChoice =
+    new DivergentFallbackChoice("broken-divergent")
+  given valid: ValidDivergentFallbackChoice =
+    new ValidDivergentFallbackChoice("divergent-fallback")
+}
+
 trait Show[A] {
   def show(value: A): String
 }
@@ -5302,6 +5351,24 @@ object Main {
   def specificFactoryPreferred: String =
     chooseFactory()
 
+  def chooseMissingFallback()(using choice: MissingFallbackChoice): String =
+    choice.label
+
+  def missingFallback: String =
+    chooseMissingFallback()
+
+  def chooseAmbiguousFallback()(using choice: AmbiguousFallbackChoice): String =
+    choice.label
+
+  def ambiguousFallback: String =
+    chooseAmbiguousFallback()
+
+  def chooseDivergentFallback()(using choice: DivergentFallbackChoice): String =
+    choice.label
+
+  def divergentFallback: String =
+    chooseDivergentFallback()
+
   def nestedLocal(value: Dog): String = {
     given outerShow: Show[Dog] = new DogShow("outer-local:")
     {
@@ -5329,6 +5396,9 @@ object Main {
     println(ownerPreferred)
     println(nonContextualPreferred)
     println(specificFactoryPreferred)
+    println(missingFallback)
+    println(ambiguousFallback)
+    println(divergentFallback)
     println(nestedLocal(new Dog("dog")))
   }
 }
@@ -5424,6 +5494,24 @@ object AmbiguousFactories {
   def choose()(using choice: TieChoice): TieChoice = choice
   val ambiguous = choose()
 }
+
+class FailedDependency
+
+object FailedDependency {
+  given firstDependency: FailedDependency = new FailedDependency
+  given secondDependency: FailedDependency = new FailedDependency
+}
+
+class FailedChoice
+
+object FailedChoice {
+  given build(using dependency: FailedDependency): FailedChoice = new FailedChoice
+}
+
+object FailedFactoryContext {
+  def choose()(using choice: FailedChoice): FailedChoice = choice
+  val failed = choose()
+}
 )";
   constexpr const char* invalidClauseSource = R"(trait Show[A]
 
@@ -5507,7 +5595,8 @@ object Main {
                   "typeclass-companion:fox\n"
                   "argument-companion:bird\ncompanion:direct\n"
                   "companion:imported\nbox\nbox\ngeneral\nnested\n"
-                  "owner-high\ndirect\nspecific-factory\ninner-local:dog\n" &&
+                  "owner-high\ndirect\nspecific-factory\nmissing-fallback\n"
+                  "ambiguous-fallback\ndivergent-fallback\ninner-local:dog\n" &&
           !invalid.ok &&
           contains(invalid.diagnosticsText,
                    "no given value found for context parameter show of type "
@@ -5531,6 +5620,10 @@ object Main {
                    "ambiguous given values for context parameter choice of type "
                    "demo.invalidcontextual.TieChoice required by choose: "
                    "firstFactory, secondFactory") &&
+          contains(invalid.diagnosticsText,
+                   "ambiguous given values for context parameter dependency of type "
+                   "demo.invalidcontextual.FailedDependency required by build: "
+                   "firstDependency, secondDependency") &&
           contains(invalid.diagnosticsText,
                    "no given value found for context parameter elementShow of type "
                    "demo.invalidcontextual.Show [ demo.invalidcontextual.Dog ] "
@@ -5597,6 +5690,21 @@ object Main {
                    "%demo.contextual.SpecificSeed$.given$") &&
           !contains(result.nirText,
                     "call %demo.contextual.FactoryChoice$.fromGeneral") &&
+          contains(result.nirText,
+                   "ret String call %chooseMissingFallback(call "
+                   "%demo.contextual.MissingFallbackChoice$.valid())") &&
+          !contains(result.nirText,
+                    "call %demo.contextual.MissingFallbackChoice$.broken") &&
+          contains(result.nirText,
+                   "ret String call %chooseAmbiguousFallback(call "
+                   "%demo.contextual.AmbiguousFallbackChoice$.valid())") &&
+          !contains(result.nirText,
+                    "call %demo.contextual.AmbiguousFallbackChoice$.broken") &&
+          contains(result.nirText,
+                   "ret String call %chooseDivergentFallback(call "
+                   "%demo.contextual.DivergentFallbackChoice$.valid())") &&
+          !contains(result.nirText,
+                    "call %demo.contextual.DivergentFallbackChoice$.broken") &&
           countOccurrences(result.nirText,
                            "call %demo.contextual.Show$.catShow.show(%value)") == 2 &&
           contains(result.nirText, "let %localShow : demo.contextual.Show = new "

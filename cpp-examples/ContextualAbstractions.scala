@@ -53,6 +53,55 @@ object FactoryChoice {
     new FactoryChoice("specific-factory")
 }
 
+class MissingFallbackDependency
+class MissingFallbackChoice(val label: String)
+class ValidMissingFallbackChoice(label: String) extends MissingFallbackChoice(label)
+
+object MissingFallbackChoice {
+  given broken(using dependency: MissingFallbackDependency): MissingFallbackChoice =
+    new MissingFallbackChoice("broken-missing")
+  given valid: ValidMissingFallbackChoice =
+    new ValidMissingFallbackChoice("missing-fallback")
+}
+
+class AmbiguousFallbackDependency
+
+object AmbiguousFallbackDependency {
+  given first: AmbiguousFallbackDependency = new AmbiguousFallbackDependency
+  given second: AmbiguousFallbackDependency = new AmbiguousFallbackDependency
+}
+
+class AmbiguousFallbackChoice(val label: String)
+class ValidAmbiguousFallbackChoice(label: String)
+    extends AmbiguousFallbackChoice(label)
+
+object AmbiguousFallbackChoice {
+  given broken(
+      using dependency: AmbiguousFallbackDependency): AmbiguousFallbackChoice =
+    new AmbiguousFallbackChoice("broken-ambiguous")
+  given valid: ValidAmbiguousFallbackChoice =
+    new ValidAmbiguousFallbackChoice("ambiguous-fallback")
+}
+
+class DivergentFallbackDependency
+
+object DivergentFallbackDependency {
+  given loop(
+      using next: DivergentFallbackDependency): DivergentFallbackDependency = next
+}
+
+class DivergentFallbackChoice(val label: String)
+class ValidDivergentFallbackChoice(label: String)
+    extends DivergentFallbackChoice(label)
+
+object DivergentFallbackChoice {
+  given broken(
+      using dependency: DivergentFallbackDependency): DivergentFallbackChoice =
+    new DivergentFallbackChoice("broken-divergent")
+  given valid: ValidDivergentFallbackChoice =
+    new ValidDivergentFallbackChoice("divergent-fallback")
+}
+
 trait Show[A] {
   def show(value: A): String
 }
@@ -168,6 +217,24 @@ object ContextualAbstractions {
   def specificFactoryPreferred: String =
     chooseFactory()
 
+  def chooseMissingFallback()(using choice: MissingFallbackChoice): String =
+    choice.label
+
+  def missingFallback: String =
+    chooseMissingFallback()
+
+  def chooseAmbiguousFallback()(using choice: AmbiguousFallbackChoice): String =
+    choice.label
+
+  def ambiguousFallback: String =
+    chooseAmbiguousFallback()
+
+  def chooseDivergentFallback()(using choice: DivergentFallbackChoice): String =
+    choice.label
+
+  def divergentFallback: String =
+    chooseDivergentFallback()
+
   def nestedLocal(value: Dog): String = {
     given outerShow: Show[Dog] = new DogShow("outer-local:")
     {
@@ -195,6 +262,9 @@ object ContextualAbstractions {
     println(ownerPreferred)
     println(nonContextualPreferred)
     println(specificFactoryPreferred)
+    println(missingFallback)
+    println(ambiguousFallback)
+    println(divergentFallback)
     println(nestedLocal(new Dog("dog")))
   }
 }

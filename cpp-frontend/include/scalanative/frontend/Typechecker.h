@@ -262,7 +262,8 @@ private:
   [[nodiscard]] std::vector<TypedContextArgument>
   resolveContextArguments(const SymbolInfo& callee, std::size_t firstContextParameter,
                           Scope& scope, const support::SourceSpan& span,
-                          std::unordered_set<std::string>* resolving = nullptr) const;
+                          std::unordered_set<std::string>* resolving = nullptr,
+                          bool reportDiagnostics = true) const;
   void recordContextApplication(const support::SourceSpan& span,
                                 std::vector<TypedContextArgument> arguments);
   [[nodiscard]] bool isSubtypeOf(const std::string& actual,

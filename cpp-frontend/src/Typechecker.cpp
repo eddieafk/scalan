@@ -6,6 +6,7 @@
 #include <cstddef>
 #include <functional>
 #include <iterator>
+#include <optional>
 #include <string_view>
 #include <unordered_set>
 
@@ -6196,10 +6197,12 @@ bool Typechecker::isAssignable(const TypeInfo& expected, const TypeInfo& actual)
 
 std::vector<TypedContextArgument> Typechecker::resolveContextArguments(
     const SymbolInfo& callee, std::size_t firstContextParameter, Scope& scope,
-    const support::SourceSpan& span, std::unordered_set<std::string>* resolving) const {
+    const support::SourceSpan& span, std::unordered_set<std::string>* resolving,
+    bool reportDiagnostics) const {
   struct ContextCandidate {
     std::string referenceName;
     SymbolInfo symbol;
+    std::optional<TypedContextArgument> materializedArgument;
   };
   const auto sortCandidates = [](std::vector<ContextCandidate>& candidates) {
     std::sort(candidates.begin(), candidates.end(),
@@ -6236,7 +6239,8 @@ std::vector<TypedContextArgument> Typechecker::resolveContextArguments(
           !isAssignable(expected, candidate.type)) {
         return;
       }
-      candidates.push_back(ContextCandidate{referenceName, std::move(candidate)});
+      candidates.push_back(
+          ContextCandidate{referenceName, std::move(candidate), std::nullopt});
     };
     for (const auto& [name, candidate] : scope) {
       if (!candidate.isGiven && !candidate.isContextParameter) {
@@ -6302,31 +6306,32 @@ std::vector<TypedContextArgument> Typechecker::resolveContextArguments(
             ? parameterCandidates
             : (!givenCandidates.empty() ? givenCandidates : companionCandidates);
     sortCandidates(candidates);
-    const auto retainUndominated = [&](const auto& dominates) {
-      if (candidates.size() < 2) {
+    const auto retainUndominated = [&](std::vector<ContextCandidate>& ranked,
+                                       const auto& dominates) {
+      if (ranked.size() < 2) {
         return;
       }
-      std::vector<bool> dominated(candidates.size(), false);
-      for (std::size_t candidateIndex = 0; candidateIndex < candidates.size();
+      std::vector<bool> dominated(ranked.size(), false);
+      for (std::size_t candidateIndex = 0; candidateIndex < ranked.size();
            ++candidateIndex) {
         for (std::size_t alternativeIndex = 0;
-             alternativeIndex < candidates.size(); ++alternativeIndex) {
+             alternativeIndex < ranked.size(); ++alternativeIndex) {
           if (candidateIndex != alternativeIndex &&
-              dominates(candidates[alternativeIndex], candidates[candidateIndex])) {
+              dominates(ranked[alternativeIndex], ranked[candidateIndex])) {
             dominated[candidateIndex] = true;
             break;
           }
         }
       }
       std::vector<ContextCandidate> preferred;
-      preferred.reserve(candidates.size());
-      for (std::size_t candidateIndex = 0; candidateIndex < candidates.size();
+      preferred.reserve(ranked.size());
+      for (std::size_t candidateIndex = 0; candidateIndex < ranked.size();
            ++candidateIndex) {
         if (!dominated[candidateIndex]) {
-          preferred.push_back(std::move(candidates[candidateIndex]));
+          preferred.push_back(std::move(ranked[candidateIndex]));
         }
       }
-      candidates = std::move(preferred);
+      ranked = std::move(preferred);
     };
     const auto companionClassOfObject = [&](const std::string& owner) {
       auto symbol = globalSymbols_.find(owner);
@@ -6375,15 +6380,6 @@ std::vector<TypedContextArgument> Typechecker::resolveContextArguments(
              isSubtypeOf(lhsCompanion, rhsCompanion);
     };
 
-    // Owner inheritance is the explicit Scala priority mechanism and precedes
-    // the Scala 3.7+ preference for a uniquely most-general result type.
-    retainUndominated(hasMoreSpecificOwner);
-    retainUndominated([&](const ContextCandidate& lhs,
-                          const ContextCandidate& rhs) {
-      return isAssignable(lhs.symbol.type, rhs.symbol.type) &&
-             !isAssignable(rhs.symbol.type, lhs.symbol.type);
-    });
-
     const auto contextualParameterTypes = [](const SymbolInfo& symbol) {
       std::vector<const TypeInfo*> types;
       for (std::size_t parameterIndex = 0;
@@ -6395,90 +6391,138 @@ std::vector<TypedContextArgument> Typechecker::resolveContextArguments(
       }
       return types;
     };
-    retainUndominated([&](const ContextCandidate& lhs,
-                          const ContextCandidate& rhs) {
-      const std::vector<const TypeInfo*> lhsParameters =
-          contextualParameterTypes(lhs.symbol);
-      const std::vector<const TypeInfo*> rhsParameters =
-          contextualParameterTypes(rhs.symbol);
-      if (lhsParameters.empty() != rhsParameters.empty()) {
-        return lhsParameters.empty();
+    const auto rankCandidates = [&](std::vector<ContextCandidate>& ranked) {
+      // Owner inheritance is the explicit Scala priority mechanism and precedes
+      // the Scala 3.7+ preference for a uniquely most-general result type.
+      retainUndominated(ranked, hasMoreSpecificOwner);
+      retainUndominated(
+          ranked, [&](const ContextCandidate& lhs, const ContextCandidate& rhs) {
+            return isAssignable(lhs.symbol.type, rhs.symbol.type) &&
+                   !isAssignable(rhs.symbol.type, lhs.symbol.type);
+          });
+      retainUndominated(
+          ranked, [&](const ContextCandidate& lhs, const ContextCandidate& rhs) {
+            const std::vector<const TypeInfo*> lhsParameters =
+                contextualParameterTypes(lhs.symbol);
+            const std::vector<const TypeInfo*> rhsParameters =
+                contextualParameterTypes(rhs.symbol);
+            if (lhsParameters.empty() != rhsParameters.empty()) {
+              return lhsParameters.empty();
+            }
+            if (lhsParameters.empty() ||
+                lhsParameters.size() != rhsParameters.size()) {
+              return false;
+            }
+            bool strictlyMoreSpecific = false;
+            for (std::size_t parameterIndex = 0;
+                 parameterIndex < lhsParameters.size(); ++parameterIndex) {
+              const TypeInfo& lhsParameter = *lhsParameters[parameterIndex];
+              const TypeInfo& rhsParameter = *rhsParameters[parameterIndex];
+              if (!isAssignable(rhsParameter, lhsParameter)) {
+                return false;
+              }
+              strictlyMoreSpecific =
+                  strictlyMoreSpecific || !isAssignable(lhsParameter, rhsParameter);
+            }
+            return strictlyMoreSpecific;
+          });
+    };
+    std::function<bool(const TypedContextArgument&)> isMaterialized;
+    isMaterialized = [&](const TypedContextArgument& argument) {
+      return argument.type.kind != SimpleTypeKind::Unknown &&
+             std::all_of(argument.arguments.begin(), argument.arguments.end(),
+                         isMaterialized);
+    };
+    const auto materializeCandidate = [&](const ContextCandidate& candidate,
+                                          bool emitDiagnostics)
+        -> std::optional<TypedContextArgument> {
+      const SymbolInfo& selected = candidate.symbol;
+      TypedContextArgument argument;
+      argument.name = candidate.referenceName;
+      argument.symbolName = selected.symbolName;
+      argument.type = selected.type;
+      argument.requiresAccessor = selected.isModuleMember;
+      argument.isCall = selected.kind == AstDeclarationKind::Def;
+      if (!argument.isCall) {
+        return argument;
       }
-      if (lhsParameters.empty() || lhsParameters.size() != rhsParameters.size()) {
-        return false;
-      }
-      bool strictlyMoreSpecific = false;
-      for (std::size_t parameterIndex = 0;
-           parameterIndex < lhsParameters.size(); ++parameterIndex) {
-        const TypeInfo& lhsParameter = *lhsParameters[parameterIndex];
-        const TypeInfo& rhsParameter = *rhsParameters[parameterIndex];
-        if (!isAssignable(rhsParameter, lhsParameter)) {
-          return false;
-        }
-        strictlyMoreSpecific =
-            strictlyMoreSpecific || !isAssignable(lhsParameter, rhsParameter);
-      }
-      return strictlyMoreSpecific;
-    });
-    const std::string parameterNameText =
-        i < callee.parameters.size() ? parameterName(callee.parameters[i])
-                                     : std::to_string(i - firstContextParameter);
-    if (candidates.empty()) {
-      diagnostics_.error(span, "no given value found for context parameter " +
-                                   parameterNameText + " of type " + expected.name +
-                                   " required by " + callee.name);
-      result.push_back(unknownArgument());
-      continue;
-    }
-    if (candidates.size() > 1) {
-      std::string message = "ambiguous given values for context parameter " +
-                            parameterNameText + " of type " + expected.name +
-                            " required by " + callee.name + ": ";
-      for (std::size_t candidateIndex = 0; candidateIndex < candidates.size();
-           ++candidateIndex) {
-        if (candidateIndex != 0) {
-          message += ", ";
-        }
-        const SymbolInfo& candidate = candidates[candidateIndex].symbol;
-        message += candidate.isAnonymousGiven ? candidate.type.name : candidate.name;
-      }
-      diagnostics_.error(span, std::move(message));
-      result.push_back(unknownArgument());
-      continue;
-    }
-    const ContextCandidate& candidate = candidates.front();
-    const SymbolInfo& selected = candidate.symbol;
-    TypedContextArgument argument;
-    argument.name = candidate.referenceName;
-    argument.symbolName = selected.symbolName;
-    argument.type = selected.type;
-    argument.requiresAccessor = selected.isModuleMember;
-    argument.isCall = selected.kind == AstDeclarationKind::Def;
-    if (argument.isCall) {
+
       const bool allContextual =
           selected.contextualParameters.size() == selected.parameterTypes.size() &&
           std::all_of(selected.contextualParameters.begin(),
                       selected.contextualParameters.end(),
                       [](bool contextual) { return contextual; });
       if (!allContextual) {
-        diagnostics_.error(span, "given method " + selected.name +
-                                     " cannot be materialized because it has "
-                                     "ordinary parameters");
-        result.push_back(unknownArgument());
-        continue;
+        if (emitDiagnostics) {
+          diagnostics_.error(span, "given method " + selected.name +
+                                       " cannot be materialized because it has "
+                                       "ordinary parameters");
+        }
+        return std::nullopt;
       }
+
       const std::string expansionKey =
           selected.symbolName + " as " + selected.type.name;
       if (!resolving->insert(expansionKey).second) {
-        diagnostics_.error(span, "diverging given expansion for type " +
-                                     selected.type.name + " via " + selected.name);
-        result.push_back(unknownArgument());
-        continue;
+        if (emitDiagnostics) {
+          diagnostics_.error(span, "diverging given expansion for type " +
+                                       selected.type.name + " via " + selected.name);
+        }
+        return std::nullopt;
       }
-      argument.arguments = resolveContextArguments(selected, 0, scope, span, resolving);
+      argument.arguments = resolveContextArguments(selected, 0, scope, span, resolving,
+                                                    emitDiagnostics);
       resolving->erase(expansionKey);
+      return isMaterialized(argument)
+                 ? std::optional<TypedContextArgument>{std::move(argument)}
+                 : std::nullopt;
+    };
+
+    std::vector<ContextCandidate> allCandidates = candidates;
+    for (ContextCandidate& candidate : candidates) {
+      candidate.materializedArgument = materializeCandidate(candidate, false);
     }
-    result.push_back(std::move(argument));
+    std::erase_if(candidates, [](const ContextCandidate& candidate) {
+      return !candidate.materializedArgument.has_value();
+    });
+    rankCandidates(candidates);
+
+    const std::string parameterNameText =
+        i < callee.parameters.size() ? parameterName(callee.parameters[i])
+                                     : std::to_string(i - firstContextParameter);
+    if (candidates.empty()) {
+      if (reportDiagnostics) {
+        if (allCandidates.empty()) {
+          diagnostics_.error(span, "no given value found for context parameter " +
+                                       parameterNameText + " of type " + expected.name +
+                                       " required by " + callee.name);
+        } else {
+          rankCandidates(allCandidates);
+          (void)materializeCandidate(allCandidates.front(), true);
+        }
+      }
+      result.push_back(unknownArgument());
+      continue;
+    }
+    if (candidates.size() > 1) {
+      if (reportDiagnostics) {
+        std::string message = "ambiguous given values for context parameter " +
+                              parameterNameText + " of type " + expected.name +
+                              " required by " + callee.name + ": ";
+        for (std::size_t candidateIndex = 0; candidateIndex < candidates.size();
+             ++candidateIndex) {
+          if (candidateIndex != 0) {
+            message += ", ";
+          }
+          const SymbolInfo& candidate = candidates[candidateIndex].symbol;
+          message += candidate.isAnonymousGiven ? candidate.type.name : candidate.name;
+        }
+        diagnostics_.error(span, std::move(message));
+      }
+      result.push_back(unknownArgument());
+      continue;
+    }
+    result.push_back(std::move(*candidates.front().materializedArgument));
   }
   return result;
 }
