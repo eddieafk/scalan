@@ -6,6 +6,13 @@ class Bird(val name: String)
 class Fox(val name: String)
 class Box[A](val value: A)
 
+class Formatter(val label: String) {
+  def format(): String = label
+}
+
+class DetailedFormatter(label: String) extends Formatter(label)
+class AlternateFormatter(label: String) extends Formatter(label)
+
 trait Show[A] {
   def show(value: A): String
 }
@@ -47,6 +54,10 @@ import Show.{catShow => selectedCatShow}
 
 object ContextualAbstractions {
   given dogShow: Show[Dog] = new DogShow("dog:")
+  given generalFormatter: Formatter = new Formatter("general")
+  given detailedFormatter: DetailedFormatter = new DetailedFormatter("detailed")
+  given alternateFormatter: AlternateFormatter =
+    new AlternateFormatter("alternate")
 
   def render[A](value: A)(using show: Show[A]): String =
     show.show(value)
@@ -88,6 +99,17 @@ object ContextualAbstractions {
   def recursivelyParameterized(value: Box[Box[Cat]]): String =
     render(value)
 
+  def format()(using formatter: Formatter): String =
+    formatter.format()
+
+  def generallyPreferred: String =
+    format()
+
+  def nestedPreference: String = {
+    given nestedFormatter: DetailedFormatter = new DetailedFormatter("nested")
+    format()
+  }
+
   def nestedLocal(value: Dog): String = {
     given outerShow: Show[Dog] = new DogShow("outer-local:")
     {
@@ -110,6 +132,8 @@ object ContextualAbstractions {
     println(parameterized(new Box[Cat](new Cat("boxed"))))
     println(recursivelyParameterized(
       new Box[Box[Cat]](new Box[Cat](new Cat("recursive")))))
+    println(generallyPreferred)
+    println(nestedPreference)
     println(nestedLocal(new Dog("dog")))
   }
 }

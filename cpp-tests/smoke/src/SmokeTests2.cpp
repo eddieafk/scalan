@@ -5140,6 +5140,13 @@ class Bird(val name: String)
 class Fox(val name: String)
 class Box[A](val value: A)
 
+class Formatter(val label: String) {
+  def format(): String = label
+}
+
+class DetailedFormatter(label: String) extends Formatter(label)
+class AlternateFormatter(label: String) extends Formatter(label)
+
 trait Show[A] {
   def show(value: A): String
 }
@@ -5181,6 +5188,10 @@ import Show.{catShow => selectedCatShow}
 
 object Main {
   given dogShow: Show[Dog] = new DogShow("dog:")
+  given generalFormatter: Formatter = new Formatter("general")
+  given detailedFormatter: DetailedFormatter = new DetailedFormatter("detailed")
+  given alternateFormatter: AlternateFormatter =
+    new AlternateFormatter("alternate")
 
   def render[A](value: A)(using show: Show[A]): String =
     show.show(value)
@@ -5222,6 +5233,17 @@ object Main {
   def recursivelyParameterized(value: Box[Box[Cat]]): String =
     render(value)
 
+  def format()(using formatter: Formatter): String =
+    formatter.format()
+
+  def generallyPreferred: String =
+    format()
+
+  def nestedPreference: String = {
+    given nestedFormatter: DetailedFormatter = new DetailedFormatter("nested")
+    format()
+  }
+
   def nestedLocal(value: Dog): String = {
     given outerShow: Show[Dog] = new DogShow("outer-local:")
     {
@@ -5244,6 +5266,8 @@ object Main {
     println(parameterized(new Box[Cat](new Cat("boxed"))))
     println(recursivelyParameterized(
       new Box[Box[Cat]](new Box[Cat](new Cat("recursive")))))
+    println(generallyPreferred)
+    println(nestedPreference)
     println(nestedLocal(new Dog("dog")))
   }
 }
@@ -5308,6 +5332,18 @@ object AmbiguousLocalContext {
     given localSecond: Show[Dog] = new DogShow
     render(value)
   }
+}
+
+class Format
+class LeftFormat extends Format
+class RightFormat extends Format
+
+object IncomparableContext {
+  given leftFormat: LeftFormat = new LeftFormat
+  given rightFormat: RightFormat = new RightFormat
+
+  def choose()(using format: Format): Format = format
+  val ambiguous = choose()
 }
 )";
   constexpr const char* invalidClauseSource = R"(trait Show[A]
@@ -5391,7 +5427,8 @@ object Main {
                   "named-local:dog\nanonymous-local:dog\n"
                   "typeclass-companion:fox\n"
                   "argument-companion:bird\ncompanion:direct\n"
-                  "companion:imported\nbox\nbox\ninner-local:dog\n" &&
+                  "companion:imported\nbox\nbox\ngeneral\nnested\n"
+                  "inner-local:dog\n" &&
           !invalid.ok &&
           contains(invalid.diagnosticsText,
                    "no given value found for context parameter show of type "
@@ -5407,6 +5444,10 @@ object Main {
                    "required by render: argumentGiven, typeclassGiven") &&
           contains(invalid.diagnosticsText,
                    "required by render: localFirst, localSecond") &&
+          contains(invalid.diagnosticsText,
+                   "ambiguous given values for context parameter format of type "
+                   "demo.invalidcontextual.Format required by choose: leftFormat, "
+                   "rightFormat") &&
           contains(invalid.diagnosticsText,
                    "no given value found for context parameter elementShow of type "
                    "demo.invalidcontextual.Show [ demo.invalidcontextual.Dog ] "
@@ -5448,6 +5489,15 @@ object Main {
           contains(result.nirText, "call %demo.contextual.Show$.boxShow(call "
                                    "%demo.contextual.Show$.boxShow(call "
                                    "%demo.contextual.Show$.catShow()))") &&
+          contains(result.nirText,
+                   "ret String call %format(call "
+                   "%demo.contextual.Main.generalFormatter())") &&
+          contains(result.nirText,
+                   "ret String call %format(%nestedFormatter)") &&
+          !contains(result.nirText,
+                    "call %demo.contextual.Main.detailedFormatter()") &&
+          !contains(result.nirText,
+                    "call %demo.contextual.Main.alternateFormatter()") &&
           countOccurrences(result.nirText,
                            "call %demo.contextual.Show$.catShow.show(%value)") == 2 &&
           contains(result.nirText, "let %localShow : demo.contextual.Show = new "

@@ -6302,6 +6302,37 @@ std::vector<TypedContextArgument> Typechecker::resolveContextArguments(
             ? parameterCandidates
             : (!givenCandidates.empty() ? givenCandidates : companionCandidates);
     sortCandidates(candidates);
+    if (candidates.size() > 1) {
+      // Scala 3.7+ given priority keeps the uniquely most-general applicable
+      // result type after lexical/source precedence has selected this layer.
+      const auto isStrictlyMoreGeneral = [&](const ContextCandidate& lhs,
+                                             const ContextCandidate& rhs) {
+        return isAssignable(lhs.symbol.type, rhs.symbol.type) &&
+               !isAssignable(rhs.symbol.type, lhs.symbol.type);
+      };
+      std::vector<bool> lessGeneral(candidates.size(), false);
+      for (std::size_t candidateIndex = 0; candidateIndex < candidates.size();
+           ++candidateIndex) {
+        for (std::size_t alternativeIndex = 0;
+             alternativeIndex < candidates.size(); ++alternativeIndex) {
+          if (candidateIndex != alternativeIndex &&
+              isStrictlyMoreGeneral(candidates[alternativeIndex],
+                                    candidates[candidateIndex])) {
+            lessGeneral[candidateIndex] = true;
+            break;
+          }
+        }
+      }
+      std::vector<ContextCandidate> preferred;
+      preferred.reserve(candidates.size());
+      for (std::size_t candidateIndex = 0; candidateIndex < candidates.size();
+           ++candidateIndex) {
+        if (!lessGeneral[candidateIndex]) {
+          preferred.push_back(std::move(candidates[candidateIndex]));
+        }
+      }
+      candidates = std::move(preferred);
+    }
     const std::string parameterNameText =
         i < callee.parameters.size() ? parameterName(callee.parameters[i])
                                      : std::to_string(i - firstContextParameter);

@@ -930,10 +930,17 @@ Current scaffold status:
   native coverage includes direct and renamed-import access, one-level
   parameterized evidence, recursively nested evidence, missing transitive
   evidence, illegal ordinary factory parameters, unsupported local factories,
-  and expansion cycles. Anonymous or local parameterized givens, candidate
-  specificity ranking, `derives`/derived givens, contextual-only inference for
-  ordinary methods, nested companion declarations, and Scala 2 `implicit`
-  syntax remain later milestones.
+  and expansion cycles. Within the selected source layer, matching candidates
+  are now ranked by the Scala 3.7 result-type rule: a uniquely most-general
+  result wins, while incomparable or equivalent results remain ambiguous.
+  Ranking runs after context-parameter, deepest-lexical, and companion-source
+  precedence, so a deeper lexical given still wins before result generality is
+  considered. Native coverage exercises a three-way inheritance triangle,
+  lexical precedence over a more-general outer candidate, and deterministic
+  ambiguity between sibling result types. Anonymous or local parameterized
+  givens, method/owner specificity tie-breaks, `derives`/derived givens,
+  contextual-only inference for ordinary methods, nested companion
+  declarations, and Scala 2 `implicit` syntax remain later milestones.
 - Postfix type application now supports typed `value.isInstanceOf[Target]` and
   checked `value.asInstanceOf[Target]` for known classes and traits. NIR uses
   dedicated `is-instance-of[T]` and `as-instance-of[T]` values; verification
