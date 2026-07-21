@@ -6302,23 +6302,18 @@ std::vector<TypedContextArgument> Typechecker::resolveContextArguments(
             ? parameterCandidates
             : (!givenCandidates.empty() ? givenCandidates : companionCandidates);
     sortCandidates(candidates);
-    if (candidates.size() > 1) {
-      // Scala 3.7+ given priority keeps the uniquely most-general applicable
-      // result type after lexical/source precedence has selected this layer.
-      const auto isStrictlyMoreGeneral = [&](const ContextCandidate& lhs,
-                                             const ContextCandidate& rhs) {
-        return isAssignable(lhs.symbol.type, rhs.symbol.type) &&
-               !isAssignable(rhs.symbol.type, lhs.symbol.type);
-      };
-      std::vector<bool> lessGeneral(candidates.size(), false);
+    const auto retainUndominated = [&](const auto& dominates) {
+      if (candidates.size() < 2) {
+        return;
+      }
+      std::vector<bool> dominated(candidates.size(), false);
       for (std::size_t candidateIndex = 0; candidateIndex < candidates.size();
            ++candidateIndex) {
         for (std::size_t alternativeIndex = 0;
              alternativeIndex < candidates.size(); ++alternativeIndex) {
           if (candidateIndex != alternativeIndex &&
-              isStrictlyMoreGeneral(candidates[alternativeIndex],
-                                    candidates[candidateIndex])) {
-            lessGeneral[candidateIndex] = true;
+              dominates(candidates[alternativeIndex], candidates[candidateIndex])) {
+            dominated[candidateIndex] = true;
             break;
           }
         }
@@ -6327,12 +6322,104 @@ std::vector<TypedContextArgument> Typechecker::resolveContextArguments(
       preferred.reserve(candidates.size());
       for (std::size_t candidateIndex = 0; candidateIndex < candidates.size();
            ++candidateIndex) {
-        if (!lessGeneral[candidateIndex]) {
+        if (!dominated[candidateIndex]) {
           preferred.push_back(std::move(candidates[candidateIndex]));
         }
       }
       candidates = std::move(preferred);
-    }
+    };
+    const auto companionClassOfObject = [&](const std::string& owner) {
+      auto symbol = globalSymbols_.find(owner);
+      if (symbol == globalSymbols_.end() ||
+          symbol->second.kind != AstDeclarationKind::Object ||
+          !owner.ends_with('$')) {
+        return std::string{};
+      }
+      const std::string companionClass = owner.substr(0, owner.size() - 1);
+      auto companion = globalSymbols_.find(companionClass);
+      return companion != globalSymbols_.end() &&
+                     (companion->second.kind == AstDeclarationKind::Class ||
+                      companion->second.kind == AstDeclarationKind::Trait)
+                 ? companionClass
+                 : std::string{};
+    };
+    const auto inheritsGivens = [&](const std::string& owner) {
+      auto members = memberScopes_.find(owner);
+      if (members == memberScopes_.end()) {
+        return false;
+      }
+      return std::any_of(
+          members->second.begin(), members->second.end(),
+          [&](const auto& entry) {
+            const SymbolInfo& member = entry.second;
+            return member.isGiven && ownerNameOf(member.symbolName) != owner;
+          });
+    };
+    const auto hasMoreSpecificOwner = [&](const ContextCandidate& lhs,
+                                          const ContextCandidate& rhs) {
+      const std::string lhsOwner = ownerNameOf(lhs.symbol.symbolName);
+      const std::string rhsOwner = ownerNameOf(rhs.symbol.symbolName);
+      if (lhsOwner.empty() || rhsOwner.empty() || lhsOwner == rhsOwner) {
+        return false;
+      }
+      if (isSubtypeOf(lhsOwner, rhsOwner)) {
+        return true;
+      }
+      const std::string lhsCompanion = companionClassOfObject(lhsOwner);
+      if (!lhsCompanion.empty() && isSubtypeOf(lhsCompanion, rhsOwner)) {
+        return true;
+      }
+      const std::string rhsCompanion = companionClassOfObject(rhsOwner);
+      return !lhsCompanion.empty() && !rhsCompanion.empty() &&
+             !inheritsGivens(rhsOwner) &&
+             isSubtypeOf(lhsCompanion, rhsCompanion);
+    };
+
+    // Owner inheritance is the explicit Scala priority mechanism and precedes
+    // the Scala 3.7+ preference for a uniquely most-general result type.
+    retainUndominated(hasMoreSpecificOwner);
+    retainUndominated([&](const ContextCandidate& lhs,
+                          const ContextCandidate& rhs) {
+      return isAssignable(lhs.symbol.type, rhs.symbol.type) &&
+             !isAssignable(rhs.symbol.type, lhs.symbol.type);
+    });
+
+    const auto contextualParameterTypes = [](const SymbolInfo& symbol) {
+      std::vector<const TypeInfo*> types;
+      for (std::size_t parameterIndex = 0;
+           parameterIndex < symbol.parameterTypes.size(); ++parameterIndex) {
+        if (parameterIndex < symbol.contextualParameters.size() &&
+            symbol.contextualParameters[parameterIndex]) {
+          types.push_back(&symbol.parameterTypes[parameterIndex]);
+        }
+      }
+      return types;
+    };
+    retainUndominated([&](const ContextCandidate& lhs,
+                          const ContextCandidate& rhs) {
+      const std::vector<const TypeInfo*> lhsParameters =
+          contextualParameterTypes(lhs.symbol);
+      const std::vector<const TypeInfo*> rhsParameters =
+          contextualParameterTypes(rhs.symbol);
+      if (lhsParameters.empty() != rhsParameters.empty()) {
+        return lhsParameters.empty();
+      }
+      if (lhsParameters.empty() || lhsParameters.size() != rhsParameters.size()) {
+        return false;
+      }
+      bool strictlyMoreSpecific = false;
+      for (std::size_t parameterIndex = 0;
+           parameterIndex < lhsParameters.size(); ++parameterIndex) {
+        const TypeInfo& lhsParameter = *lhsParameters[parameterIndex];
+        const TypeInfo& rhsParameter = *rhsParameters[parameterIndex];
+        if (!isAssignable(rhsParameter, lhsParameter)) {
+          return false;
+        }
+        strictlyMoreSpecific =
+            strictlyMoreSpecific || !isAssignable(lhsParameter, rhsParameter);
+      }
+      return strictlyMoreSpecific;
+    });
     const std::string parameterNameText =
         i < callee.parameters.size() ? parameterName(callee.parameters[i])
                                      : std::to_string(i - firstContextParameter);

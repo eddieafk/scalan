@@ -13,6 +13,46 @@ class Formatter(val label: String) {
 class DetailedFormatter(label: String) extends Formatter(label)
 class AlternateFormatter(label: String) extends Formatter(label)
 
+class OwnerChoice(val label: String)
+class SpecificOwnerChoice(label: String) extends OwnerChoice(label)
+
+class LowPriorityOwnerChoices {
+  given lowOwnerChoice: OwnerChoice = new OwnerChoice("owner-low")
+}
+
+class MiddlePriorityOwnerChoices extends LowPriorityOwnerChoices
+
+object OwnerChoice extends MiddlePriorityOwnerChoices {
+  given highOwnerChoice: SpecificOwnerChoice =
+    new SpecificOwnerChoice("owner-high")
+}
+
+class DirectSeed
+class DirectChoice(val label: String)
+
+object DirectChoice {
+  given DirectSeed = new DirectSeed
+  given directChoice: DirectChoice = new DirectChoice("direct")
+  given contextualChoice(using seed: DirectSeed): DirectChoice =
+    new DirectChoice("contextual")
+}
+
+class GeneralSeed
+class SpecificSeed extends GeneralSeed
+
+object SpecificSeed {
+  given SpecificSeed = new SpecificSeed
+}
+
+class FactoryChoice(val label: String)
+
+object FactoryChoice {
+  given fromGeneral(using seed: GeneralSeed): FactoryChoice =
+    new FactoryChoice("general-factory")
+  given fromSpecific(using seed: SpecificSeed): FactoryChoice =
+    new FactoryChoice("specific-factory")
+}
+
 trait Show[A] {
   def show(value: A): String
 }
@@ -110,6 +150,24 @@ object ContextualAbstractions {
     format()
   }
 
+  def chooseOwner()(using choice: OwnerChoice): String =
+    choice.label
+
+  def ownerPreferred: String =
+    chooseOwner()
+
+  def chooseDirect()(using choice: DirectChoice): String =
+    choice.label
+
+  def nonContextualPreferred: String =
+    chooseDirect()
+
+  def chooseFactory()(using choice: FactoryChoice): String =
+    choice.label
+
+  def specificFactoryPreferred: String =
+    chooseFactory()
+
   def nestedLocal(value: Dog): String = {
     given outerShow: Show[Dog] = new DogShow("outer-local:")
     {
@@ -134,6 +192,9 @@ object ContextualAbstractions {
       new Box[Box[Cat]](new Box[Cat](new Cat("recursive")))))
     println(generallyPreferred)
     println(nestedPreference)
+    println(ownerPreferred)
+    println(nonContextualPreferred)
+    println(specificFactoryPreferred)
     println(nestedLocal(new Dog("dog")))
   }
 }

@@ -937,10 +937,18 @@ Current scaffold status:
   precedence, so a deeper lexical given still wins before result generality is
   considered. Native coverage exercises a three-way inheritance triangle,
   lexical precedence over a more-general outer candidate, and deterministic
-  ambiguity between sibling result types. Anonymous or local parameterized
-  givens, method/owner specificity tie-breaks, `derives`/derived givens,
-  contextual-only inference for ordinary methods, nested companion
-  declarations, and Scala 2 `implicit` syntax remain later milestones.
+  ambiguity between sibling result types. Candidate ranking also implements the
+  transitive Scala 3 owner rules, including object companion-class ancestry and
+  the inherited-given guard, before comparing result generality. For otherwise
+  tied alternatives, a given without `using` parameters wins over a contextual
+  factory; two contextual factories compare equally sized `using` clauses as
+  ordinary parameter lists. Native coverage exercises the low-priority owner
+  pattern overriding result generality, the non-contextual tie-break, and a
+  recursively materialized factory selected by its narrower evidence type.
+  Anonymous or local parameterized givens, recursive-candidate failure and
+  divergence fallback, `derives`/derived givens, contextual-only inference for
+  ordinary methods, nested companion declarations, and Scala 2 `implicit`
+  syntax remain later milestones.
 - Postfix type application now supports typed `value.isInstanceOf[Target]` and
   checked `value.asInstanceOf[Target]` for known classes and traits. NIR uses
   dedicated `is-instance-of[T]` and `as-instance-of[T]` values; verification

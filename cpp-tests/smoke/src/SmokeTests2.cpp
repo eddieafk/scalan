@@ -5147,6 +5147,46 @@ class Formatter(val label: String) {
 class DetailedFormatter(label: String) extends Formatter(label)
 class AlternateFormatter(label: String) extends Formatter(label)
 
+class OwnerChoice(val label: String)
+class SpecificOwnerChoice(label: String) extends OwnerChoice(label)
+
+class LowPriorityOwnerChoices {
+  given lowOwnerChoice: OwnerChoice = new OwnerChoice("owner-low")
+}
+
+class MiddlePriorityOwnerChoices extends LowPriorityOwnerChoices
+
+object OwnerChoice extends MiddlePriorityOwnerChoices {
+  given highOwnerChoice: SpecificOwnerChoice =
+    new SpecificOwnerChoice("owner-high")
+}
+
+class DirectSeed
+class DirectChoice(val label: String)
+
+object DirectChoice {
+  given DirectSeed = new DirectSeed
+  given directChoice: DirectChoice = new DirectChoice("direct")
+  given contextualChoice(using seed: DirectSeed): DirectChoice =
+    new DirectChoice("contextual")
+}
+
+class GeneralSeed
+class SpecificSeed extends GeneralSeed
+
+object SpecificSeed {
+  given SpecificSeed = new SpecificSeed
+}
+
+class FactoryChoice(val label: String)
+
+object FactoryChoice {
+  given fromGeneral(using seed: GeneralSeed): FactoryChoice =
+    new FactoryChoice("general-factory")
+  given fromSpecific(using seed: SpecificSeed): FactoryChoice =
+    new FactoryChoice("specific-factory")
+}
+
 trait Show[A] {
   def show(value: A): String
 }
@@ -5244,6 +5284,24 @@ object Main {
     format()
   }
 
+  def chooseOwner()(using choice: OwnerChoice): String =
+    choice.label
+
+  def ownerPreferred: String =
+    chooseOwner()
+
+  def chooseDirect()(using choice: DirectChoice): String =
+    choice.label
+
+  def nonContextualPreferred: String =
+    chooseDirect()
+
+  def chooseFactory()(using choice: FactoryChoice): String =
+    choice.label
+
+  def specificFactoryPreferred: String =
+    chooseFactory()
+
   def nestedLocal(value: Dog): String = {
     given outerShow: Show[Dog] = new DogShow("outer-local:")
     {
@@ -5268,6 +5326,9 @@ object Main {
       new Box[Box[Cat]](new Box[Cat](new Cat("recursive")))))
     println(generallyPreferred)
     println(nestedPreference)
+    println(ownerPreferred)
+    println(nonContextualPreferred)
+    println(specificFactoryPreferred)
     println(nestedLocal(new Dog("dog")))
   }
 }
@@ -5343,6 +5404,24 @@ object IncomparableContext {
   given rightFormat: RightFormat = new RightFormat
 
   def choose()(using format: Format): Format = format
+  val ambiguous = choose()
+}
+
+class TieSeed
+
+object TieSeed {
+  given TieSeed = new TieSeed
+}
+
+class TieChoice
+
+object TieChoice {
+  given firstFactory(using seed: TieSeed): TieChoice = new TieChoice
+  given secondFactory(using seed: TieSeed): TieChoice = new TieChoice
+}
+
+object AmbiguousFactories {
+  def choose()(using choice: TieChoice): TieChoice = choice
   val ambiguous = choose()
 }
 )";
@@ -5428,7 +5507,7 @@ object Main {
                   "typeclass-companion:fox\n"
                   "argument-companion:bird\ncompanion:direct\n"
                   "companion:imported\nbox\nbox\ngeneral\nnested\n"
-                  "inner-local:dog\n" &&
+                  "owner-high\ndirect\nspecific-factory\ninner-local:dog\n" &&
           !invalid.ok &&
           contains(invalid.diagnosticsText,
                    "no given value found for context parameter show of type "
@@ -5448,6 +5527,10 @@ object Main {
                    "ambiguous given values for context parameter format of type "
                    "demo.invalidcontextual.Format required by choose: leftFormat, "
                    "rightFormat") &&
+          contains(invalid.diagnosticsText,
+                   "ambiguous given values for context parameter choice of type "
+                   "demo.invalidcontextual.TieChoice required by choose: "
+                   "firstFactory, secondFactory") &&
           contains(invalid.diagnosticsText,
                    "no given value found for context parameter elementShow of type "
                    "demo.invalidcontextual.Show [ demo.invalidcontextual.Dog ] "
@@ -5498,6 +5581,22 @@ object Main {
                     "call %demo.contextual.Main.detailedFormatter()") &&
           !contains(result.nirText,
                     "call %demo.contextual.Main.alternateFormatter()") &&
+          contains(result.nirText,
+                   "ret String call %chooseOwner(call "
+                   "%demo.contextual.OwnerChoice$.highOwnerChoice())") &&
+          !contains(result.nirText,
+                    "call %demo.contextual.LowPriorityOwnerChoices.lowOwnerChoice") &&
+          contains(result.nirText,
+                   "ret String call %chooseDirect(call "
+                   "%demo.contextual.DirectChoice$.directChoice())") &&
+          !contains(result.nirText,
+                    "call %demo.contextual.DirectChoice$.contextualChoice") &&
+          contains(result.nirText,
+                   "ret String call %chooseFactory(call "
+                   "%demo.contextual.FactoryChoice$.fromSpecific(call "
+                   "%demo.contextual.SpecificSeed$.given$") &&
+          !contains(result.nirText,
+                    "call %demo.contextual.FactoryChoice$.fromGeneral") &&
           countOccurrences(result.nirText,
                            "call %demo.contextual.Show$.catShow.show(%value)") == 2 &&
           contains(result.nirText, "let %localShow : demo.contextual.Show = new "
