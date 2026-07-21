@@ -5890,6 +5890,140 @@ object Main {
           invalidDerivesSemantics.diagnosticsText + "')");
 }
 
+int smokeProductMirrorDerivationNativeRuntime() {
+  constexpr const char* source = R"(package demo.mirrorproduct
+
+trait Rebuild[A] {
+  def rebuild(product: scala.Product): A
+}
+
+class DerivedRebuild[A](val mirror: scala.deriving.Mirror.ProductOf[A])
+    extends Rebuild[A] {
+  override def rebuild(product: scala.Product): A = mirror.fromProduct(product)
+}
+
+object Rebuild {
+  def derived[A](using mirror: scala.deriving.Mirror.ProductOf[A]): Rebuild[A] =
+    new DerivedRebuild[A](mirror)
+}
+
+class Pair(val number: Int, val text: String) derives Rebuild
+
+class Product2(val first: Object, val second: Object) extends scala.Product {
+  override def productArity(): Int = 2
+  override def productElement(index: Int): Object =
+    if (index == 0) first else second
+}
+
+object Main {
+  def rebuild[A](product: scala.Product)(using instance: Rebuild[A]): A =
+    instance.rebuild(product)
+
+  def mirror[A]()(using instance: scala.deriving.Mirror.ProductOf[A]):
+      scala.deriving.Mirror.ProductOf[A] = instance
+
+  def main = {
+    val pair: Pair = rebuild[Pair](new Product2(42, "answer"))
+    println(pair.number)
+    println(pair.text)
+    println(mirror[Pair]() == mirror[Pair]())
+  }
+}
+)";
+  constexpr const char* invalidSource =
+      R"(package demo.invalidmirrorproduct
+
+trait Rebuild[A]
+object Rebuild {
+  def derived[A]: Rebuild[A] = null
+}
+
+class Generic[A](val value: A) derives Rebuild
+
+object MissingGenericMirror {
+  def choose[A]()(using mirror: scala.deriving.Mirror.ProductOf[A]):
+      scala.deriving.Mirror.ProductOf[A] = mirror
+  val missing = choose[Generic[String]]()
+}
+)";
+
+  const std::filesystem::path temporary = std::filesystem::temp_directory_path();
+  const std::filesystem::path binary =
+      temporary / "cpp-scalanative-smoke-product-mirror-derivation";
+  const std::filesystem::path output =
+      temporary / "cpp-scalanative-smoke-product-mirror-derivation.out";
+  std::error_code ignored;
+  std::filesystem::remove(binary, ignored);
+  std::filesystem::remove(output, ignored);
+
+  scalanative::tools::build::BuildDriver driver;
+  scalanative::tools::build::BuildOptions options;
+  options.action = scalanative::tools::build::BuildAction::BuildBinary;
+  options.optimize = true;
+  options.outputPath = binary;
+  scalanative::support::DiagnosticEngine diagnostics;
+  const scalanative::tools::build::BuildResult result =
+      driver.buildSource("ProductMirrorDerivation.scala", source, options, diagnostics);
+
+  scalanative::support::DiagnosticEngine invalidDiagnostics;
+  const scalanative::tools::build::BuildResult invalid = driver.buildSource(
+      "InvalidProductMirrorDerivation.scala", invalidSource, {}, invalidDiagnostics);
+
+  if (!result.ok) {
+    if (contains(result.diagnosticsText, "clang toolchain not found")) {
+      return 0;
+    }
+    return fail("product-mirror derivation native build failed: " +
+                result.diagnosticsText);
+  }
+
+  const std::string command = binary.string() + " > " + output.string();
+  const int status = std::system(command.c_str());
+  const std::string text = readTextFile(output);
+  std::filesystem::remove(binary, ignored);
+  std::filesystem::remove(output, ignored);
+
+  return expect(
+      status == 0 && text == "42\nanswer\ntrue\n" && !invalid.ok &&
+          contains(invalid.diagnosticsText,
+                   "no given value found for context parameter mirror of type "
+                   "scala.deriving.Mirror.ProductOf [ "
+                   "demo.invalidmirrorproduct.Generic [ String ] ] required by "
+                   "choose") &&
+          contains(result.nirText, "trait @scala.Product : @java.lang.Object") &&
+          contains(result.nirText, "declare @scala.Product.productElement : "
+                                   "(scala.Product,Int)Object") &&
+          contains(result.nirText,
+                   "trait @scala.deriving.Mirror.ProductOf : @java.lang.Object") &&
+          contains(result.nirText,
+                   "class @demo.mirrorproduct.$mirror$Product$demo$mirrorproduct$Pair "
+                   ": @scala.deriving.Mirror.ProductOf") &&
+          contains(result.nirText,
+                   "ret Object new demo.mirrorproduct.Pair(unbox[Int](call "
+                   "%product.productElement(0)), unbox[String](call "
+                   "%product.productElement(1)))") &&
+          contains(result.nirText,
+                   "field @demo.mirrorproduct.Pair$.$mirror$Product$type$field : "
+                   "scala.deriving.Mirror.ProductOf") &&
+          contains(result.nirText,
+                   "eval assign %demo.mirrorproduct.Pair$."
+                   "$mirror$Product$type$field = new "
+                   "demo.mirrorproduct.$mirror$Product$demo$mirrorproduct$Pair") &&
+          contains(result.nirText,
+                   "eval assign %demo.mirrorproduct.Pair$."
+                   "$derived$demo$mirrorproduct$Rebuild$type$field = call "
+                   "%demo.mirrorproduct.Rebuild$.derived(call "
+                   "%demo.mirrorproduct.Pair$.$mirror$Product$type())") &&
+          countOccurrences(result.nirText, "call %demo.mirrorproduct.Pair$."
+                                           "$mirror$Product$type()") == 3,
+      "Scala 3 product Mirror synthesis, stable contextual evidence, generated "
+      "fromProduct lowering, generic diagnostics, or native execution diverged "
+      "(status=" +
+          std::to_string(status) + ", output='" + text + "', diagnostics='" +
+          result.diagnosticsText + "', invalid-diagnostics='" +
+          invalid.diagnosticsText + "')");
+}
+
 int smokePrimitiveGenericsNativeRuntime() {
   constexpr const char* source = R"(package demo.primitivegenerics
 
@@ -12475,6 +12609,9 @@ int main() {
     return code;
   }
   if (int code = smokeContextualAbstractionsNativeRuntime()) {
+    return code;
+  }
+  if (int code = smokeProductMirrorDerivationNativeRuntime()) {
     return code;
   }
   if (int code = smokePrimitiveGenericsNativeRuntime()) {

@@ -981,8 +981,20 @@ Current scaffold status:
   generic derived instances remain contextual factories. Native identity checks
   distinguish stable monomorphic evidence from fresh generic factory results,
   and NIR coverage checks generated modules, fields, accessors, and initializer
-  calls. Higher-kinded derivation and `Mirror`-based structural derivation remain
-  later derivation milestones. Anonymous or local parameterized givens,
+  calls. The first structural-derivation layer also provides compiler-owned
+  `scala.Product` and `scala.deriving.Mirror.ProductOf[T]` traits. A monomorphic
+  class with a `derives` clause receives stable product-mirror evidence in its
+  companion and a generated mirror implementation whose `fromProduct` reads
+  constructor elements in declaration order, casts or unboxes them to the
+  declared parameter types, and invokes the primary constructor. Consequently a
+  normal `derived` method can request `Mirror.ProductOf[T]` through a `using`
+  parameter and use it at native runtime. Optimized coverage checks primitive
+  and reference reconstruction, one-time mirror initialization before the
+  derived value, evidence identity, and a focused missing-evidence diagnostic
+  for generic products. This intentionally value-level milestone does not yet
+  model `Mirror.Of`, `Mirror.SumOf`, singleton labels, element-type tuples, or
+  generic product mirrors; those and higher-kinded derivation remain later
+  derivation milestones. Anonymous or local parameterized givens,
   contextual-only inference for ordinary methods, nested companion declarations,
   and Scala 2 `implicit` syntax also remain later milestones.
 - Postfix type application now supports typed `value.isInstanceOf[Target]` and

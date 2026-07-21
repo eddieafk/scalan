@@ -75,6 +75,11 @@ build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
 build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
   --output /tmp/contextual-abstractions \
   cpp-examples/ContextualAbstractions.scala
+
+# Compile monomorphic product `Mirror` evidence used by a `derived` factory.
+build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
+  --output /tmp/product-mirror-derivation \
+  cpp-examples/ProductMirrorDerivation.scala
 ```
 
 Optimization levels select distinct Interflow pipelines: `O1` performs one

@@ -161,6 +161,8 @@ private:
                                                       Scope& scope);
   void collectDeclaration(const AstDeclaration& declaration, const std::string& owner,
                           Scope& scope);
+  void collectProductMirrors(const std::vector<AstDeclaration>& declarations,
+                             const std::string& owner, Scope& scope);
   void collectDerivedGivens(const std::vector<AstDeclaration>& declarations,
                             const std::string& owner, const Scope& scope);
   void attachDerivedInstances(std::vector<TypedDeclaration>& declarations);
@@ -301,6 +303,7 @@ private:
   std::unordered_set<std::string> companionTypeNames_;
   std::unordered_map<std::string, std::vector<SymbolInfo>> derivedGivens_;
   std::vector<DerivedInstanceInfo> derivedInstances_;
+  std::vector<AstDeclaration> productMirrorDeclarations_;
   std::vector<TypedExpressionInfo> expressionTypes_;
   std::vector<TypedContextApplication> contextApplications_;
   std::unordered_set<std::string> directZoneReceiverEscapes_;
