@@ -56,6 +56,10 @@ build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
 # Compile the boxed primitive-generics example.
 build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
   --output /tmp/primitive-generics cpp-examples/PrimitiveGenerics.scala
+
+# Compile the argument-driven generic-inference example.
+build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
+  --output /tmp/generic-inference cpp-examples/GenericInference.scala
 ```
 
 Optimization levels select distinct Interflow pipelines: `O1` performs one

@@ -2858,7 +2858,6 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
       constructor = &callee.children.front();
     }
     if (constructor != nullptr) {
-      TypeInfo constructed = inferExpressionType(callee, scope);
       std::vector<TypeInfo> argumentTypes;
       for (std::size_t i = 1; i < expression.children.size(); ++i) {
         argumentTypes.push_back(inferExpressionType(expression.children[i], scope));
@@ -2874,10 +2873,23 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
                  global->second.kind == AstDeclarationKind::Class) {
         classSymbol = &global->second;
       }
-      if (classSymbol != nullptr && callee.kind == AstExpressionKind::TypeApply) {
-        specializedClass = specializeTypeApplication(
-            *classSymbol, typeArgumentsFor(callee), scope, callee.span, false);
-        classSymbol = &specializedClass;
+      TypeInfo constructed{SimpleTypeKind::Unknown, "Unknown"};
+      if (classSymbol != nullptr) {
+        if (callee.kind == AstExpressionKind::TypeApply) {
+          constructed = inferExpressionType(callee, scope);
+          specializedClass = specializeTypeApplication(
+              *classSymbol, typeArgumentsFor(callee), scope, callee.span, false);
+          classSymbol = &specializedClass;
+        } else if (!classSymbol->typeParameters.empty()) {
+          specializedClass =
+              inferTypeApplication(*classSymbol, argumentTypes, expression.span);
+          classSymbol = &specializedClass;
+          constructed = specializedClass.type;
+        } else {
+          constructed = inferExpressionType(callee, scope);
+        }
+      } else {
+        constructed = inferExpressionType(callee, scope);
       }
 
       if (classSymbol != nullptr && classSymbol->typeParameters.empty()) {
@@ -2950,10 +2962,20 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
       }
     }
 
-    TypeInfo calleeType = inferExpressionType(callee, scope);
     std::vector<TypeInfo> argumentTypes;
     for (std::size_t i = 1; i < expression.children.size(); ++i) {
       argumentTypes.push_back(inferExpressionType(expression.children[i], scope));
+    }
+    TypeInfo calleeType{SimpleTypeKind::Unknown, "Unknown"};
+    if (calleeSymbol != nullptr && callee.kind != AstExpressionKind::TypeApply &&
+        !calleeSymbol->typeParameters.empty()) {
+      const SymbolInfo inferenceTarget = *calleeSymbol;
+      specializedCallee =
+          inferTypeApplication(inferenceTarget, argumentTypes, expression.span);
+      calleeSymbol = &specializedCallee;
+      calleeType = specializedCallee.type;
+    } else {
+      calleeType = inferExpressionType(callee, scope);
     }
 
     if (calleeSymbol != nullptr && calleeSymbol->typeParameters.empty()) {
@@ -4993,6 +5015,29 @@ SymbolInfo Typechecker::specializeMemberForReceiver(const SymbolInfo& member,
 SymbolInfo Typechecker::specializeTypeApplication(
     const SymbolInfo& symbol, const std::vector<std::string>& typeArguments,
     const Scope& scope, const support::SourceSpan& span, bool reportDiagnostics) const {
+  if (typeArguments.size() != symbol.typeParameters.size()) {
+    if (reportDiagnostics) {
+      diagnostics_.error(span, "type application to " + symbol.name + " has " +
+                                   std::to_string(typeArguments.size()) +
+                                   " arguments but expected " +
+                                   std::to_string(symbol.typeParameters.size()));
+    }
+    return symbol;
+  }
+
+  std::vector<TypeInfo> resolvedArguments;
+  resolvedArguments.reserve(typeArguments.size());
+  for (const std::string& typeArgument : typeArguments) {
+    resolvedArguments.push_back(typeFromDeclaredName(
+        typeArgument, &scope, reportDiagnostics ? &span : nullptr));
+  }
+  return specializeResolvedTypeApplication(symbol, resolvedArguments, span,
+                                           reportDiagnostics);
+}
+
+SymbolInfo Typechecker::specializeResolvedTypeApplication(
+    const SymbolInfo& symbol, const std::vector<TypeInfo>& typeArguments,
+    const support::SourceSpan& span, bool reportDiagnostics) const {
   SymbolInfo specialized = symbol;
   if (typeArguments.size() != symbol.typeParameters.size()) {
     if (reportDiagnostics) {
@@ -5005,11 +5050,8 @@ SymbolInfo Typechecker::specializeTypeApplication(
   }
 
   std::unordered_map<std::string, TypeInfo> substitutions;
-  std::vector<TypeInfo> resolvedArguments;
-  resolvedArguments.reserve(typeArguments.size());
   for (std::size_t i = 0; i < typeArguments.size(); ++i) {
-    const TypeInfo argument = typeFromDeclaredName(typeArguments[i], &scope,
-                                                   reportDiagnostics ? &span : nullptr);
+    const TypeInfo& argument = typeArguments[i];
     if (argument.kind != SimpleTypeKind::Unknown && !isReferenceType(argument) &&
         !isBoxablePrimitiveType(argument.kind)) {
       if (reportDiagnostics) {
@@ -5038,7 +5080,6 @@ SymbolInfo Typechecker::specializeTypeApplication(
                                    " does not conform to lower bound " + lower.name);
     }
     substitutions[symbol.typeParameters[i].symbolName] = argument;
-    resolvedArguments.push_back(argument);
   }
 
   specialized.type = substituteTypeParameters(symbol.type, substitutions);
@@ -5048,19 +5089,120 @@ SymbolInfo Typechecker::specializeTypeApplication(
   if (symbol.kind == AstDeclarationKind::Class ||
       symbol.kind == AstDeclarationKind::Trait) {
     specialized.type = TypeInfo{SimpleTypeKind::Object, symbol.symbolName + " [ "};
-    for (std::size_t i = 0; i < resolvedArguments.size(); ++i) {
+    for (std::size_t i = 0; i < typeArguments.size(); ++i) {
       if (i != 0) {
         specialized.type.name += ", ";
       }
-      specialized.type.name += resolvedArguments[i].name;
+      specialized.type.name += typeArguments[i].name;
     }
     specialized.type.name += " ]";
     specialized.type.runtimeName = symbol.symbolName;
     specialized.type.typeConstructorName = symbol.symbolName;
-    specialized.type.typeArguments = std::move(resolvedArguments);
+    specialized.type.typeArguments = typeArguments;
   }
   specialized.typeParameters.clear();
   return specialized;
+}
+
+SymbolInfo Typechecker::inferTypeApplication(const SymbolInfo& symbol,
+                                             const std::vector<TypeInfo>& argumentTypes,
+                                             const support::SourceSpan& span,
+                                             bool reportDiagnostics) const {
+  std::unordered_map<std::string, TypeInfo> substitutions;
+  std::unordered_set<std::string> conflictingParameters;
+  bool hasConflict = false;
+
+  const auto isApplicationTypeParameter = [&](const TypeInfo& type) {
+    return type.typeParameter &&
+           std::any_of(symbol.typeParameters.begin(), symbol.typeParameters.end(),
+                       [&](const TypeParameterInfo& parameter) {
+                         return parameter.symbolName == type.typeParameterSymbolName;
+                       });
+  };
+  const auto sameType = [](const TypeInfo& lhs, const TypeInfo& rhs) {
+    return lhs.kind == rhs.kind && lhs.name == rhs.name;
+  };
+  const auto mergeCandidate = [&](const TypeInfo& current, const TypeInfo& candidate) {
+    if (sameType(current, candidate)) {
+      return current;
+    }
+    if (isAssignable(current, candidate)) {
+      return current;
+    }
+    if (isAssignable(candidate, current)) {
+      return candidate;
+    }
+    if (current.kind == candidate.kind) {
+      return TypeInfo{SimpleTypeKind::Unknown, "Unknown"};
+    }
+    return commonType(current, candidate);
+  };
+
+  std::function<void(const TypeInfo&, const TypeInfo&)> collectInference;
+  collectInference = [&](const TypeInfo& parameterType, const TypeInfo& argumentType) {
+    if (argumentType.kind == SimpleTypeKind::Unknown) {
+      return;
+    }
+    if (isApplicationTypeParameter(parameterType)) {
+      auto inferred = substitutions.find(parameterType.typeParameterSymbolName);
+      if (inferred == substitutions.end()) {
+        substitutions.emplace(parameterType.typeParameterSymbolName, argumentType);
+        return;
+      }
+      const TypeInfo merged = mergeCandidate(inferred->second, argumentType);
+      if (merged.kind == SimpleTypeKind::Unknown) {
+        hasConflict = true;
+        if (reportDiagnostics &&
+            conflictingParameters.insert(parameterType.typeParameterSymbolName)
+                .second) {
+          diagnostics_.error(span, "conflicting inferred types " +
+                                       inferred->second.name + " and " +
+                                       argumentType.name + " for type parameter " +
+                                       parameterType.name + " of " + symbol.name);
+        }
+        return;
+      }
+      inferred->second = merged;
+      return;
+    }
+    if (!parameterType.typeConstructorName.empty() &&
+        parameterType.typeConstructorName == argumentType.typeConstructorName &&
+        parameterType.typeArguments.size() == argumentType.typeArguments.size()) {
+      for (std::size_t i = 0; i < parameterType.typeArguments.size(); ++i) {
+        collectInference(parameterType.typeArguments[i], argumentType.typeArguments[i]);
+      }
+    }
+  };
+
+  const std::size_t checkedArguments =
+      std::min(symbol.parameterTypes.size(), argumentTypes.size());
+  for (std::size_t i = 0; i < checkedArguments; ++i) {
+    collectInference(symbol.parameterTypes[i], argumentTypes[i]);
+  }
+
+  std::vector<TypeInfo> inferredArguments;
+  inferredArguments.reserve(symbol.typeParameters.size());
+  bool complete = true;
+  for (const TypeParameterInfo& parameter : symbol.typeParameters) {
+    auto inferred = substitutions.find(parameter.symbolName);
+    if (inferred == substitutions.end() ||
+        inferred->second.kind == SimpleTypeKind::Unknown) {
+      complete = false;
+      if (reportDiagnostics) {
+        diagnostics_.error(span, "cannot infer type argument " + parameter.name +
+                                     " for " + symbol.name +
+                                     " from value arguments; use explicit type "
+                                     "arguments");
+      }
+      continue;
+    }
+    inferredArguments.push_back(inferred->second);
+  }
+  if (!complete || hasConflict) {
+    return symbol;
+  }
+  return specializeResolvedTypeApplication(symbol, inferredArguments, span,
+                                           reportDiagnostics);
 }
 
 bool Typechecker::isAbstractTypeMember(const TypeInfo& type) const {

@@ -191,6 +191,12 @@ private:
                             const std::vector<std::string>& typeArguments,
                             const Scope& scope, const support::SourceSpan& span,
                             bool reportDiagnostics = true) const;
+  [[nodiscard]] SymbolInfo specializeResolvedTypeApplication(
+      const SymbolInfo& symbol, const std::vector<TypeInfo>& typeArguments,
+      const support::SourceSpan& span, bool reportDiagnostics = true) const;
+  [[nodiscard]] SymbolInfo inferTypeApplication(
+      const SymbolInfo& symbol, const std::vector<TypeInfo>& argumentTypes,
+      const support::SourceSpan& span, bool reportDiagnostics = true) const;
   [[nodiscard]] bool isAbstractTypeMember(const TypeInfo& type) const;
   [[nodiscard]] bool runtimeSignatureUsesAbstractType(const SymbolInfo& member) const;
   [[nodiscard]] TypeInfo

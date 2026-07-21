@@ -851,9 +851,21 @@ Current scaffold status:
   write through an unboxed selection. `cpp-examples/PrimitiveGenerics.scala`
   and optimized native smoke coverage exercise every supported scalar, generic
   class and method round trips, direct mutation, and erased NIR signatures.
-  Primitive upper/lower bounds, omitted-argument inference, variance, generic
-  inheritance, and contextual `using`/`given` search remain explicit next
-  milestones.
+  Primitive upper/lower bounds remain deferred.
+- Omitted type arguments are now inferred from value arguments for generic
+  method and constructor calls. The current Scala 3-oriented subset collects
+  direct and nested applied-type constraints, specializes generic members after
+  receiver substitution, merges repeated compatible candidates (including
+  numeric widening), and validates inferred arguments against existing bounds.
+  Missing evidence, incompatible candidates, and bound failures receive focused
+  diagnostics that recommend an explicit application where inference cannot
+  proceed. Inferred calls reuse the same erased `Object` ABI, boxing, unboxing,
+  and checked casts as explicit applications.
+  `cpp-examples/GenericInference.scala` and optimized native smoke coverage
+  exercise primitive, reference, bounded, nested, multiple-parameter,
+  receiver-member, and generic-inside-generic inference. Expected-result-type
+  inference, variance, generic inheritance, and contextual `using`/`given`
+  search remain explicit next milestones.
 - Postfix type application now supports typed `value.isInstanceOf[Target]` and
   checked `value.asInstanceOf[Target]` for known classes and traits. NIR uses
   dedicated `is-instance-of[T]` and `as-instance-of[T]` values; verification

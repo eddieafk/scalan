@@ -4852,7 +4852,6 @@ object InvalidGenerics {
   val arity = new Box[Base, Child](new Base)
   val bounded = new Bounded[String]("no")
   val lowerBounded = new LowerBounded[String]()
-  val inferred = identity(new Base)
   val child: Box[Child] = new Box[Child](new Child)
   val invariant: Box[Base] = child
   val missingTypeArguments: Box = new Box[Base](new Base)
@@ -4912,8 +4911,6 @@ class GenericChild extends Parent[Base]
           contains(invalid.diagnosticsText,
                    "type argument String for A does not conform to lower bound "
                    "Child") &&
-          contains(invalid.diagnosticsText,
-                   "generic method identity requires 1 explicit type arguments") &&
           contains(invalid.diagnosticsText,
                    "initializer type Box [ Child ] does not conform to declared "
                    "type Box [ Base ]") &&
@@ -5025,6 +5022,135 @@ object Main {
       "native execution diverged (status=" +
           std::to_string(status) + ", output='" + text + "', diagnostics='" +
           result.diagnosticsText + "')");
+}
+
+int smokeGenericInferenceNativeRuntime() {
+  constexpr const char* source = R"(package demo.genericinference
+
+class Label(val code: Int)
+
+class Box[A](val value: A) {
+  def get(): A = value
+  def choose[B](next: B): B = next
+}
+
+class Pair[A, B](val first: A, val second: B)
+class Restricted[A <: Label](val value: A)
+
+object Main {
+  def identity[A](value: A): A = value
+  def unwrap[A](box: Box[A]): A = box.get()
+  def wider[A](left: A, right: A): A = right
+  def duplicated[A](value: A): Pair[A, A] = new Pair(value, value)
+
+  def main = {
+    val numbers = new Box(40)
+    val pair = new Pair("inferred", 7L)
+    val nested = unwrap(new Box(new Label(2)))
+    val bounded = new Restricted(new Label(3))
+    val duplicate = duplicated(new Label(4))
+
+    println(identity(numbers.choose(41)))
+    println(pair.first)
+    println(pair.second)
+    println(nested.code + bounded.value.code)
+    println(wider(1, 9L))
+    println(duplicate.first.code + duplicate.second.code)
+  }
+}
+)";
+  constexpr const char* invalidSource = R"(class Base
+class Other
+class Box[A](val value: A)
+class Empty[A]
+
+object InvalidInference {
+  def noEvidence[A](): A = null
+  def same[A](left: A, right: A): A = left
+  def unwrap[A](box: Box[A]): A = box.value
+  def bounded[A <: Base](value: A): A = value
+
+  val missingMethod = noEvidence()
+  val missingConstructor = new Empty()
+  val conflicting = same(1, "no")
+  val conflictingReferences = same(new Base, new Other)
+  val wrongShape = unwrap("no")
+  val badBound = bounded("no")
+}
+)";
+
+  const std::filesystem::path temporary = std::filesystem::temp_directory_path();
+  const std::filesystem::path binary =
+      temporary / "cpp-scalanative-smoke-generic-inference";
+  const std::filesystem::path output =
+      temporary / "cpp-scalanative-smoke-generic-inference.out";
+  std::error_code ignored;
+  std::filesystem::remove(binary, ignored);
+  std::filesystem::remove(output, ignored);
+
+  scalanative::tools::build::BuildDriver driver;
+  scalanative::tools::build::BuildOptions options;
+  options.action = scalanative::tools::build::BuildAction::BuildBinary;
+  options.optimize = true;
+  options.outputPath = binary;
+  scalanative::support::DiagnosticEngine diagnostics;
+  const scalanative::tools::build::BuildResult result =
+      driver.buildSource("GenericInference.scala", source, options, diagnostics);
+
+  scalanative::support::DiagnosticEngine invalidDiagnostics;
+  const scalanative::tools::build::BuildResult invalid = driver.buildSource(
+      "InvalidGenericInference.scala", invalidSource, {}, invalidDiagnostics);
+
+  if (!result.ok) {
+    if (contains(result.diagnosticsText, "clang toolchain not found")) {
+      return 0;
+    }
+    return fail("generic-inference native build failed: " + result.diagnosticsText);
+  }
+
+  const std::string command = binary.string() + " > " + output.string();
+  const int status = std::system(command.c_str());
+  const std::string text = readTextFile(output);
+  std::filesystem::remove(binary, ignored);
+  std::filesystem::remove(output, ignored);
+
+  return expect(
+      status == 0 && text == "41\ninferred\n7\n5\n9\n8\n" && !invalid.ok &&
+          contains(invalid.diagnosticsText,
+                   "cannot infer type argument A for noEvidence from value "
+                   "arguments; use explicit type arguments") &&
+          contains(invalid.diagnosticsText,
+                   "cannot infer type argument A for Empty from value arguments; "
+                   "use explicit type arguments") &&
+          contains(invalid.diagnosticsText,
+                   "conflicting inferred types Int and String for type parameter A "
+                   "of same") &&
+          contains(invalid.diagnosticsText,
+                   "conflicting inferred types Base and Other for type parameter A "
+                   "of same") &&
+          contains(invalid.diagnosticsText,
+                   "cannot infer type argument A for unwrap from value arguments; "
+                   "use explicit type arguments") &&
+          contains(invalid.diagnosticsText,
+                   "type argument String for A does not conform to upper bound "
+                   "Base") &&
+          contains(result.nirText,
+                   "define @demo.genericinference.Main.identity : (Object)Object") &&
+          contains(result.nirText, "define @demo.genericinference.Main.unwrap : "
+                                   "(demo.genericinference.Box)Object") &&
+          contains(result.nirText, "new demo.genericinference.Box(box[Int](40))") &&
+          contains(result.nirText,
+                   "new demo.genericinference.Pair(box[String](\"inferred\"), "
+                   "box[Long](7L))") &&
+          contains(result.nirText,
+                   "unbox[Long](call %wider(box[Int](1), box[Long](9L)))") &&
+          contains(result.nirText,
+                   "as-instance-of[demo.genericinference.Label](call %unwrap") &&
+          !contains(result.nirText, "demo.genericinference.Box ["),
+      "generic argument inference, diagnostics, erasure, optimization, or native "
+      "execution diverged (status=" +
+          std::to_string(status) + ", output='" + text + "', diagnostics='" +
+          invalid.diagnosticsText + "')");
 }
 
 int smokeByteAndShortNativeRuntime() {
@@ -11256,6 +11382,9 @@ int main() {
     return code;
   }
   if (int code = smokePrimitiveGenericsNativeRuntime()) {
+    return code;
+  }
+  if (int code = smokeGenericInferenceNativeRuntime()) {
     return code;
   }
   if (int code = smokeByteAndShortNativeRuntime()) {
