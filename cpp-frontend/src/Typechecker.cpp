@@ -865,6 +865,7 @@ TypedModule Typechecker::typecheck(const AstModule& module) {
   memberScopes_.clear();
   globalSymbols_.clear();
   companionTypeNames_.clear();
+  derivedGivens_.clear();
   expressionTypes_.clear();
   contextApplications_.clear();
   directZoneReceiverEscapes_.clear();
@@ -910,6 +911,7 @@ TypedModule Typechecker::typecheck(const AstModule& module) {
   for (const AstDeclaration& declaration : module.declarations) {
     applyImport(declaration, scope);
   }
+  collectDerivedGivens(module.declarations, module.packageName, scope);
   for (const AstDeclaration& declaration : module.declarations) {
     typed.declarations.push_back(
         typecheckDeclaration(declaration, module.packageName, scope));
@@ -942,6 +944,7 @@ TypedDeclaration Typechecker::typecheckDeclaration(const AstDeclaration& declara
   typed.importPath = declaration.importPath;
   typed.importSelectors = declaration.importSelectors;
   typed.parentArguments = declaration.parentArguments;
+  typed.derivedTypes = declaration.derivedTypes;
   typed.isOverride = declaration.isOverride;
   typed.isGiven = declaration.isGiven;
   typed.isAnonymousGiven = declaration.isAnonymousGiven;
@@ -1992,6 +1995,94 @@ void Typechecker::collectDeclaration(const AstDeclaration& declaration,
     declaredMemberScopes_[symbolName] = ownMembers;
     mergeInheritedMembers(ownMembers, symbol.parentSymbolNames, symbol.parentTypes);
     memberScopes_[symbolName] = std::move(ownMembers);
+  }
+}
+
+void Typechecker::collectDerivedGivens(const std::vector<AstDeclaration>& declarations,
+                                       const std::string& owner, const Scope& scope) {
+  for (const AstDeclaration& declaration : declarations) {
+    if (declaration.name.empty() || (declaration.kind != AstDeclarationKind::Class &&
+                                     declaration.kind != AstDeclarationKind::Trait &&
+                                     declaration.kind != AstDeclarationKind::Object)) {
+      continue;
+    }
+
+    const std::string targetName = declarationSymbolName(declaration, owner);
+    auto target = globalSymbols_.find(targetName);
+    if (target == globalSymbols_.end()) {
+      continue;
+    }
+
+    Scope declarationScope = scope;
+    if (auto members = memberScopes_.find(targetName); members != memberScopes_.end()) {
+      mergeScope(declarationScope, members->second);
+    }
+
+    for (const std::string& derivedTypeName : declaration.derivedTypes) {
+      const SymbolInfo* typeclass =
+          typeSymbolForDeclaredName(derivedTypeName, &declarationScope);
+      if (typeclass == nullptr || (typeclass->kind != AstDeclarationKind::Class &&
+                                   typeclass->kind != AstDeclarationKind::Trait)) {
+        diagnostics_.error(declaration.span,
+                           "unresolved derived type class: " + derivedTypeName);
+        continue;
+      }
+      if (typeclass->typeParameters.size() != 1) {
+        diagnostics_.error(
+            declaration.span,
+            "derived type class " + derivedTypeName +
+                " must have exactly one type parameter in this derives milestone");
+        continue;
+      }
+
+      const TypeInfo expected =
+          specializeResolvedTypeApplication(*typeclass, {target->second.type},
+                                            declaration.span, false)
+              .type;
+      auto companionMembers = memberScopes_.find(typeclass->symbolName + '$');
+      if (companionMembers == memberScopes_.end()) {
+        diagnostics_.error(declaration.span,
+                           "derived type class " + derivedTypeName +
+                               " requires a companion method named derived");
+        continue;
+      }
+      auto method = companionMembers->second.find("derived");
+      if (method == companionMembers->second.end() ||
+          method->second.kind != AstDeclarationKind::Def) {
+        diagnostics_.error(declaration.span,
+                           "derived type class " + derivedTypeName +
+                               " requires a companion method named derived");
+        continue;
+      }
+
+      SymbolInfo candidate =
+          inferTypeApplication(method->second, {}, declaration.span, &expected, false);
+      if (!candidate.typeParameters.empty() ||
+          candidate.type.kind == SimpleTypeKind::Unknown ||
+          !isAssignable(expected, candidate.type)) {
+        diagnostics_.error(declaration.span, "method " + typeclass->name +
+                                                 ".derived cannot produce " +
+                                                 expected.name);
+        continue;
+      }
+      const bool allContextual =
+          candidate.contextualParameters.size() == candidate.parameterTypes.size() &&
+          std::all_of(candidate.contextualParameters.begin(),
+                      candidate.contextualParameters.end(),
+                      [](bool contextual) { return contextual; });
+      if (!allContextual) {
+        diagnostics_.error(declaration.span,
+                           "method " + typeclass->name +
+                               ".derived may only have using parameters");
+        continue;
+      }
+
+      candidate.name = "derived$" + typeclass->name;
+      candidate.isGiven = true;
+      derivedGivens_[targetName].push_back(std::move(candidate));
+    }
+
+    collectDerivedGivens(declaration.members, targetName, declarationScope);
   }
 }
 
@@ -6285,18 +6376,29 @@ std::vector<TypedContextArgument> Typechecker::resolveContextArguments(
 
       std::unordered_set<std::string> seenSymbols;
       for (const std::string& associatedType : associatedTypes) {
-        if (!companionTypeNames_.contains(associatedType)) {
-          continue;
-        }
-        auto members = memberScopes_.find(associatedType + '$');
-        if (members == memberScopes_.end()) {
-          continue;
-        }
-        for (const auto& [name, candidate] : members->second) {
-          if (!candidate.isGiven || !seenSymbols.insert(candidate.symbolName).second) {
-            continue;
+        if (companionTypeNames_.contains(associatedType)) {
+          auto members = memberScopes_.find(associatedType + '$');
+          if (members != memberScopes_.end()) {
+            for (const auto& [name, candidate] : members->second) {
+              if (!candidate.isGiven ||
+                  !seenSymbols
+                       .insert(candidate.symbolName + " as " + candidate.type.name)
+                       .second) {
+                continue;
+              }
+              addCandidate(companionCandidates, name, candidate);
+            }
           }
-          addCandidate(companionCandidates, name, candidate);
+        }
+        if (auto derived = derivedGivens_.find(associatedType);
+            derived != derivedGivens_.end()) {
+          for (const SymbolInfo& candidate : derived->second) {
+            if (!seenSymbols.insert(candidate.symbolName + " as " + candidate.type.name)
+                     .second) {
+              continue;
+            }
+            addCandidate(companionCandidates, candidate.name, candidate);
+          }
         }
       }
     }

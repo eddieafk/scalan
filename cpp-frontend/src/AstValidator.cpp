@@ -99,6 +99,28 @@ bool AstValidator::validateDeclaration(const AstDeclaration& declaration,
         "type parameters are only supported on classes, traits, and methods");
     ok = false;
   }
+  if (!declaration.derivedTypes.empty() &&
+      declaration.kind != AstDeclarationKind::Class &&
+      declaration.kind != AstDeclarationKind::Trait &&
+      declaration.kind != AstDeclarationKind::Object) {
+    diagnostics.error(declaration.span,
+                      "derives clauses are only supported on classes, traits, and "
+                      "objects");
+    ok = false;
+  }
+  if (!declaration.derivedTypes.empty() && !declaration.typeParameters.empty()) {
+    diagnostics.error(declaration.span,
+                      "generic derives clauses are not supported yet");
+    ok = false;
+  }
+  std::unordered_set<std::string> derivedTypeNames;
+  for (const std::string& derivedType : declaration.derivedTypes) {
+    if (!derivedTypeNames.insert(derivedType).second) {
+      diagnostics.error(declaration.span,
+                        "duplicate derived type class: " + derivedType);
+      ok = false;
+    }
+  }
   std::unordered_set<std::string> typeParameterNames;
   for (const AstTypeParameter& parameter : declaration.typeParameters) {
     if (parameter.name.empty()) {

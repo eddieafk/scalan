@@ -104,6 +104,15 @@ void writeDeclaration(std::ostringstream& out, const AstDeclaration& declaration
   for (std::size_t i = 1; i < declaration.parentTypes.size(); ++i) {
     out << " with " << declaration.parentTypes[i];
   }
+  if (!declaration.derivedTypes.empty()) {
+    out << " derives ";
+    for (std::size_t i = 0; i < declaration.derivedTypes.size(); ++i) {
+      if (i != 0) {
+        out << ", ";
+      }
+      out << declaration.derivedTypes[i];
+    }
+  }
   if (!declaration.importPath.empty()) {
     out << " <- " << declaration.importPath;
   }

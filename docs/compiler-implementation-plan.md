@@ -952,9 +952,24 @@ Current scaffold status:
   one deterministically ranked path is replayed with diagnostics enabled to
   retain the focused nested cause. Native coverage exercises fallback from all
   three recursive failure classes and diagnostic replay for all-failed missing,
-  ambiguous, and divergent searches. Anonymous or local parameterized givens,
-  `derives`/derived givens, contextual-only inference for ordinary methods,
-  nested companion declarations, and Scala 2 `implicit` syntax remain later
+  ambiguous, and divergent searches.
+- The first Scala 3 derivation slice parses and preserves `derives` clauses on
+  monomorphic classes, traits, and objects, including clauses following an
+  `extends` chain. Each requested unary type class is resolved through normal
+  type scope, its companion `derived` method is specialized from the expected
+  `TypeClass[DerivingType]` result, and the synthesized evidence participates in
+  associated-type contextual search. A `derived` method may itself accept only
+  `using` parameters; those dependencies use the existing recursive evidence
+  materializer and lower as nested erased calls. Focused diagnostics cover
+  duplicate clauses, unsupported generic deriving types, missing or non-unary
+  type classes, missing companion methods, incompatible results, and ordinary
+  parameters. The contextual-abstractions example and optimized native smoke
+  coverage exercise class, trait, and object derivation, `extends ... derives`,
+  recursive companion evidence, NIR lowering, and native execution. Generic
+  derives clauses, `Mirror`-based structural derivation, and stable synthesized
+  instance storage remain later derivation milestones. Anonymous or local
+  parameterized givens, contextual-only inference for ordinary methods, nested
+  companion declarations, and Scala 2 `implicit` syntax also remain later
   milestones.
 - Postfix type application now supports typed `value.isInstanceOf[Target]` and
   checked `value.asInstanceOf[Target]` for known classes and traits. NIR uses

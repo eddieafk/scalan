@@ -97,6 +97,7 @@ struct AstDeclaration {
   std::string lowerBound;
   std::string upperBound;
   std::vector<std::string> parentTypes;
+  std::vector<std::string> derivedTypes;
   std::vector<AstExpression> parentArguments;
   std::string importPath;
   std::vector<AstImportSelector> importSelectors;

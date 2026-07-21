@@ -263,6 +263,17 @@ AstDeclaration Parser::parseObjectLike(AstDeclarationKind kind, const Token& key
     }
   }
 
+  if (match(TokenKind::KeywordDerives)) {
+    do {
+      std::string derivedType = parseTypeName();
+      if (derivedType.empty()) {
+        diagnostics_.error(peek().span, "expected type class name after 'derives'");
+        break;
+      }
+      declaration.derivedTypes.push_back(std::move(derivedType));
+    } while (match(TokenKind::Comma));
+  }
+
   if (check(TokenKind::LeftBrace)) {
     const bool capturesInitializationOrder =
         kind == AstDeclarationKind::Class || kind == AstDeclarationKind::Object;
@@ -733,6 +744,7 @@ std::string Parser::parseTypeName(bool stopAtUpperBound, bool stopAtRightBracket
     case TokenKind::RightParen:
     case TokenKind::Arrow:
     case TokenKind::KeywordIf:
+    case TokenKind::KeywordDerives:
     case TokenKind::KeywordWith:
       return type;
     default:

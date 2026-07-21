@@ -5139,6 +5139,11 @@ class Cat(val name: String)
 class Bird(val name: String)
 class Fox(val name: String)
 class Box[A](val value: A)
+class DerivationSeed(val prefix: String)
+
+object DerivationSeed {
+  given seed: DerivationSeed = new DerivationSeed("derived")
+}
 
 class Formatter(val label: String) {
   def format(): String = label
@@ -5240,6 +5245,10 @@ trait Show[A] {
   def show(value: A): String
 }
 
+class DerivedShow[A](val prefix: String) extends Show[A] {
+  override def show(value: A): String = prefix
+}
+
 class DogShow(val prefix: String) extends Show[Dog] {
   override def show(value: Dog): String = prefix + value.name
 }
@@ -5267,7 +5276,16 @@ object Show {
 
   given boxShow[A](using elementShow: Show[A]): Show[Box[A]] =
     new BoxShow[A](elementShow)
+
+  def derived[A](using seed: DerivationSeed): Show[A] =
+    new DerivedShow[A](seed.prefix)
 }
+
+class DerivationBase
+class AutomaticallyShown extends DerivationBase derives Show
+trait AutomaticallyShownTrait derives Show
+class AutomaticallyShownTraitValue extends AutomaticallyShownTrait
+object AutomaticallyShownObject derives Show
 
 object Bird {
   given Show[Bird] = new BirdShow("argument-companion:")
@@ -5321,6 +5339,15 @@ object Main {
 
   def recursivelyParameterized(value: Box[Box[Cat]]): String =
     render(value)
+
+  def automaticallyDerivedClass: String =
+    render(new AutomaticallyShown)
+
+  def automaticallyDerivedTrait(value: AutomaticallyShownTrait): String =
+    render(value)
+
+  def automaticallyDerivedObject: String =
+    render(AutomaticallyShownObject)
 
   def format()(using formatter: Formatter): String =
     formatter.format()
@@ -5391,6 +5418,9 @@ object Main {
     println(parameterized(new Box[Cat](new Cat("boxed"))))
     println(recursivelyParameterized(
       new Box[Box[Cat]](new Box[Cat](new Cat("recursive")))))
+    println(automaticallyDerivedClass)
+    println(automaticallyDerivedTrait(new AutomaticallyShownTraitValue))
+    println(automaticallyDerivedObject)
     println(generallyPreferred)
     println(nestedPreference)
     println(ownerPreferred)
@@ -5527,6 +5557,33 @@ object InvalidContextualClauses {
   }
 }
 )";
+  constexpr const char* invalidDerivesSyntaxSource = R"(trait Show[A]
+
+object Show {
+  def derived[A]: Show[A] = null
+}
+
+class Generic[A] derives Show
+class Duplicate derives Show, Show
+)";
+  constexpr const char* invalidDerivesSemanticsSource = R"(trait MissingDerived[A]
+object MissingDerived
+class NoMethod derives MissingDerived
+
+trait Binary[A, B]
+object Binary {
+  def derived[A]: Binary[A, A] = null
+}
+class WrongArity derives Binary
+
+trait WrongResult[A]
+object WrongResult {
+  def derived[A]: Int = 1
+}
+class BadResult derives WrongResult
+
+class UnknownTypeclass derives NotFound
+)";
   constexpr const char* divergingSource = R"(package demo.divergingcontext
 
 class Fish
@@ -5570,6 +5627,14 @@ object Main {
   const scalanative::tools::build::BuildResult invalidClause =
       driver.buildSource("InvalidContextualClauses.scala", invalidClauseSource, {},
                          invalidClauseDiagnostics);
+  scalanative::support::DiagnosticEngine invalidDerivesSyntaxDiagnostics;
+  const scalanative::tools::build::BuildResult invalidDerivesSyntax =
+      driver.buildSource("InvalidDerivesSyntax.scala", invalidDerivesSyntaxSource, {},
+                         invalidDerivesSyntaxDiagnostics);
+  scalanative::support::DiagnosticEngine invalidDerivesSemanticsDiagnostics;
+  const scalanative::tools::build::BuildResult invalidDerivesSemantics =
+      driver.buildSource("InvalidDerivesSemantics.scala", invalidDerivesSemanticsSource,
+                         {}, invalidDerivesSemanticsDiagnostics);
   scalanative::support::DiagnosticEngine divergingDiagnostics;
   const scalanative::tools::build::BuildResult diverging = driver.buildSource(
       "DivergingContext.scala", divergingSource, {}, divergingDiagnostics);
@@ -5594,7 +5659,8 @@ object Main {
                   "named-local:dog\nanonymous-local:dog\n"
                   "typeclass-companion:fox\n"
                   "argument-companion:bird\ncompanion:direct\n"
-                  "companion:imported\nbox\nbox\ngeneral\nnested\n"
+                  "companion:imported\nbox\nbox\nderived\nderived\nderived\n"
+                  "general\nnested\n"
                   "owner-high\ndirect\nspecific-factory\nmissing-fallback\n"
                   "ambiguous-fallback\ndivergent-fallback\ninner-local:dog\n" &&
           !invalid.ok &&
@@ -5639,6 +5705,22 @@ object Main {
                    "parameterized given parameters must use a using clause") &&
           contains(invalidClause.diagnosticsText,
                    "local parameterized givens are not supported yet") &&
+          !invalidDerivesSyntax.ok &&
+          contains(invalidDerivesSyntax.diagnosticsText,
+                   "generic derives clauses are not supported yet") &&
+          contains(invalidDerivesSyntax.diagnosticsText,
+                   "duplicate derived type class: Show") &&
+          !invalidDerivesSemantics.ok &&
+          contains(invalidDerivesSemantics.diagnosticsText,
+                   "derived type class MissingDerived requires a companion method "
+                   "named derived") &&
+          contains(invalidDerivesSemantics.diagnosticsText,
+                   "derived type class Binary must have exactly one type parameter") &&
+          contains(invalidDerivesSemantics.diagnosticsText,
+                   "method WrongResult.derived cannot produce WrongResult [ "
+                   "BadResult ]") &&
+          contains(invalidDerivesSemantics.diagnosticsText,
+                   "unresolved derived type class: NotFound") &&
           !diverging.ok &&
           contains(diverging.diagnosticsText,
                    "diverging given expansion for type demo.divergingcontext.Show "
@@ -5665,6 +5747,8 @@ object Main {
           contains(result.nirText, "call %demo.contextual.Show$.boxShow(call "
                                    "%demo.contextual.Show$.boxShow(call "
                                    "%demo.contextual.Show$.catShow()))") &&
+          contains(result.nirText, "call %demo.contextual.Show$.derived(call "
+                                   "%demo.contextual.DerivationSeed$.seed())") &&
           contains(result.nirText,
                    "ret String call %format(call "
                    "%demo.contextual.Main.generalFormatter())") &&
@@ -5716,7 +5800,9 @@ object Main {
           std::to_string(status) + ", output='" + text + "', diagnostics='" +
           invalid.diagnosticsText + "', clause-diagnostics='" +
           invalidClause.diagnosticsText + "', diverging-diagnostics='" +
-          diverging.diagnosticsText + "')");
+          diverging.diagnosticsText + "', derives-syntax-diagnostics='" +
+          invalidDerivesSyntax.diagnosticsText + "', derives-semantics-diagnostics='" +
+          invalidDerivesSemantics.diagnosticsText + "')");
 }
 
 int smokePrimitiveGenericsNativeRuntime() {

@@ -827,6 +827,9 @@ TokenKind Lexer::keywordKind(std::string_view text) const {
   if (text == "def") {
     return TokenKind::KeywordDef;
   }
+  if (text == "derives") {
+    return TokenKind::KeywordDerives;
+  }
   if (text == "else") {
     return TokenKind::KeywordElse;
   }
@@ -1037,6 +1040,8 @@ const char* tokenKindName(TokenKind kind) {
     return "class";
   case TokenKind::KeywordDef:
     return "def";
+  case TokenKind::KeywordDerives:
+    return "derives";
   case TokenKind::KeywordElse:
     return "else";
   case TokenKind::KeywordExtends:

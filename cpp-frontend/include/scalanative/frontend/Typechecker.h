@@ -73,6 +73,7 @@ struct TypedDeclaration {
   std::string lowerBound;
   std::string upperBound;
   std::vector<std::string> parentTypes;
+  std::vector<std::string> derivedTypes;
   std::vector<TypeInfo> parentTypeInfos;
   std::vector<AstExpression> parentArguments;
   std::string importPath;
@@ -152,6 +153,8 @@ private:
                                                       Scope& scope);
   void collectDeclaration(const AstDeclaration& declaration, const std::string& owner,
                           Scope& scope);
+  void collectDerivedGivens(const std::vector<AstDeclaration>& declarations,
+                            const std::string& owner, const Scope& scope);
   [[nodiscard]] std::string declarationSymbolName(const AstDeclaration& declaration,
                                                   const std::string& owner) const;
   [[nodiscard]] std::string importSymbolName(const AstDeclaration& declaration,
@@ -287,6 +290,7 @@ private:
   std::unordered_map<std::string, Scope> memberScopes_;
   std::unordered_map<std::string, SymbolInfo> globalSymbols_;
   std::unordered_set<std::string> companionTypeNames_;
+  std::unordered_map<std::string, std::vector<SymbolInfo>> derivedGivens_;
   std::vector<TypedExpressionInfo> expressionTypes_;
   std::vector<TypedContextApplication> contextApplications_;
   std::unordered_set<std::string> directZoneReceiverEscapes_;

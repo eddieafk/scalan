@@ -5,6 +5,11 @@ class Cat(val name: String)
 class Bird(val name: String)
 class Fox(val name: String)
 class Box[A](val value: A)
+class DerivationSeed(val prefix: String)
+
+object DerivationSeed {
+  given seed: DerivationSeed = new DerivationSeed("derived")
+}
 
 class Formatter(val label: String) {
   def format(): String = label
@@ -106,6 +111,10 @@ trait Show[A] {
   def show(value: A): String
 }
 
+class DerivedShow[A](val prefix: String) extends Show[A] {
+  override def show(value: A): String = prefix
+}
+
 class DogShow(val prefix: String) extends Show[Dog] {
   override def show(value: Dog): String = prefix + value.name
 }
@@ -133,7 +142,16 @@ object Show {
 
   given boxShow[A](using elementShow: Show[A]): Show[Box[A]] =
     new BoxShow[A](elementShow)
+
+  def derived[A](using seed: DerivationSeed): Show[A] =
+    new DerivedShow[A](seed.prefix)
 }
+
+class DerivationBase
+class AutomaticallyShown extends DerivationBase derives Show
+trait AutomaticallyShownTrait derives Show
+class AutomaticallyShownTraitValue extends AutomaticallyShownTrait
+object AutomaticallyShownObject derives Show
 
 object Bird {
   given Show[Bird] = new BirdShow("argument-companion:")
@@ -187,6 +205,15 @@ object ContextualAbstractions {
 
   def recursivelyParameterized(value: Box[Box[Cat]]): String =
     render(value)
+
+  def automaticallyDerivedClass: String =
+    render(new AutomaticallyShown)
+
+  def automaticallyDerivedTrait(value: AutomaticallyShownTrait): String =
+    render(value)
+
+  def automaticallyDerivedObject: String =
+    render(AutomaticallyShownObject)
 
   def format()(using formatter: Formatter): String =
     formatter.format()
@@ -257,6 +284,9 @@ object ContextualAbstractions {
     println(parameterized(new Box[Cat](new Cat("boxed"))))
     println(recursivelyParameterized(
       new Box[Box[Cat]](new Box[Cat](new Cat("recursive")))))
+    println(automaticallyDerivedClass)
+    println(automaticallyDerivedTrait(new AutomaticallyShownTraitValue))
+    println(automaticallyDerivedObject)
     println(generallyPreferred)
     println(nestedPreference)
     println(ownerPreferred)

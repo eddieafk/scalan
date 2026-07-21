@@ -28,6 +28,7 @@ enum class TokenKind {
   KeywordCase,
   KeywordCatch,
   KeywordDef,
+  KeywordDerives,
   KeywordElse,
   KeywordExtends,
   KeywordFalse,
