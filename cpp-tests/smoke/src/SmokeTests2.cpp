@@ -5135,6 +5135,8 @@ int smokeContextualAbstractionsNativeRuntime() {
   constexpr const char* source = R"(package demo.contextual
 
 class Dog(val name: String)
+class Cat(val name: String)
+class Bird(val name: String)
 
 trait Show[A] {
   def show(value: A): String
@@ -5142,6 +5144,23 @@ trait Show[A] {
 
 class DogShow(val prefix: String) extends Show[Dog] {
   override def show(value: Dog): String = prefix + value.name
+}
+
+class CatShow(val prefix: String) extends Show[Cat] {
+  override def show(value: Cat): String = prefix + value.name
+}
+
+class BirdShow(val prefix: String) extends Show[Bird] {
+  override def show(value: Bird): String = prefix + value.name
+}
+
+object Show {
+  given Show[Cat] = new CatShow("companion:")
+  given Show[Dog] = new DogShow("shadowed-companion:")
+}
+
+object Bird {
+  given Show[Bird] = new BirdShow("argument-companion:")
 }
 
 object Main {
@@ -5159,17 +5178,47 @@ object Main {
   def locally(value: Dog)(using show: Show[Dog]): String =
     render(value)
 
+  def localNamed(value: Dog): String = {
+    given localShow: Show[Dog] = new DogShow("named-local:")
+    render(value)
+  }
+
+  def localAnonymous(value: Dog): String = {
+    given Show[Dog] = new DogShow("anonymous-local:")
+    render(value)
+  }
+
+  def companion(value: Cat): String =
+    render(value)
+
+  def argumentCompanion(value: Bird): String =
+    render(value)
+
+  def nestedLocal(value: Dog): String = {
+    given outerShow: Show[Dog] = new DogShow("outer-local:")
+    {
+      given Show[Dog] = new DogShow("inner-local:")
+      render(value)
+    }
+  }
+
   def main = {
     println(render(new Dog("inferred")))
     println(forwarded(new Dog("forwarded")))
     println(explicit(new Dog("explicit")))
     println(locally(new Dog("local"))(using new DogShow("local:")))
+    println(localNamed(new Dog("dog")))
+    println(localAnonymous(new Dog("dog")))
+    println(companion(new Cat("cat")))
+    println(argumentCompanion(new Bird("bird")))
+    println(nestedLocal(new Dog("dog")))
   }
 }
 )";
   constexpr const char* invalidSource = R"(package demo.invalidcontextual
 
 class Dog
+class Cat
 
 trait Show[A] {
   def show(value: A): String
@@ -5177,6 +5226,18 @@ trait Show[A] {
 
 class DogShow extends Show[Dog] {
   override def show(value: Dog): String = "dog"
+}
+
+class CatShow extends Show[Cat] {
+  override def show(value: Cat): String = "cat"
+}
+
+object Show {
+  given typeclassGiven: Show[Cat] = new CatShow
+}
+
+object Cat {
+  given argumentGiven: Show[Cat] = new CatShow
 }
 
 object MissingContext {
@@ -5190,6 +5251,21 @@ object AmbiguousContext {
 
   def render[A](value: A)(using show: Show[A]): String = show.show(value)
   val ambiguous = render(new Dog)
+}
+
+object AmbiguousCompanionContext {
+  def render[A](value: A)(using show: Show[A]): String = show.show(value)
+  val ambiguous = render(new Cat)
+}
+
+object AmbiguousLocalContext {
+  def render[A](value: A)(using show: Show[A]): String = show.show(value)
+
+  def ambiguous(value: Dog): String = {
+    given localFirst: Show[Dog] = new DogShow
+    given localSecond: Show[Dog] = new DogShow
+    render(value)
+  }
 }
 )";
   constexpr const char* invalidClauseSource = R"(trait Show[A]
@@ -5243,7 +5319,9 @@ object InvalidContextualClauses {
 
   return expect(
       status == 0 &&
-          text == "dog:inferred\ndog:forwarded\ndog:explicit\nlocal:local\n" &&
+          text == "dog:inferred\ndog:forwarded\ndog:explicit\nlocal:local\n"
+                  "named-local:dog\nanonymous-local:dog\ncompanion:cat\n"
+                  "argument-companion:bird\ninner-local:dog\n" &&
           !invalid.ok &&
           contains(invalid.diagnosticsText,
                    "no given value found for context parameter show of type "
@@ -5253,6 +5331,12 @@ object InvalidContextualClauses {
                    "ambiguous given values for context parameter show of type "
                    "demo.invalidcontextual.Show [ demo.invalidcontextual.Dog ] "
                    "required by render: first, second") &&
+          contains(invalid.diagnosticsText,
+                   "ambiguous given values for context parameter show of type "
+                   "demo.invalidcontextual.Show [ demo.invalidcontextual.Cat ] "
+                   "required by render: argumentGiven, typeclassGiven") &&
+          contains(invalid.diagnosticsText,
+                   "required by render: localFirst, localSecond") &&
           !invalidClause.ok &&
           contains(invalidClause.diagnosticsText,
                    "using parameter requires an explicit type") &&
@@ -5271,6 +5355,13 @@ object InvalidContextualClauses {
                                    "(Object,demo.contextual.Show)String") &&
           contains(result.nirText, "ret String call %render(%value, %show)") &&
           contains(result.nirText, "call %demo.contextual.Main.dogShow()") &&
+          contains(result.nirText, "module @demo.contextual.Show$") &&
+          contains(result.nirText, "module @demo.contextual.Bird$") &&
+          contains(result.nirText, "call %demo.contextual.Show$.given$") &&
+          contains(result.nirText, "call %demo.contextual.Bird$.given$") &&
+          contains(result.nirText, "let %localShow : demo.contextual.Show = new "
+                                   "demo.contextual.DogShow(\"named-local:\")") &&
+          contains(result.nirText, "let %given$") &&
           !contains(result.nirText, "demo.contextual.Show ["),
       "contextual abstraction parsing, generic-aware search, erased lowering, "
       "diagnostics, or native execution diverged (status=" +

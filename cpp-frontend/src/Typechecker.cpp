@@ -863,6 +863,7 @@ TypedModule Typechecker::typecheck(const AstModule& module) {
   declaredMemberScopes_.clear();
   memberScopes_.clear();
   globalSymbols_.clear();
+  companionTypeNames_.clear();
   expressionTypes_.clear();
   contextApplications_.clear();
   directZoneReceiverEscapes_.clear();
@@ -875,8 +876,35 @@ TypedModule Typechecker::typecheck(const AstModule& module) {
   Scope scope;
   addRuntimeBuiltins(scope);
   typed.declarations = standardExceptionDeclarations();
+  std::unordered_map<std::string, unsigned> companionKinds;
   for (const AstDeclaration& declaration : module.declarations) {
-    collectDeclaration(declaration, module.packageName, scope);
+    if (declaration.name.empty()) {
+      continue;
+    }
+    const std::string name = qualify(module.packageName, declaration.name);
+    if (declaration.kind == AstDeclarationKind::Class ||
+        declaration.kind == AstDeclarationKind::Trait) {
+      companionKinds[name] |= 1U;
+    } else if (declaration.kind == AstDeclarationKind::Object) {
+      companionKinds[name] |= 2U;
+    }
+  }
+  for (const auto& [name, kinds] : companionKinds) {
+    if (kinds == 3U) {
+      companionTypeNames_.insert(name);
+    }
+  }
+  for (const AstDeclaration& declaration : module.declarations) {
+    if (declaration.kind == AstDeclarationKind::Class ||
+        declaration.kind == AstDeclarationKind::Trait) {
+      collectDeclaration(declaration, module.packageName, scope);
+    }
+  }
+  for (const AstDeclaration& declaration : module.declarations) {
+    if (declaration.kind != AstDeclarationKind::Class &&
+        declaration.kind != AstDeclarationKind::Trait) {
+      collectDeclaration(declaration, module.packageName, scope);
+    }
   }
   for (const AstDeclaration& declaration : module.declarations) {
     applyImport(declaration, scope);
@@ -908,13 +936,14 @@ TypedDeclaration Typechecker::typecheckDeclaration(const AstDeclaration& declara
   typed.name = declaration.name;
   typed.symbolName = declaration.kind == AstDeclarationKind::Import
                          ? declaration.importPath
-                         : qualify(owner, declaration.name);
+                         : declarationSymbolName(declaration, owner);
   typed.span = declaration.span;
   typed.importPath = declaration.importPath;
   typed.importSelectors = declaration.importSelectors;
   typed.parentArguments = declaration.parentArguments;
   typed.isOverride = declaration.isOverride;
   typed.isGiven = declaration.isGiven;
+  typed.isAnonymousGiven = declaration.isAnonymousGiven;
   typed.hasInitializer = declaration.hasInitializer;
   typed.initializer = declaration.initializer;
   typed.constructorBody = declaration.constructorBody;
@@ -1054,6 +1083,7 @@ TypedDeclaration Typechecker::typecheckDeclaration(const AstDeclaration& declara
       imported.parameterTypes = symbol.parameterTypes;
       imported.contextualParameters = symbol.contextualParameters;
       imported.isGiven = symbol.isGiven;
+      imported.isAnonymousGiven = symbol.isAnonymousGiven;
       typed.members.push_back(std::move(imported));
     }
   }
@@ -1069,7 +1099,7 @@ TypedDeclaration Typechecker::typecheckDeclaration(const AstDeclaration& declara
 
   if (!declaration.name.empty() && declaration.kind != AstDeclarationKind::Package &&
       declaration.kind != AstDeclarationKind::Import) {
-    SymbolInfo& symbol = scope[declaration.name];
+    SymbolInfo symbol;
     symbol.kind = declaration.kind;
     symbol.name = declaration.name;
     symbol.symbolName = typed.symbolName;
@@ -1089,9 +1119,22 @@ TypedDeclaration Typechecker::typecheckDeclaration(const AstDeclaration& declara
     symbol.parameterTypes = typed.parameterTypes;
     symbol.contextualParameters = typed.contextualParameters;
     symbol.isGiven = typed.isGiven;
+    symbol.isAnonymousGiven = typed.isAnonymousGiven;
+    if (auto enclosing = globalSymbols_.find(owner);
+        enclosing != globalSymbols_.end() &&
+        enclosing->second.kind == AstDeclarationKind::Object) {
+      symbol.isModuleMember = declaration.kind == AstDeclarationKind::Val ||
+                              declaration.kind == AstDeclarationKind::Var;
+    }
     symbol.hasImplementation =
         declarationHasImplementation(declaration.kind, declaration.hasInitializer);
     globalSymbols_[typed.symbolName] = symbol;
+    const bool companionObject =
+        declaration.kind == AstDeclarationKind::Object &&
+        companionTypeNames_.contains(qualify(owner, declaration.name));
+    if (!companionObject) {
+      scope[declaration.name] = std::move(symbol);
+    }
   }
 
   Scope ownMemberScope;
@@ -1327,6 +1370,10 @@ TypedDeclaration Typechecker::typecheckDeclaration(const AstDeclaration& declara
     updated.parameterTypes = typedMember.parameterTypes;
     updated.contextualParameters = typedMember.contextualParameters;
     updated.isGiven = typedMember.isGiven;
+    updated.isAnonymousGiven = typedMember.isAnonymousGiven;
+    updated.isModuleMember = declaration.kind == AstDeclarationKind::Object &&
+                             (typedMember.kind == AstDeclarationKind::Val ||
+                              typedMember.kind == AstDeclarationKind::Var);
     updated.hasImplementation =
         declarationHasImplementation(typedMember.kind, typedMember.hasInitializer);
     if ((declaration.kind == AstDeclarationKind::Class ||
@@ -1790,6 +1837,16 @@ void Typechecker::addRuntimeBuiltins(Scope& scope) {
   memberScopes_[stackTraceElement.symbolName] = std::move(stackTraceMembers);
 }
 
+std::string Typechecker::declarationSymbolName(const AstDeclaration& declaration,
+                                               const std::string& owner) const {
+  std::string name = qualify(owner, declaration.name);
+  if (declaration.kind == AstDeclarationKind::Object &&
+      companionTypeNames_.contains(name)) {
+    name += '$';
+  }
+  return name;
+}
+
 void Typechecker::collectDeclaration(const AstDeclaration& declaration,
                                      const std::string& owner, Scope& scope) {
   if (declaration.name.empty() || declaration.kind == AstDeclarationKind::Package ||
@@ -1800,7 +1857,7 @@ void Typechecker::collectDeclaration(const AstDeclaration& declaration,
   SymbolInfo symbol;
   symbol.kind = declaration.kind;
   symbol.name = declaration.name;
-  symbol.symbolName = qualify(owner, declaration.name);
+  symbol.symbolName = declarationSymbolName(declaration, owner);
   Scope declarationScope = scope;
   symbol.typeParameters = resolvedTypeParameters(declaration.typeParameters,
                                                  symbol.symbolName, declarationScope);
@@ -1808,6 +1865,13 @@ void Typechecker::collectDeclaration(const AstDeclaration& declaration,
   symbol.contextualParameters = declaration.contextualParameters;
   symbol.contextualParameters.resize(declaration.parameters.size(), false);
   symbol.isGiven = declaration.isGiven;
+  symbol.isAnonymousGiven = declaration.isAnonymousGiven;
+  if (auto enclosing = globalSymbols_.find(owner);
+      enclosing != globalSymbols_.end() &&
+      enclosing->second.kind == AstDeclarationKind::Object) {
+    symbol.isModuleMember = declaration.kind == AstDeclarationKind::Val ||
+                            declaration.kind == AstDeclarationKind::Var;
+  }
   if (isClassLikeDeclaration(declaration.kind)) {
     for (const std::string& parentName : sourceParentTypes(declaration)) {
       if (const SymbolInfo* parent =
@@ -1841,9 +1905,14 @@ void Typechecker::collectDeclaration(const AstDeclaration& declaration,
     symbol.parameterTypes.push_back(parameterType(parameter, &declarationScope));
   }
   std::string symbolName = symbol.symbolName;
-  scope[declaration.name] = symbol;
   globalSymbols_[symbol.symbolName] = symbol;
-  declarationScope[declaration.name] = symbol;
+  const bool companionObject =
+      declaration.kind == AstDeclarationKind::Object &&
+      companionTypeNames_.contains(qualify(owner, declaration.name));
+  if (!companionObject) {
+    scope[declaration.name] = symbol;
+    declarationScope[declaration.name] = symbol;
+  }
 
   if (declaration.kind == AstDeclarationKind::Object ||
       declaration.kind == AstDeclarationKind::Class ||
@@ -3077,6 +3146,14 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
     }
     {
       Scope blockScope = scope;
+      std::size_t contextualNestingDepth = 1;
+      for (const auto& [name, candidate] : blockScope) {
+        (void)name;
+        if (candidate.isGiven) {
+          contextualNestingDepth =
+              std::max(contextualNestingDepth, candidate.contextualNestingDepth + 1);
+        }
+      }
       auto localDeclarationType = [&](const AstExpression& local) {
         TypeInfo declared{SimpleTypeKind::Unknown, "Unknown"};
         if (!local.declaredType.empty()) {
@@ -3113,6 +3190,9 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
           symbol.name = child.text;
           symbol.symbolName = child.text;
           symbol.type = localType;
+          symbol.isGiven = child.isGiven;
+          symbol.isAnonymousGiven = child.isAnonymousGiven;
+          symbol.contextualNestingDepth = contextualNestingDepth;
           blockScope[child.text] = std::move(symbol);
         } else {
           (void)inferExpressionType(child, blockScope);
@@ -3126,6 +3206,9 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
         symbol.name = last.text;
         symbol.symbolName = last.text;
         symbol.type = localDeclarationType(last);
+        symbol.isGiven = last.isGiven;
+        symbol.isAnonymousGiven = last.isAnonymousGiven;
+        symbol.contextualNestingDepth = contextualNestingDepth;
         blockScope[last.text] = std::move(symbol);
         return TypeInfo{SimpleTypeKind::Unit, "Unit"};
       }
@@ -6068,28 +6151,90 @@ std::vector<TypedContextArgument>
 Typechecker::resolveContextArguments(const SymbolInfo& callee,
                                      std::size_t firstContextParameter, Scope& scope,
                                      const support::SourceSpan& span) const {
+  struct ContextCandidate {
+    std::string referenceName;
+    const SymbolInfo* symbol = nullptr;
+  };
+  const auto sortCandidates = [](std::vector<ContextCandidate>& candidates) {
+    std::sort(candidates.begin(), candidates.end(),
+              [](const ContextCandidate& lhs, const ContextCandidate& rhs) {
+                return lhs.symbol->symbolName < rhs.symbol->symbolName;
+              });
+  };
+
   std::vector<TypedContextArgument> result;
   for (std::size_t i = firstContextParameter; i < callee.parameterTypes.size(); ++i) {
     const TypeInfo& expected = callee.parameterTypes[i];
-    std::vector<const SymbolInfo*> parameterCandidates;
-    std::vector<const SymbolInfo*> givenCandidates;
+    std::vector<ContextCandidate> parameterCandidates;
+    std::vector<ContextCandidate> givenCandidates;
     for (const auto& [name, candidate] : scope) {
-      (void)name;
       if ((!candidate.isGiven && !candidate.isContextParameter) ||
           candidate.type.kind == SimpleTypeKind::Unknown ||
           !isAssignable(expected, candidate.type)) {
         continue;
       }
       (candidate.isContextParameter ? parameterCandidates : givenCandidates)
-          .push_back(&candidate);
+          .push_back(ContextCandidate{name, &candidate});
     }
 
-    std::vector<const SymbolInfo*>& candidates =
-        parameterCandidates.empty() ? givenCandidates : parameterCandidates;
-    std::sort(candidates.begin(), candidates.end(),
-              [](const SymbolInfo* lhs, const SymbolInfo* rhs) {
-                return lhs->symbolName < rhs->symbolName;
-              });
+    if (!givenCandidates.empty()) {
+      const std::size_t innermostDepth =
+          std::max_element(
+              givenCandidates.begin(), givenCandidates.end(),
+              [](const ContextCandidate& lhs, const ContextCandidate& rhs) {
+                return lhs.symbol->contextualNestingDepth <
+                       rhs.symbol->contextualNestingDepth;
+              })
+              ->symbol->contextualNestingDepth;
+      std::erase_if(givenCandidates, [&](const ContextCandidate& candidate) {
+        return candidate.symbol->contextualNestingDepth != innermostDepth;
+      });
+    }
+
+    std::vector<ContextCandidate> companionCandidates;
+    if (parameterCandidates.empty() && givenCandidates.empty()) {
+      std::unordered_set<std::string> associatedTypes;
+      std::function<void(const TypeInfo&)> collectAssociatedTypes;
+      collectAssociatedTypes = [&](const TypeInfo& type) {
+        if (!type.typeParameter && !type.abstractTypeMember &&
+            type.kind == SimpleTypeKind::Object) {
+          const std::string name =
+              type.typeConstructorName.empty() ? type.name : type.typeConstructorName;
+          if (!name.empty() && name != "Object") {
+            associatedTypes.insert(name);
+          }
+        }
+        for (const TypeInfo& argument : type.typeArguments) {
+          collectAssociatedTypes(argument);
+        }
+      };
+      collectAssociatedTypes(expected);
+
+      std::unordered_set<std::string> seenSymbols;
+      for (const std::string& associatedType : associatedTypes) {
+        if (!companionTypeNames_.contains(associatedType)) {
+          continue;
+        }
+        auto members = memberScopes_.find(associatedType + '$');
+        if (members == memberScopes_.end()) {
+          continue;
+        }
+        for (const auto& [name, candidate] : members->second) {
+          if (!candidate.isGiven || candidate.type.kind == SimpleTypeKind::Unknown ||
+              !isAssignable(expected, candidate.type) ||
+              !seenSymbols.insert(candidate.symbolName).second) {
+            continue;
+          }
+          companionCandidates.push_back(ContextCandidate{name, &candidate});
+        }
+      }
+    }
+
+    std::vector<ContextCandidate>& candidates =
+        !parameterCandidates.empty()
+            ? parameterCandidates
+            : (!givenCandidates.empty() ? givenCandidates : companionCandidates);
+    sortCandidates(candidates);
     const std::string parameterNameText =
         i < callee.parameters.size() ? parameterName(callee.parameters[i])
                                      : std::to_string(i - firstContextParameter);
@@ -6110,16 +6255,18 @@ Typechecker::resolveContextArguments(const SymbolInfo& callee,
         if (candidateIndex != 0) {
           message += ", ";
         }
-        message += candidates[candidateIndex]->name;
+        const SymbolInfo& candidate = *candidates[candidateIndex].symbol;
+        message += candidate.isAnonymousGiven ? candidate.type.name : candidate.name;
       }
       diagnostics_.error(span, std::move(message));
       result.push_back(
           TypedContextArgument{{}, {}, TypeInfo{SimpleTypeKind::Unknown, "Unknown"}});
       continue;
     }
-    const SymbolInfo& selected = *candidates.front();
-    result.push_back(
-        TypedContextArgument{selected.name, selected.symbolName, selected.type});
+    const ContextCandidate& candidate = candidates.front();
+    const SymbolInfo& selected = *candidate.symbol;
+    result.push_back(TypedContextArgument{candidate.referenceName, selected.symbolName,
+                                          selected.type, selected.isModuleMember});
   }
   return result;
 }

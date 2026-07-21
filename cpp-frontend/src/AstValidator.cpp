@@ -1,5 +1,6 @@
 #include "scalanative/frontend/AstValidator.h"
 
+#include <unordered_map>
 #include <unordered_set>
 
 namespace scalanative::frontend {
@@ -25,7 +26,7 @@ bool AstValidator::validateScope(const std::vector<AstDeclaration>& declarations
                                  support::DiagnosticEngine& diagnostics,
                                  bool isTopLevel) const {
   bool ok = true;
-  std::unordered_set<std::string> names;
+  std::unordered_map<std::string, unsigned> names;
 
   for (const AstDeclaration& declaration : declarations) {
     if (declaration.kind != AstDeclarationKind::Package &&
@@ -33,11 +34,22 @@ bool AstValidator::validateScope(const std::vector<AstDeclaration>& declarations
       if (declaration.name.empty()) {
         diagnostics.error(declaration.span, "declaration has no name");
         ok = false;
-      } else if (!names.insert(declaration.name).second) {
-        diagnostics.error(declaration.span,
-                          "duplicate declaration in the same scope: " +
-                              declaration.name);
-        ok = false;
+      } else {
+        const unsigned kind = declaration.kind == AstDeclarationKind::Object ? 1U
+                              : declaration.kind == AstDeclarationKind::Class ||
+                                      declaration.kind == AstDeclarationKind::Trait
+                                  ? 2U
+                                  : 4U;
+        unsigned& seen = names[declaration.name];
+        const bool companionPair =
+            isTopLevel && (seen | kind) == 3U && (seen & kind) == 0U;
+        if (seen != 0U && !companionPair) {
+          diagnostics.error(declaration.span,
+                            "duplicate declaration in the same scope: " +
+                                declaration.name);
+          ok = false;
+        }
+        seen |= kind;
       }
     }
 
@@ -53,6 +65,11 @@ bool AstValidator::validateDeclaration(const AstDeclaration& declaration,
   bool ok = true;
   if (declaration.isGiven && declaration.kind != AstDeclarationKind::Val) {
     diagnostics.error(declaration.span, "given declaration must be a value");
+    ok = false;
+  }
+  if (declaration.isAnonymousGiven && !declaration.isGiven) {
+    diagnostics.error(declaration.span,
+                      "anonymous-given metadata requires a given declaration");
     ok = false;
   }
   if (declaration.isGiven &&
@@ -327,6 +344,18 @@ bool AstValidator::validateExpression(const AstExpression& expression,
     if (expression.children.size() > 1) {
       diagnostics.error(expression.span,
                         "local declaration must have at most one initializer");
+      ok = false;
+    }
+    if (expression.isGiven &&
+        (expression.mutableLocal || expression.declaredType.empty() ||
+         expression.children.size() != 1)) {
+      diagnostics.error(expression.span,
+                        "local given requires an explicit type and initializer");
+      ok = false;
+    }
+    if (expression.isAnonymousGiven && !expression.isGiven) {
+      diagnostics.error(expression.span,
+                        "anonymous-given metadata requires a local given");
       ok = false;
     }
     break;

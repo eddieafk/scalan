@@ -2665,10 +2665,16 @@ nir::Value valueFor(const frontend::AstExpression& expression,
         argumentExpression.kind = AstExpressionKind::Identifier;
         argumentExpression.text = contextual.name;
         argumentExpression.span = expression.span;
-        nir::Value argument =
-            contextual.name.empty()
-                ? nir::unknownValue("<missing-given>", expression.span)
-                : expressionValueFor(argumentExpression, context);
+        nir::Value argument;
+        if (contextual.name.empty()) {
+          argument = nir::unknownValue("<missing-given>", expression.span);
+        } else if (contextual.requiresAccessor) {
+          argument =
+              nir::callValue(nir::localValue(contextual.symbolName, expression.span),
+                             {}, expression.span);
+        } else {
+          argument = expressionValueFor(argumentExpression, context);
+        }
         if (target != nullptr && parameterIndex < target->parameterTypes.size()) {
           const std::string targetType =
               runtimeTypeName(target->parameterTypes[parameterIndex]);

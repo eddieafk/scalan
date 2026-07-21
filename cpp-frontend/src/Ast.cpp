@@ -14,6 +14,9 @@ void writeExpression(std::ostringstream& out, const AstExpression& expression,
   if (!expression.text.empty()) {
     out << ' ' << expression.text;
   }
+  if (expression.isGiven) {
+    out << (expression.isAnonymousGiven ? " anonymous-given" : " given");
+  }
   if ((expression.kind == AstExpressionKind::LocalDeclaration ||
        expression.kind == AstExpressionKind::TypeApply) &&
       !expression.declaredType.empty()) {
@@ -40,7 +43,7 @@ void writeDeclaration(std::ostringstream& out, const AstDeclaration& declaration
   std::string indent(depth * 2, ' ');
   out << indent
       << (declaration.isGiven ? "given" : declarationKindName(declaration.kind)) << ' '
-      << declaration.name;
+      << (declaration.isAnonymousGiven ? "<anonymous>" : declaration.name);
   if (declaration.isOverride) {
     out << " override";
   }

@@ -906,9 +906,21 @@ Current scaffold status:
   reference overrides reconstruct their semantic parameter type inside the
   erased body. `cpp-examples/ContextualAbstractions.scala` and optimized native
   smoke coverage exercise inferred, forwarded, explicit, and locally overridden
-  evidence. Anonymous, local, parameterized, and derived givens, contextual-only
-  type inference, companion implicit scope, and Scala 2 `implicit` syntax remain
-  later milestones.
+  evidence.
+- Anonymous givens and block-local named or anonymous givens now use the same
+  typed evidence model. Lexical depth is retained during search, so the
+  innermost matching local given wins while equally nested matches remain
+  ambiguous. Top-level class/trait companions and their objects receive distinct
+  internal type and module symbols (`Type` and `Type$`), allowing contextual
+  search to inspect both the expected type constructor's companion and the
+  companions of its applied type arguments. Lexically visible evidence still
+  takes precedence over companion evidence, and selected companion values lower
+  through their module accessors so initialization remains lazy and reachable.
+  Native coverage exercises named and anonymous locals, nested shadowing,
+  typeclass and type-argument companions, and companion ambiguity. Parameterized
+  and derived givens, direct companion-object term selection/imports,
+  contextual-only type inference, nested companion declarations, and Scala 2
+  `implicit` syntax remain later milestones.
 - Postfix type application now supports typed `value.isInstanceOf[Target]` and
   checked `value.asInstanceOf[Target]` for known classes and traits. NIR uses
   dedicated `is-instance-of[T]` and `as-instance-of[T]` values; verification

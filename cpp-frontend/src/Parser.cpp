@@ -476,20 +476,18 @@ AstDeclaration Parser::parseGiven(const Token& keyword) {
   declaration.span = keyword.span;
   declaration.isGiven = true;
 
-  if (!match(TokenKind::Identifier)) {
-    diagnostics_.error(peek().span,
-                       "expected named given declaration; anonymous givens are not "
-                       "supported in this milestone");
-    synchronize();
-    return declaration;
+  const bool named = check(TokenKind::Identifier) && current_ + 1 < tokens_.size() &&
+                     tokens_[current_ + 1].kind == TokenKind::Colon;
+  if (named) {
+    advance();
+    declaration.name = previous().text;
+    advance();
+    declaration.declaredType = parseTypeName();
+  } else {
+    declaration.isAnonymousGiven = true;
+    declaration.name = "given$" + std::to_string(keyword.span.start);
+    declaration.declaredType = parseTypeName();
   }
-  declaration.name = previous().text;
-
-  if (!consume(TokenKind::Colon, "expected ':' after given name")) {
-    synchronize();
-    return declaration;
-  }
-  declaration.declaredType = parseTypeName();
   if (declaration.declaredType.empty()) {
     diagnostics_.error(peek().span, "expected given result type");
   }
@@ -1046,6 +1044,8 @@ AstExpression Parser::parseBlockExpression() {
       localExpression.declaredType = local.declaredType;
       localExpression.span = local.span;
       localExpression.mutableLocal = local.kind == AstDeclarationKind::Var;
+      localExpression.isGiven = local.isGiven;
+      localExpression.isAnonymousGiven = local.isAnonymousGiven;
       if (local.hasInitializer) {
         localExpression.children.push_back(std::move(local.initializer));
       }

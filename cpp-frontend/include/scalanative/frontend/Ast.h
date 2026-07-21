@@ -63,6 +63,8 @@ struct AstExpression {
   support::SourceSpan span;
   std::vector<AstExpression> children;
   bool mutableLocal = false;
+  bool isGiven = false;
+  bool isAnonymousGiven = false;
 };
 
 struct AstClassBodyItem {
@@ -100,6 +102,7 @@ struct AstDeclaration {
   std::vector<AstImportSelector> importSelectors;
   bool isOverride = false;
   bool isGiven = false;
+  bool isAnonymousGiven = false;
   bool hasInitializer = false;
   AstExpression initializer;
   std::vector<AstDeclaration> members;

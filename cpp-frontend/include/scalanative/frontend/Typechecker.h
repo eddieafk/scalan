@@ -80,6 +80,7 @@ struct TypedDeclaration {
   TypeInfo inferredType;
   bool isOverride = false;
   bool isGiven = false;
+  bool isAnonymousGiven = false;
   bool hasInitializer = false;
   bool needsAccessor = false;
   AstExpression initializer;
@@ -97,6 +98,7 @@ struct TypedContextArgument {
   std::string name;
   std::string symbolName;
   TypeInfo type;
+  bool requiresAccessor = false;
 };
 
 struct TypedContextApplication {
@@ -127,7 +129,10 @@ struct SymbolInfo {
   std::vector<bool> contextualParameters;
   bool hasImplementation = true;
   bool isGiven = false;
+  bool isAnonymousGiven = false;
   bool isContextParameter = false;
+  bool isModuleMember = false;
+  std::size_t contextualNestingDepth = 0;
 };
 
 class Typechecker {
@@ -145,6 +150,8 @@ private:
                                                       Scope& scope);
   void collectDeclaration(const AstDeclaration& declaration, const std::string& owner,
                           Scope& scope);
+  [[nodiscard]] std::string declarationSymbolName(const AstDeclaration& declaration,
+                                                  const std::string& owner) const;
   void applyImport(const AstDeclaration& declaration, Scope& scope);
   void mergeScope(Scope& destination, const Scope& source) const;
   [[nodiscard]] TypeInfo inferExpressionType(const AstExpression& expression,
@@ -273,6 +280,7 @@ private:
   std::unordered_map<std::string, Scope> declaredMemberScopes_;
   std::unordered_map<std::string, Scope> memberScopes_;
   std::unordered_map<std::string, SymbolInfo> globalSymbols_;
+  std::unordered_set<std::string> companionTypeNames_;
   std::vector<TypedExpressionInfo> expressionTypes_;
   std::vector<TypedContextApplication> contextApplications_;
   std::unordered_set<std::string> directZoneReceiverEscapes_;
