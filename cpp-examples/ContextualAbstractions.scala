@@ -149,6 +149,10 @@ object Show {
 
 class DerivationBase
 class AutomaticallyShown extends DerivationBase derives Show
+class AutomaticallyShownWithCompanion derives Show
+object AutomaticallyShownWithCompanion derives Show {
+  val marker: String = "companion"
+}
 trait AutomaticallyShownTrait derives Show
 class AutomaticallyShownTraitValue extends AutomaticallyShownTrait
 object AutomaticallyShownObject derives Show
@@ -170,6 +174,9 @@ object ContextualAbstractions {
 
   def render[A](value: A)(using show: Show[A]): String =
     show.show(value)
+
+  def evidence[A]()(using show: Show[A]): Show[A] =
+    show
 
   def forwarded[A](value: A)(using show: Show[A]): String =
     render(value)
@@ -211,6 +218,12 @@ object ContextualAbstractions {
   def automaticallyDerivedClass: String =
     render(new AutomaticallyShown)
 
+  def automaticallyDerivedClassWithCompanion: String =
+    render(new AutomaticallyShownWithCompanion)
+
+  def automaticallyDerivedCompanionObject: String =
+    render(AutomaticallyShownWithCompanion)
+
   def automaticallyDerivedTrait(value: AutomaticallyShownTrait): String =
     render(value)
 
@@ -227,6 +240,13 @@ object ContextualAbstractions {
   def automaticallyDerivedGenericPair(
       value: AutomaticallyShownPair[Cat, Fox]): String =
     render(value)
+
+  def monomorphicDerivedIsStable: Boolean =
+    evidence[AutomaticallyShown]() == evidence[AutomaticallyShown]()
+
+  def genericDerivedIsFactory: Boolean =
+    evidence[AutomaticallyShownBox[Cat]]() !=
+      evidence[AutomaticallyShownBox[Cat]]()
 
   def format()(using formatter: Formatter): String =
     formatter.format()
@@ -298,6 +318,8 @@ object ContextualAbstractions {
     println(recursivelyParameterized(
       new Box[Box[Cat]](new Box[Cat](new Cat("recursive")))))
     println(automaticallyDerivedClass)
+    println(automaticallyDerivedClassWithCompanion)
+    println(automaticallyDerivedCompanionObject)
     println(automaticallyDerivedTrait(new AutomaticallyShownTraitValue))
     println(automaticallyDerivedObject)
     println(automaticallyDerivedGeneric(
@@ -308,6 +330,8 @@ object ContextualAbstractions {
     println(automaticallyDerivedGenericPair(
       new AutomaticallyShownPair[Cat, Fox](
         new Cat("generic-pair"), new Fox("generic-pair"))))
+    println(monomorphicDerivedIsStable)
+    println(genericDerivedIsFactory)
     println(generallyPreferred)
     println(nestedPreference)
     println(ownerPreferred)

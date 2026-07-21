@@ -972,9 +972,17 @@ Current scaffold status:
   contextual-abstractions example and optimized native smoke coverage exercise
   class, trait, and object derivation, `extends ... derives`, one- and
   two-parameter generic derivation, recursive generic derivation, companion
-  dependencies, NIR lowering, and native execution. Higher-kinded derivation,
-  `Mirror`-based structural derivation, and stable synthesized instance storage
-  remain later derivation milestones. Anonymous or local parameterized givens,
+  dependencies, NIR lowering, and native execution. Monomorphic derived
+  instances are synthesized as stored `given` values in an existing companion,
+  in the deriving object itself, or in a generated companion module when none
+  was declared. Their companion `derived` call and contextual dependencies are
+  resolved at the derivation definition site, initialized once through the
+  normal module-initializer path, and reached through a zero-argument accessor;
+  generic derived instances remain contextual factories. Native identity checks
+  distinguish stable monomorphic evidence from fresh generic factory results,
+  and NIR coverage checks generated modules, fields, accessors, and initializer
+  calls. Higher-kinded derivation and `Mirror`-based structural derivation remain
+  later derivation milestones. Anonymous or local parameterized givens,
   contextual-only inference for ordinary methods, nested companion declarations,
   and Scala 2 `implicit` syntax also remain later milestones.
 - Postfix type application now supports typed `value.isInstanceOf[Target]` and

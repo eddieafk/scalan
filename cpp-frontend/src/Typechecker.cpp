@@ -23,6 +23,19 @@ bool isInheritableDeclaration(AstDeclarationKind kind) {
   return kind == AstDeclarationKind::Class || kind == AstDeclarationKind::Trait;
 }
 
+std::string derivedInstanceName(std::string_view typeclassSymbolName,
+                                bool derivingObject) {
+  std::string name = "$derived$";
+  name.reserve(name.size() + typeclassSymbolName.size());
+  for (char ch : typeclassSymbolName) {
+    const bool alphaNumeric = (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') ||
+                              (ch >= '0' && ch <= '9');
+    name.push_back(alphaNumeric || ch == '_' ? ch : '$');
+  }
+  name += derivingObject ? "$object" : "$type";
+  return name;
+}
+
 bool typesMatchForOverride(const TypeInfo& expected, const TypeInfo& actual) {
   if (expected.kind == SimpleTypeKind::Unknown ||
       actual.kind == SimpleTypeKind::Unknown) {
@@ -866,6 +879,7 @@ TypedModule Typechecker::typecheck(const AstModule& module) {
   globalSymbols_.clear();
   companionTypeNames_.clear();
   derivedGivens_.clear();
+  derivedInstances_.clear();
   expressionTypes_.clear();
   contextApplications_.clear();
   directZoneReceiverEscapes_.clear();
@@ -916,6 +930,7 @@ TypedModule Typechecker::typecheck(const AstModule& module) {
     typed.declarations.push_back(
         typecheckDeclaration(declaration, module.packageName, scope));
   }
+  attachDerivedInstances(typed.declarations);
   propagateZoneReceiverEffects();
   for (const AstExpression& body : zoneBodiesToAnalyze_) {
     std::unordered_map<std::string, bool> arenaReferences;
@@ -2124,10 +2139,95 @@ void Typechecker::collectDerivedGivens(const std::vector<AstDeclaration>& declar
 
       candidate.name = "derived$" + typeclass->name;
       candidate.isGiven = true;
+      if (derivingTypeArguments.empty()) {
+        Scope initializerScope = scope;
+        std::vector<TypedContextArgument> factoryArguments =
+            resolveContextArguments(candidate, 0, initializerScope, declaration.span);
+        const std::string instanceName = derivedInstanceName(
+            typeclass->symbolName, declaration.kind == AstDeclarationKind::Object);
+        const std::string instanceOwner = declaration.kind == AstDeclarationKind::Object
+                                              ? targetName
+                                              : targetName + '$';
+        support::SourceSpan initializerSpan = declaration.span;
+        initializerSpan.length += derivedInstances_.size() + 1;
+
+        TypedDeclaration member;
+        member.kind = AstDeclarationKind::Val;
+        member.name = instanceName;
+        member.symbolName = qualify(instanceOwner, instanceName);
+        member.span = declaration.span;
+        member.declaredType = expected.name;
+        member.inferredType = expected;
+        member.isGiven = true;
+        member.hasInitializer = true;
+        member.initializer.kind = AstExpressionKind::Call;
+        member.initializer.span = initializerSpan;
+        AstExpression factory;
+        factory.kind = AstExpressionKind::Identifier;
+        factory.text = candidate.symbolName;
+        factory.span = initializerSpan;
+        member.initializer.children.push_back(std::move(factory));
+        derivedInstances_.push_back(DerivedInstanceInfo{
+            instanceOwner, std::move(member), std::move(factoryArguments)});
+
+        candidate.kind = AstDeclarationKind::Val;
+        candidate.symbolName = qualify(instanceOwner, instanceName);
+        candidate.parameters.clear();
+        candidate.parameterTypes.clear();
+        candidate.contextualParameters.clear();
+        candidate.isModuleMember = true;
+        candidate.contextPrerequisiteCount = 0;
+      }
       derivedGivens_[targetName].push_back(std::move(candidate));
     }
 
     collectDerivedGivens(declaration.members, targetName, declarationScope);
+  }
+}
+
+void Typechecker::attachDerivedInstances(std::vector<TypedDeclaration>& declarations) {
+  const auto findDeclaration = [&](const auto& self,
+                                   std::vector<TypedDeclaration>& candidates,
+                                   const std::string& symbolName) -> TypedDeclaration* {
+    for (TypedDeclaration& candidate : candidates) {
+      if (candidate.symbolName == symbolName) {
+        return &candidate;
+      }
+      if (TypedDeclaration* nested = self(self, candidate.members, symbolName);
+          nested != nullptr) {
+        return nested;
+      }
+    }
+    return nullptr;
+  };
+
+  for (DerivedInstanceInfo& instance : derivedInstances_) {
+    TypedDeclaration* owner =
+        findDeclaration(findDeclaration, declarations, instance.ownerSymbolName);
+    if (owner == nullptr) {
+      TypedDeclaration companion;
+      companion.kind = AstDeclarationKind::Object;
+      const std::size_t separator = instance.ownerSymbolName.rfind('.');
+      companion.name = separator == std::string::npos
+                           ? instance.ownerSymbolName
+                           : instance.ownerSymbolName.substr(separator + 1);
+      if (companion.name.ends_with('$')) {
+        companion.name.pop_back();
+      }
+      companion.symbolName = instance.ownerSymbolName;
+      companion.span = instance.member.span;
+      companion.inferredType =
+          TypeInfo{SimpleTypeKind::Object, instance.ownerSymbolName};
+      declarations.push_back(std::move(companion));
+      owner = &declarations.back();
+    }
+
+    const std::size_t memberIndex = owner->members.size();
+    recordContextApplication(instance.member.initializer.span,
+                             std::move(instance.factoryArguments));
+    owner->members.push_back(std::move(instance.member));
+    owner->classBodyItems.push_back(
+        AstClassBodyItem{AstClassBodyItemKind::Declaration, memberIndex});
   }
 }
 

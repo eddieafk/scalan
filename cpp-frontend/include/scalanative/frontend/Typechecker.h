@@ -149,6 +149,12 @@ public:
 private:
   using Scope = std::unordered_map<std::string, SymbolInfo>;
 
+  struct DerivedInstanceInfo {
+    std::string ownerSymbolName;
+    TypedDeclaration member;
+    std::vector<TypedContextArgument> factoryArguments;
+  };
+
   void addRuntimeBuiltins(Scope& scope);
   [[nodiscard]] TypedDeclaration typecheckDeclaration(const AstDeclaration& declaration,
                                                       const std::string& owner,
@@ -157,6 +163,7 @@ private:
                           Scope& scope);
   void collectDerivedGivens(const std::vector<AstDeclaration>& declarations,
                             const std::string& owner, const Scope& scope);
+  void attachDerivedInstances(std::vector<TypedDeclaration>& declarations);
   [[nodiscard]] std::string declarationSymbolName(const AstDeclaration& declaration,
                                                   const std::string& owner) const;
   [[nodiscard]] std::string importSymbolName(const AstDeclaration& declaration,
@@ -293,6 +300,7 @@ private:
   std::unordered_map<std::string, SymbolInfo> globalSymbols_;
   std::unordered_set<std::string> companionTypeNames_;
   std::unordered_map<std::string, std::vector<SymbolInfo>> derivedGivens_;
+  std::vector<DerivedInstanceInfo> derivedInstances_;
   std::vector<TypedExpressionInfo> expressionTypes_;
   std::vector<TypedContextApplication> contextApplications_;
   std::unordered_set<std::string> directZoneReceiverEscapes_;
