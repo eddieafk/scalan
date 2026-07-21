@@ -48,6 +48,10 @@ build/debug/cpp-driver/cpp-scalanative --emit-llvm --no-debug-info \
 # Run Interflow and request aggressive native optimization.
 build/debug/cpp-driver/cpp-scalanative --build-binary --opt-level 3 \
   path/to/Main.scala
+
+# Compile the explicit reference-generics example.
+build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
+  --output /tmp/reference-generics cpp-examples/ReferenceGenerics.scala
 ```
 
 Optimization levels select distinct Interflow pipelines: `O1` performs one

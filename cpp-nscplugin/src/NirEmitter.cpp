@@ -714,6 +714,11 @@ std::string localDeclaredTypeName(const frontend::AstExpression& expression,
   if (expression.declaredType == "Any") {
     return "Object";
   }
+  const std::string compact = compactTypeName(expression.declaredType);
+  const std::size_t typeArguments = compact.find('[');
+  if (typeArguments != std::string::npos && arrayElementTypeName(compact).empty()) {
+    return qualifyTypeName(compact.substr(0, typeArguments), context);
+  }
   return qualifyTypeName(expression.declaredType, context);
 }
 
@@ -973,7 +978,14 @@ parameterAccessorBodyFor(const frontend::TypedDeclaration& declaration,
                          const std::string& receiverType) {
   nir::FunctionBodyBuilder body;
   const std::string name = parameterName(parameter);
-  const std::string type = parameterTypeName(parameter, context);
+  std::string type = parameterTypeName(parameter, context);
+  for (std::size_t i = 0; i < declaration.parameters.size(); ++i) {
+    if (parameterName(declaration.parameters[i]) == name &&
+        i < declaration.parameterTypes.size()) {
+      type = runtimeTypeName(declaration.parameterTypes[i]);
+      break;
+    }
+  }
   (void)body.addParameter("this", receiverType, declaration.span);
   (void)body.addReturn(
       type,
@@ -1068,6 +1080,26 @@ const frontend::TypedDeclaration* findMemberDeclaration(const ValueContext& cont
   return nullptr;
 }
 
+const frontend::TypeInfo* findConstructorParameterType(const ValueContext& context,
+                                                       const std::string& ownerName,
+                                                       const std::string& memberName) {
+  if (context.declarations == nullptr || ownerName.empty()) {
+    return nullptr;
+  }
+  const frontend::TypedDeclaration* owner =
+      findDeclarationBySymbol(*context.declarations, ownerName);
+  if (owner == nullptr || owner->kind != frontend::AstDeclarationKind::Class) {
+    return nullptr;
+  }
+  for (std::size_t i = 0; i < owner->parameters.size(); ++i) {
+    if (parameterName(owner->parameters[i]) == memberName &&
+        i < owner->parameterTypes.size()) {
+      return &owner->parameterTypes[i];
+    }
+  }
+  return nullptr;
+}
+
 const frontend::TypedDeclaration*
 findTypeMemberDeclaration(const ValueContext& context, const std::string& ownerName,
                           const std::string& memberName) {
@@ -1132,6 +1164,11 @@ declarationForExpression(const frontend::AstExpression& expression,
                ? nullptr
                : declarationForExpression(expression.children.front(), context);
   }
+  if (expression.kind == AstExpressionKind::TypeApply) {
+    return expression.children.empty()
+               ? nullptr
+               : declarationForExpression(expression.children.front(), context);
+  }
   if (expression.kind == AstExpressionKind::Select) {
     if (expression.children.empty()) {
       return nullptr;
@@ -1175,6 +1212,11 @@ arrayReceiverTypeFor(const frontend::AstExpression& expression,
 std::string memberReceiverType(const frontend::AstExpression& expression,
                                const ValueContext& context) {
   if (expression.kind == frontend::AstExpressionKind::Call) {
+    return expression.children.empty()
+               ? std::string{}
+               : memberReceiverType(expression.children.front(), context);
+  }
+  if (expression.kind == frontend::AstExpressionKind::TypeApply) {
     return expression.children.empty()
                ? std::string{}
                : memberReceiverType(expression.children.front(), context);
@@ -2040,13 +2082,34 @@ nir::Value valueFor(const frontend::AstExpression& expression,
       }
       const std::string selectedReceiver = memberReceiverType(expression, context);
       auto adaptSelectedValue = [&](nir::Value selected) {
-        const std::string primitive =
+        const frontend::TypeInfo* erasedSelectedType =
             selectedDeclaration == nullptr
+                ? findConstructorParameterType(context, selectedReceiver,
+                                               expression.text)
+                : &selectedDeclaration->inferredType;
+        const std::string primitive =
+            erasedSelectedType == nullptr
                 ? std::string{}
-                : boxedPrimitiveTypeFor(selectedDeclaration->inferredType,
-                                        selectedReceiver, context);
+                : boxedPrimitiveTypeFor(*erasedSelectedType, selectedReceiver, context);
         if (!preserveCallable && !primitive.empty()) {
           return nir::unboxValue(primitive, std::move(selected), expression.span);
+        }
+        if (!preserveCallable && erasedSelectedType != nullptr &&
+            (selectedDeclaration == nullptr ||
+             selectedDeclaration->kind != frontend::AstDeclarationKind::Def)) {
+          const frontend::TypeInfo* selectedType =
+              annotatedTypeFor(expression, context);
+          const std::string erasedType = runtimeTypeName(*erasedSelectedType);
+          const std::string staticType =
+              selectedType == nullptr ? erasedType : runtimeTypeName(*selectedType);
+          if (erasedType != staticType && staticType != "Object") {
+            if (selectedType != nullptr &&
+                selectedType->kind == frontend::SimpleTypeKind::String) {
+              return nir::unboxValue("String", std::move(selected), expression.span);
+            }
+            return nir::asInstanceOfValue(staticType, std::move(selected),
+                                          expression.span);
+          }
         }
         return selected;
       };
@@ -2120,7 +2183,7 @@ nir::Value valueFor(const frontend::AstExpression& expression,
                               expression.span);
     }
     if (callee.kind != AstExpressionKind::Select || callee.children.size() != 1) {
-      return nir::unknownValue("unsupported type application", expression.span);
+      return expressionValueFor(callee, context, preserveCallable);
     }
     const std::string targetType = qualifyTypeName(expression.declaredType, context);
     nir::Value receiver = expressionValueFor(callee.children.front(), context);
@@ -2142,7 +2205,7 @@ nir::Value valueFor(const frontend::AstExpression& expression,
       }
       return nir::asInstanceOfValue(targetType, std::move(receiver), expression.span);
     }
-    return nir::unknownValue("unsupported type application", expression.span);
+    return expressionValueFor(callee, context, preserveCallable);
   }
   case AstExpressionKind::Call: {
     if (expression.children.empty()) {
@@ -2505,13 +2568,21 @@ nir::Value valueFor(const frontend::AstExpression& expression,
       return nir::newValue("Array [ " + elementType + " ]", std::move(elements),
                            expression.span);
     }
-    if (expression.children.front().kind == AstExpressionKind::New) {
-      const frontend::AstExpression& constructor = expression.children.front();
+    const frontend::AstExpression* constructor =
+        expression.children.front().kind == AstExpressionKind::New
+            ? &expression.children.front()
+            : nullptr;
+    if (expression.children.front().kind == AstExpressionKind::TypeApply &&
+        expression.children.front().children.size() == 1 &&
+        expression.children.front().children.front().kind == AstExpressionKind::New) {
+      constructor = &expression.children.front().children.front();
+    }
+    if (constructor != nullptr) {
       const frontend::TypedDeclaration* classDeclaration =
           context.declarations == nullptr
               ? nullptr
               : findDeclarationBySymbol(*context.declarations,
-                                        qualifyTypeName(constructor.text, context));
+                                        qualifyTypeName(constructor->text, context));
       std::vector<nir::Value> arguments;
       for (std::size_t i = 1; i < expression.children.size(); ++i) {
         nir::Value argument = expressionValueFor(expression.children[i], context);
@@ -2525,7 +2596,7 @@ nir::Value valueFor(const frontend::AstExpression& expression,
         }
         arguments.push_back(std::move(argument));
       }
-      return nir::newValue(qualifyTypeName(constructor.text, context),
+      return nir::newValue(qualifyTypeName(constructor->text, context),
                            std::move(arguments), expression.span);
     }
     if (expression.children.size() == 2) {
@@ -2577,6 +2648,19 @@ nir::Value valueFor(const frontend::AstExpression& expression,
             : boxedPrimitiveTypeFor(target->inferredType, targetReceiver, context);
     if (!returnPrimitive.empty()) {
       return nir::unboxValue(returnPrimitive, std::move(call), expression.span);
+    }
+    if (target != nullptr) {
+      const frontend::TypeInfo* staticResult = annotatedTypeFor(expression, context);
+      const std::string erasedResult = runtimeTypeName(target->inferredType);
+      const std::string staticRuntime =
+          staticResult == nullptr ? erasedResult : runtimeTypeName(*staticResult);
+      if (erasedResult != staticRuntime && staticRuntime != "Object") {
+        if (staticResult != nullptr &&
+            staticResult->kind == frontend::SimpleTypeKind::String) {
+          return nir::unboxValue("String", std::move(call), expression.span);
+        }
+        return nir::asInstanceOfValue(staticRuntime, std::move(call), expression.span);
+      }
     }
     return call;
   }
@@ -3884,32 +3968,37 @@ void NirEmitter::emitDeclaration(
                                           metadataParentNames(declaration),
                                           {},
                                           declaration.span});
-    for (const std::string& parameter : declaration.parameters) {
+    for (std::size_t parameterIndex = 0; parameterIndex < declaration.parameters.size();
+         ++parameterIndex) {
+      const std::string& parameter = declaration.parameters[parameterIndex];
       const std::string name = parameterName(parameter);
       if (name.empty()) {
         continue;
       }
+      const std::string parameterType =
+          parameterIndex < declaration.parameterTypes.size()
+              ? runtimeTypeName(declaration.parameterTypes[parameterIndex])
+              : parameterTypeName(parameter, context);
       builder.addDefinition(nir::Definition{
           nir::DefinitionKind::Field,
           qualifyMember(globalName, storedParameterFieldName(declaration, parameter)),
-          parameterTypeName(parameter, context),
+          parameterType,
           {},
           declaration.span});
       if (isAccessorParameter(declaration, name)) {
         builder.addFunctionDef(
-            qualifyMember(globalName, name),
-            "(" + globalName + ")" + parameterTypeName(parameter, context),
+            qualifyMember(globalName, name), "(" + globalName + ")" + parameterType,
             parameterAccessorBodyFor(declaration, parameter, context, globalName),
             declaration.span);
         if (parameter.rfind("var ", 0) == 0) {
           frontend::TypedDeclaration parameterDeclaration;
           parameterDeclaration.name = name;
-          parameterDeclaration.inferredType = frontend::TypeInfo{
-              frontend::SimpleTypeKind::Unknown, parameterTypeName(parameter, context)};
+          parameterDeclaration.inferredType =
+              frontend::TypeInfo{frontend::SimpleTypeKind::Unknown, parameterType};
           parameterDeclaration.span = declaration.span;
           builder.addFunctionDef(
               qualifyMember(globalName, setterName(name)),
-              "(" + globalName + "," + parameterTypeName(parameter, context) + ")Unit",
+              "(" + globalName + "," + parameterType + ")Unit",
               fieldSetterBodyFor(parameterDeclaration,
                                  storedParameterFieldName(declaration, parameter),
                                  globalName),

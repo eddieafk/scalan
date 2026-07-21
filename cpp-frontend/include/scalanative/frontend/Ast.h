@@ -57,6 +57,7 @@ struct AstExpression {
   AstExpressionKind kind = AstExpressionKind::Empty;
   std::string text;
   std::string declaredType;
+  std::vector<std::string> typeArguments;
   support::SourceSpan span;
   std::vector<AstExpression> children;
   bool mutableLocal = false;
@@ -73,10 +74,18 @@ struct AstImportSelector {
   support::SourceSpan span;
 };
 
+struct AstTypeParameter {
+  std::string name;
+  std::string lowerBound;
+  std::string upperBound;
+  support::SourceSpan span;
+};
+
 struct AstDeclaration {
   AstDeclarationKind kind = AstDeclarationKind::Def;
   std::string name;
   support::SourceSpan span;
+  std::vector<AstTypeParameter> typeParameters;
   std::vector<std::string> parameters;
   std::string declaredType;
   std::string lowerBound;

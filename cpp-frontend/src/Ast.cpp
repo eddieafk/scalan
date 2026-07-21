@@ -19,6 +19,12 @@ void writeExpression(std::ostringstream& out, const AstExpression& expression,
       !expression.declaredType.empty()) {
     out << ": " << expression.declaredType;
   }
+  if (expression.kind == AstExpressionKind::TypeApply &&
+      expression.typeArguments.size() > 1) {
+    for (std::size_t i = 1; i < expression.typeArguments.size(); ++i) {
+      out << ", " << expression.typeArguments[i];
+    }
+  }
   if (expression.kind == AstExpressionKind::LocalDeclaration &&
       expression.mutableLocal) {
     out << " mutable";
@@ -35,6 +41,23 @@ void writeDeclaration(std::ostringstream& out, const AstDeclaration& declaration
   out << indent << declarationKindName(declaration.kind) << ' ' << declaration.name;
   if (declaration.isOverride) {
     out << " override";
+  }
+  if (!declaration.typeParameters.empty()) {
+    out << '[';
+    for (std::size_t i = 0; i < declaration.typeParameters.size(); ++i) {
+      if (i != 0) {
+        out << ", ";
+      }
+      const AstTypeParameter& parameter = declaration.typeParameters[i];
+      out << parameter.name;
+      if (!parameter.lowerBound.empty()) {
+        out << " >: " << parameter.lowerBound;
+      }
+      if (!parameter.upperBound.empty()) {
+        out << " <: " << parameter.upperBound;
+      }
+    }
+    out << ']';
   }
   if (!declaration.parameters.empty()) {
     out << '(';

@@ -385,8 +385,9 @@ Implementation steps:
 2. Implement primitive and standard prelude symbols.
 3. Typecheck expressions, blocks, calls, methods, vals, vars, and control flow.
 4. Add class and trait conformance.
-5. Add generics, variance, implicit/given resolution, and advanced Scala
-   features in later milestones.
+5. Stage generics through explicit reference-type applications and erasure,
+   followed by primitive boxing, inference, bounds/variance expansion, and then
+   implicit/`given`/`using` resolution.
 
 Exit criteria:
 
@@ -828,6 +829,20 @@ Current scaffold status:
   propagate the same data into typed-expression records, and inherited member
   specialization preserves the original dependent occurrence while recording
   the effective concrete alias.
+- The first source-generics slice now preserves structured type parameters on
+  classes, traits, and methods plus multiple explicit type arguments on postfix
+  applications. Explicit invariant reference applications such as `Box[Label]`,
+  bounded declarations such as `Box[A <: Base]`, generic constructor calls, and
+  generic member/object method calls are typechecked with arity, bound, and
+  substitution diagnostics. Runtime signatures erase a type parameter to
+  `Object` or its concrete reference upper bound; NIR inserts checked casts when
+  an erased field read or method result returns to a concrete static type.
+  `cpp-examples/ReferenceGenerics.scala` and optimized native smoke coverage
+  exercise one- and two-parameter classes, a generic trait declaration, nested
+  generic construction, generic member methods, invariant conformance, and
+  erased NIR. Primitive type arguments, omitted-argument inference, variance,
+  generic inheritance, and contextual `using`/`given` search remain explicit
+  next milestones and currently receive focused diagnostics.
 - Postfix type application now supports typed `value.isInstanceOf[Target]` and
   checked `value.asInstanceOf[Target]` for known classes and traits. NIR uses
   dedicated `is-instance-of[T]` and `as-instance-of[T]` values; verification

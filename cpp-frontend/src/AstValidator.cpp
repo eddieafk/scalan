@@ -51,6 +51,25 @@ bool AstValidator::validateDeclaration(const AstDeclaration& declaration,
                                        support::DiagnosticEngine& diagnostics,
                                        bool isTopLevel) const {
   bool ok = true;
+  if (!declaration.typeParameters.empty() &&
+      declaration.kind != AstDeclarationKind::Class &&
+      declaration.kind != AstDeclarationKind::Trait &&
+      declaration.kind != AstDeclarationKind::Def) {
+    diagnostics.error(
+        declaration.span,
+        "type parameters are only supported on classes, traits, and methods");
+    ok = false;
+  }
+  std::unordered_set<std::string> typeParameterNames;
+  for (const AstTypeParameter& parameter : declaration.typeParameters) {
+    if (parameter.name.empty()) {
+      diagnostics.error(parameter.span, "type parameter has no name");
+      ok = false;
+    } else if (!typeParameterNames.insert(parameter.name).second) {
+      diagnostics.error(parameter.span, "duplicate type parameter: " + parameter.name);
+      ok = false;
+    }
+  }
   switch (declaration.kind) {
   case AstDeclarationKind::Package:
     if (!isTopLevel) {
@@ -185,9 +204,10 @@ bool AstValidator::validateExpression(const AstExpression& expression,
     }
     break;
   case AstExpressionKind::TypeApply:
-    if (expression.children.size() != 1 || expression.declaredType.empty()) {
+    if (expression.children.size() != 1 || expression.typeArguments.empty() ||
+        expression.declaredType.empty()) {
       diagnostics.error(expression.span,
-                        "type application must have a target and type argument");
+                        "type application must have a target and type arguments");
       ok = false;
     }
     break;

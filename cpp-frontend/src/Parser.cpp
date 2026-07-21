@@ -229,6 +229,10 @@ AstDeclaration Parser::parseObjectLike(AstDeclarationKind kind, const Token& key
   }
   declaration.name = previous().text;
 
+  if (check(TokenKind::LeftBracket)) {
+    declaration.typeParameters = parseTypeParameterList();
+  }
+
   if (check(TokenKind::LeftParen)) {
     declaration.parameters = parseParameterList(kind == AstDeclarationKind::Class);
   }
@@ -421,6 +425,10 @@ AstDeclaration Parser::parseDef(const Token& keyword) {
   }
   declaration.name = previous().text;
 
+  if (check(TokenKind::LeftBracket)) {
+    declaration.typeParameters = parseTypeParameterList();
+  }
+
   if (check(TokenKind::LeftParen)) {
     declaration.parameters = parseParameterList();
   }
@@ -464,6 +472,60 @@ AstDeclaration Parser::parseValOrVar(AstDeclarationKind kind, const Token& keywo
 
   consumeSeparators();
   return declaration;
+}
+
+std::vector<AstTypeParameter> Parser::parseTypeParameterList() {
+  std::vector<AstTypeParameter> parameters;
+  if (!consume(TokenKind::LeftBracket, "expected '['")) {
+    return parameters;
+  }
+
+  consumeSeparators();
+  while (!isAtEnd() && !check(TokenKind::RightBracket)) {
+    if (check(TokenKind::Operator) && (peek().text == "+" || peek().text == "-")) {
+      diagnostics_.error(
+          peek().span,
+          "variance annotations are not supported in this generics milestone");
+      advance();
+    }
+    if (!match(TokenKind::Identifier)) {
+      diagnostics_.error(peek().span, "expected type parameter name");
+      synchronize();
+      break;
+    }
+
+    AstTypeParameter parameter;
+    parameter.name = previous().text;
+    parameter.span = previous().span;
+    if (check(TokenKind::Operator) && peek().text == ">") {
+      advance();
+      if (consume(TokenKind::Colon, "expected ':' after '>' in type bound")) {
+        parameter.lowerBound = parseTypeName(true, true);
+        if (parameter.lowerBound.empty()) {
+          diagnostics_.error(peek().span, "expected lower-bound type");
+        }
+      }
+    }
+    if (check(TokenKind::Operator) && peek().text == "<") {
+      advance();
+      if (consume(TokenKind::Colon, "expected ':' after '<' in type bound")) {
+        parameter.upperBound = parseTypeName(false, true);
+        if (parameter.upperBound.empty()) {
+          diagnostics_.error(peek().span, "expected upper-bound type");
+        }
+      }
+    }
+    parameters.push_back(std::move(parameter));
+
+    consumeSeparators();
+    if (!match(TokenKind::Comma)) {
+      break;
+    }
+    consumeSeparators();
+  }
+
+  consume(TokenKind::RightBracket, "expected ']' after type parameter list");
+  return parameters;
 }
 
 std::vector<std::string> Parser::parseParameterList(bool allowModifiers) {
@@ -542,6 +604,15 @@ std::string Parser::parseTypeName(bool stopAtUpperBound, bool stopAtRightBracket
     }
     if (stopAtMatchAlternative && check(TokenKind::Operator) && peek().text == "|") {
       return type;
+    }
+    if (check(TokenKind::Comma) && bracketDepth > 0) {
+      if (!type.empty() && !previousWasTypeJoiner) {
+        type += ' ';
+      }
+      type += ',';
+      previousWasTypeJoiner = false;
+      advance();
+      continue;
     }
     switch (peek().kind) {
     case TokenKind::Equals:
@@ -718,11 +789,24 @@ AstExpression Parser::parsePostfixExpression() {
       AstExpression typeApply;
       typeApply.kind = AstExpressionKind::TypeApply;
       typeApply.span = bracket.span;
-      typeApply.declaredType = parseTypeName(false, true);
-      if (typeApply.declaredType.empty()) {
-        diagnostics_.error(peek().span, "expected type argument inside brackets");
+      consumeSeparators();
+      while (!isAtEnd() && !check(TokenKind::RightBracket)) {
+        std::string typeArgument = parseTypeName(false, true);
+        if (typeArgument.empty()) {
+          diagnostics_.error(peek().span, "expected type argument inside brackets");
+          break;
+        }
+        typeApply.typeArguments.push_back(std::move(typeArgument));
+        consumeSeparators();
+        if (!match(TokenKind::Comma)) {
+          break;
+        }
+        consumeSeparators();
       }
-      consume(TokenKind::RightBracket, "expected ']' after type argument");
+      if (!typeApply.typeArguments.empty()) {
+        typeApply.declaredType = typeApply.typeArguments.front();
+      }
+      consume(TokenKind::RightBracket, "expected ']' after type arguments");
       typeApply.children.push_back(std::move(expression));
       expression = std::move(typeApply);
       continue;

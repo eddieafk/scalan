@@ -42,9 +42,20 @@ struct TypeInfo {
   std::string dependentMemberName;
   std::string dependentPathName;
   std::string resolvedAliasName;
+  std::string typeConstructorName;
+  std::vector<TypeInfo> typeArguments;
+  std::string typeParameterSymbolName;
   bool abstractTypeMember = false;
   bool pathDependent = false;
   bool typeProjection = false;
+  bool typeParameter = false;
+};
+
+struct TypeParameterInfo {
+  std::string name;
+  std::string symbolName;
+  TypeInfo lowerBound;
+  TypeInfo upperBound;
 };
 
 struct TypedDeclaration {
@@ -52,6 +63,7 @@ struct TypedDeclaration {
   std::string name;
   std::string symbolName;
   support::SourceSpan span;
+  std::vector<TypeParameterInfo> typeParameters;
   std::vector<std::string> parameters;
   std::vector<TypeInfo> parameterTypes;
   std::vector<std::string> accessorParameters;
@@ -92,6 +104,7 @@ struct SymbolInfo {
   TypeInfo type;
   TypeInfo lowerBound;
   TypeInfo upperBound;
+  std::vector<TypeParameterInfo> typeParameters;
   std::vector<TypeInfo> parameterTypes;
   bool hasImplementation = true;
 };
@@ -165,6 +178,19 @@ private:
                                                const Scope& scope) const;
   [[nodiscard]] SymbolInfo specializeInheritedMember(const SymbolInfo& member,
                                                      const Scope& scope) const;
+  [[nodiscard]] std::vector<TypeParameterInfo>
+  resolvedTypeParameters(const std::vector<AstTypeParameter>& parameters,
+                         const std::string& owner, Scope& scope) const;
+  [[nodiscard]] TypeInfo substituteTypeParameters(
+      const TypeInfo& type,
+      const std::unordered_map<std::string, TypeInfo>& substitutions) const;
+  [[nodiscard]] SymbolInfo specializeMemberForReceiver(const SymbolInfo& member,
+                                                       const TypeInfo& receiver) const;
+  [[nodiscard]] SymbolInfo
+  specializeTypeApplication(const SymbolInfo& symbol,
+                            const std::vector<std::string>& typeArguments,
+                            const Scope& scope, const support::SourceSpan& span,
+                            bool reportDiagnostics = true) const;
   [[nodiscard]] bool isAbstractTypeMember(const TypeInfo& type) const;
   [[nodiscard]] bool runtimeSignatureUsesAbstractType(const SymbolInfo& member) const;
   [[nodiscard]] TypeInfo

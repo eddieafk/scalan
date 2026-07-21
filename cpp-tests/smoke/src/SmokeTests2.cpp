@@ -4801,6 +4801,138 @@ object Invalid {
                     std::to_string(status) + ", output='" + output + "')");
 }
 
+int smokeReferenceGenericsNativeRuntime() {
+  constexpr const char* source = R"(package demo.generics
+
+trait Producer[A] {
+  def produce(): A
+}
+
+class Label(val code: Int)
+
+class Box[A](val value: A) {
+  def get(): A = value
+  def replaced(next: A): Box[A] = new Box[A](next)
+  def choose[B](next: B): B = next
+}
+
+class Pair[A, B](val first: A, val second: B)
+class Restricted[A <: Label](val value: A)
+
+object Main {
+  def identity[A](value: A): A = value
+
+  def main = {
+    val box: Box[Label] = new Box[Label](new Label(40))
+    val pair: Pair[Label, Label] =
+      new Pair[Label, Label](box.get(), box.choose[Label](new Label(2)))
+    val bounded = new Restricted[Label](pair.first)
+    val text = new Box[String]("reference")
+    val producer: Producer[Label] = null
+    val replaced = box.replaced(pair.second)
+
+    println(bounded.value.code + identity[Label](pair.second).code)
+    println(replaced.get().code)
+    println(text.get())
+  }
+}
+)";
+  constexpr const char* invalidSource = R"(class Base
+class Child extends Base
+class Box[A](val value: A)
+class Bounded[A <: Base](val value: A)
+class LowerBounded[A >: Child]
+trait Parent[A]
+class Covariant[+A]
+
+object InvalidGenerics {
+  def identity[A](value: A): A = value
+  val primitive = new Box[Int](1)
+  val arity = new Box[Base, Child](new Base)
+  val bounded = new Bounded[String]("no")
+  val lowerBounded = new LowerBounded[String]()
+  val inferred = identity(new Base)
+  val child: Box[Child] = new Box[Child](new Child)
+  val invariant: Box[Base] = child
+  val missingTypeArguments: Box = new Box[Base](new Base)
+}
+
+class GenericChild extends Parent[Base]
+)";
+
+  const std::filesystem::path temporary = std::filesystem::temp_directory_path();
+  const std::filesystem::path binary =
+      temporary / "cpp-scalanative-smoke-reference-generics";
+  const std::filesystem::path output =
+      temporary / "cpp-scalanative-smoke-reference-generics.out";
+  std::error_code ignored;
+  std::filesystem::remove(binary, ignored);
+  std::filesystem::remove(output, ignored);
+
+  scalanative::tools::build::BuildDriver driver;
+  scalanative::tools::build::BuildOptions options;
+  options.action = scalanative::tools::build::BuildAction::BuildBinary;
+  options.optimize = true;
+  options.outputPath = binary;
+  scalanative::support::DiagnosticEngine diagnostics;
+  const scalanative::tools::build::BuildResult result =
+      driver.buildSource("ReferenceGenerics.scala", source, options, diagnostics);
+
+  scalanative::support::DiagnosticEngine invalidDiagnostics;
+  const scalanative::tools::build::BuildResult invalid = driver.buildSource(
+      "InvalidGenerics.scala", invalidSource, {}, invalidDiagnostics);
+
+  if (!result.ok) {
+    if (contains(result.diagnosticsText, "clang toolchain not found")) {
+      return 0;
+    }
+    return fail("reference-generics native build failed: " + result.diagnosticsText);
+  }
+
+  const std::string command = binary.string() + " > " + output.string();
+  const int status = std::system(command.c_str());
+  const std::string text = readTextFile(output);
+  std::filesystem::remove(binary, ignored);
+  std::filesystem::remove(output, ignored);
+
+  return expect(
+      status == 0 && text == "42\n2\nreference\n" && !invalid.ok &&
+          contains(invalid.diagnosticsText,
+                   "variance annotations are not supported in this generics "
+                   "milestone") &&
+          contains(invalid.diagnosticsText,
+                   "type argument Int for Box must be a reference type") &&
+          contains(invalid.diagnosticsText,
+                   "type application to Box has 2 arguments but expected 1") &&
+          contains(invalid.diagnosticsText,
+                   "type argument String for A does not conform to upper bound "
+                   "Base") &&
+          contains(invalid.diagnosticsText,
+                   "type argument String for A does not conform to lower bound "
+                   "Child") &&
+          contains(invalid.diagnosticsText,
+                   "generic method identity requires 1 explicit type arguments") &&
+          contains(invalid.diagnosticsText,
+                   "initializer type Box [ Child ] does not conform to declared "
+                   "type Box [ Base ]") &&
+          contains(invalid.diagnosticsText,
+                   "generic type Box requires 1 explicit type arguments") &&
+          contains(invalid.diagnosticsText,
+                   "generic inheritance is deferred beyond this generics "
+                   "milestone") &&
+          contains(result.nirText, "field @demo.generics.Box.value : Object") &&
+          contains(result.nirText, "define @demo.generics.Box.get : "
+                                   "(demo.generics.Box)Object") &&
+          contains(result.nirText,
+                   "define @demo.generics.Main.identity : (Object)Object") &&
+          contains(result.nirText, "as-instance-of[demo.generics.Label]") &&
+          !contains(result.nirText, "demo.generics.Box ["),
+      "reference generic parsing, typing, erasure, diagnostics, or native "
+      "execution diverged (status=" +
+          std::to_string(status) + ", output='" + text + "', diagnostics='" +
+          invalid.diagnosticsText + "')");
+}
+
 int smokeByteAndShortNativeRuntime() {
   constexpr const char* source = R"(package demo.narrow
 
@@ -11024,6 +11156,9 @@ int main() {
     return code;
   }
   if (int code = smokeBuildReportJson()) {
+    return code;
+  }
+  if (int code = smokeReferenceGenericsNativeRuntime()) {
     return code;
   }
   if (int code = smokeByteAndShortNativeRuntime()) {
