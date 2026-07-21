@@ -71,7 +71,7 @@ build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
   --output /tmp/variance-inheritance \
   cpp-examples/VarianceAndInheritance.scala
 
-# Compile local/anonymous givens, using clauses, and companion evidence search.
+# Compile local, companion, and recursively parameterized contextual evidence.
 build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
   --output /tmp/contextual-abstractions \
   cpp-examples/ContextualAbstractions.scala

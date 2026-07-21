@@ -476,9 +476,58 @@ AstDeclaration Parser::parseGiven(const Token& keyword) {
   declaration.span = keyword.span;
   declaration.isGiven = true;
 
+  bool namedParameterized = false;
+  if (check(TokenKind::Identifier) && current_ + 1 < tokens_.size()) {
+    if (tokens_[current_ + 1].kind == TokenKind::LeftParen) {
+      namedParameterized = true;
+    } else if (tokens_[current_ + 1].kind == TokenKind::LeftBracket) {
+      std::size_t cursor = current_ + 1;
+      std::size_t depth = 0;
+      while (cursor < tokens_.size()) {
+        if (tokens_[cursor].kind == TokenKind::LeftBracket) {
+          ++depth;
+        } else if (tokens_[cursor].kind == TokenKind::RightBracket) {
+          if (--depth == 0) {
+            ++cursor;
+            break;
+          }
+        }
+        ++cursor;
+      }
+      namedParameterized =
+          cursor < tokens_.size() && (tokens_[cursor].kind == TokenKind::LeftParen ||
+                                      tokens_[cursor].kind == TokenKind::Colon);
+    }
+  }
   const bool named = check(TokenKind::Identifier) && current_ + 1 < tokens_.size() &&
                      tokens_[current_ + 1].kind == TokenKind::Colon;
-  if (named) {
+  if (namedParameterized) {
+    declaration.kind = AstDeclarationKind::Def;
+    advance();
+    declaration.name = previous().text;
+    if (check(TokenKind::LeftBracket)) {
+      declaration.typeParameters = parseTypeParameterList();
+    }
+    while (check(TokenKind::LeftParen)) {
+      bool contextualClause = false;
+      std::vector<std::string> parameters =
+          parseParameterList(false, &contextualClause);
+      declaration.parameters.insert(declaration.parameters.end(), parameters.begin(),
+                                    parameters.end());
+      declaration.contextualParameters.insert(declaration.contextualParameters.end(),
+                                              parameters.size(), contextualClause);
+      if (!contextualClause && !parameters.empty()) {
+        diagnostics_.error(keyword.span,
+                           "parameterized given parameters must use a using clause");
+      }
+    }
+    if (!consume(TokenKind::Colon,
+                 "expected ':' before parameterized given result type")) {
+      synchronize();
+      return declaration;
+    }
+    declaration.declaredType = parseTypeName();
+  } else if (named) {
     advance();
     declaration.name = previous().text;
     advance();
@@ -1046,6 +1095,10 @@ AstExpression Parser::parseBlockExpression() {
       localExpression.mutableLocal = local.kind == AstDeclarationKind::Var;
       localExpression.isGiven = local.isGiven;
       localExpression.isAnonymousGiven = local.isAnonymousGiven;
+      if (local.isGiven && local.kind == AstDeclarationKind::Def) {
+        diagnostics_.error(local.span,
+                           "local parameterized givens are not supported yet");
+      }
       if (local.hasInitializer) {
         localExpression.children.push_back(std::move(local.initializer));
       }

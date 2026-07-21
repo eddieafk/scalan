@@ -99,6 +99,8 @@ struct TypedContextArgument {
   std::string symbolName;
   TypeInfo type;
   bool requiresAccessor = false;
+  bool isCall = false;
+  std::vector<TypedContextArgument> arguments;
 };
 
 struct TypedContextApplication {
@@ -152,6 +154,8 @@ private:
                           Scope& scope);
   [[nodiscard]] std::string declarationSymbolName(const AstDeclaration& declaration,
                                                   const std::string& owner) const;
+  [[nodiscard]] std::string importSymbolName(const AstDeclaration& declaration,
+                                             const Scope& scope) const;
   void applyImport(const AstDeclaration& declaration, Scope& scope);
   void mergeScope(Scope& destination, const Scope& source) const;
   [[nodiscard]] TypeInfo inferExpressionType(const AstExpression& expression,
@@ -257,7 +261,8 @@ private:
                                   const TypeInfo& actual) const;
   [[nodiscard]] std::vector<TypedContextArgument>
   resolveContextArguments(const SymbolInfo& callee, std::size_t firstContextParameter,
-                          Scope& scope, const support::SourceSpan& span) const;
+                          Scope& scope, const support::SourceSpan& span,
+                          std::unordered_set<std::string>* resolving = nullptr) const;
   void recordContextApplication(const support::SourceSpan& span,
                                 std::vector<TypedContextArgument> arguments);
   [[nodiscard]] bool isSubtypeOf(const std::string& actual,

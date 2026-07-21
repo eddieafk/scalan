@@ -5,6 +5,7 @@
 #include "scalanative/support/StdNames.h"
 
 #include <algorithm>
+#include <functional>
 #include <sstream>
 #include <string_view>
 #include <unordered_map>
@@ -776,9 +777,12 @@ importAliasesFor(const std::vector<frontend::TypedDeclaration>& declarations) {
       continue;
     }
     if (!declaration.importSelectors.empty()) {
+      const std::string& importOwner = declaration.symbolName.empty()
+                                           ? declaration.importPath
+                                           : declaration.symbolName;
       for (const frontend::AstImportSelector& selector : declaration.importSelectors) {
         if (!selector.name.empty() && !selector.alias.empty()) {
-          aliases[selector.alias] = declaration.importPath + "." + selector.name;
+          aliases[selector.alias] = importOwner + "." + selector.name;
         }
       }
     } else if (declaration.name == "_") {
@@ -1846,6 +1850,11 @@ nir::Value valueFor(const frontend::AstExpression& expression,
       return selected;
     }
     if (!context.localNames.contains(expression.text)) {
+      if (const frontend::TypeInfo* type = annotatedTypeFor(expression, context);
+          type != nullptr && type->kind == frontend::SimpleTypeKind::Object &&
+          runtimeTypeName(*type).ends_with('$')) {
+        return nir::localValue(runtimeTypeName(*type), expression.span);
+      }
       const frontend::TypedDeclaration* selectedDeclaration =
           declarationForExpression(expression, context);
       const frontend::TypedDeclaration* owner =
@@ -2659,22 +2668,35 @@ nir::Value valueFor(const frontend::AstExpression& expression,
     }
     if (const frontend::TypedContextApplication* application =
             contextApplicationFor(expression, context)) {
-      for (const frontend::TypedContextArgument& contextual : application->arguments) {
-        const std::size_t parameterIndex = arguments.size();
+      std::function<nir::Value(const frontend::TypedContextArgument&)>
+          materializeContextArgument;
+      materializeContextArgument =
+          [&](const frontend::TypedContextArgument& contextual) -> nir::Value {
+        if (contextual.name.empty()) {
+          return nir::unknownValue("<missing-given>", expression.span);
+        }
+        if (contextual.isCall) {
+          std::vector<nir::Value> nestedArguments;
+          nestedArguments.reserve(contextual.arguments.size());
+          for (const frontend::TypedContextArgument& nested : contextual.arguments) {
+            nestedArguments.push_back(materializeContextArgument(nested));
+          }
+          return nir::callValue(nir::localValue(contextual.symbolName, expression.span),
+                                std::move(nestedArguments), expression.span);
+        }
+        if (contextual.requiresAccessor) {
+          return nir::callValue(nir::localValue(contextual.symbolName, expression.span),
+                                {}, expression.span);
+        }
         frontend::AstExpression argumentExpression;
         argumentExpression.kind = AstExpressionKind::Identifier;
         argumentExpression.text = contextual.name;
         argumentExpression.span = expression.span;
-        nir::Value argument;
-        if (contextual.name.empty()) {
-          argument = nir::unknownValue("<missing-given>", expression.span);
-        } else if (contextual.requiresAccessor) {
-          argument =
-              nir::callValue(nir::localValue(contextual.symbolName, expression.span),
-                             {}, expression.span);
-        } else {
-          argument = expressionValueFor(argumentExpression, context);
-        }
+        return expressionValueFor(argumentExpression, context);
+      };
+      for (const frontend::TypedContextArgument& contextual : application->arguments) {
+        const std::size_t parameterIndex = arguments.size();
+        nir::Value argument = materializeContextArgument(contextual);
         if (target != nullptr && parameterIndex < target->parameterTypes.size()) {
           const std::string targetType =
               runtimeTypeName(target->parameterTypes[parameterIndex]);

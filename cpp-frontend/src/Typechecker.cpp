@@ -935,7 +935,7 @@ TypedDeclaration Typechecker::typecheckDeclaration(const AstDeclaration& declara
   typed.kind = declaration.kind;
   typed.name = declaration.name;
   typed.symbolName = declaration.kind == AstDeclarationKind::Import
-                         ? declaration.importPath
+                         ? importSymbolName(declaration, scope)
                          : declarationSymbolName(declaration, owner);
   typed.span = declaration.span;
   typed.importPath = declaration.importPath;
@@ -1066,7 +1066,7 @@ TypedDeclaration Typechecker::typecheckDeclaration(const AstDeclaration& declara
     typed.inferredType = inferred;
   }
   if (declaration.kind == AstDeclarationKind::Import && declaration.name == "_") {
-    const std::string importOwner = wildcardImportOwner(declaration.importPath);
+    const std::string& importOwner = typed.symbolName;
     for (const auto& [symbolName, symbol] : globalSymbols_) {
       if (!isDirectMemberOf(symbolName, importOwner)) {
         continue;
@@ -1847,6 +1847,43 @@ std::string Typechecker::declarationSymbolName(const AstDeclaration& declaration
   return name;
 }
 
+std::string Typechecker::importSymbolName(const AstDeclaration& declaration,
+                                          const Scope& scope) const {
+  std::string path = declaration.importPath;
+  if (declaration.name == "_") {
+    path = wildcardImportOwner(path);
+  }
+
+  const auto resolveOwner = [&](const std::string& owner) {
+    if (companionTypeNames_.contains(owner)) {
+      return owner + '$';
+    }
+    if (auto visible = scope.find(owner); visible != scope.end()) {
+      if (companionTypeNames_.contains(visible->second.symbolName)) {
+        return visible->second.symbolName + '$';
+      }
+      if (visible->second.kind == AstDeclarationKind::Object) {
+        return visible->second.symbolName;
+      }
+    }
+    return owner;
+  };
+
+  if (!declaration.importSelectors.empty() || declaration.name == "_") {
+    return resolveOwner(path);
+  }
+  if (globalSymbols_.contains(path)) {
+    return path;
+  }
+  const std::size_t separator = path.rfind('.');
+  if (separator == std::string::npos) {
+    return resolveOwner(path);
+  }
+  const std::string owner = resolveOwner(path.substr(0, separator));
+  const std::string resolved = owner + path.substr(separator);
+  return globalSymbols_.contains(resolved) ? resolved : path;
+}
+
 void Typechecker::collectDeclaration(const AstDeclaration& declaration,
                                      const std::string& owner, Scope& scope) {
   if (declaration.name.empty() || declaration.kind == AstDeclarationKind::Package ||
@@ -1966,13 +2003,14 @@ void Typechecker::applyImport(const AstDeclaration& declaration, Scope& scope) {
   }
 
   if (!declaration.importSelectors.empty()) {
-    if (!globalSymbols_.contains(declaration.importPath)) {
+    const std::string importOwner = importSymbolName(declaration, scope);
+    if (!globalSymbols_.contains(importOwner)) {
       diagnostics_.error(declaration.span,
                          "unresolved import owner: " + declaration.importPath);
       return;
     }
     for (const AstImportSelector& selector : declaration.importSelectors) {
-      const std::string importedName = declaration.importPath + "." + selector.name;
+      const std::string importedName = importOwner + "." + selector.name;
       auto imported = globalSymbols_.find(importedName);
       if (imported == globalSymbols_.end()) {
         diagnostics_.error(selector.span,
@@ -1991,7 +2029,7 @@ void Typechecker::applyImport(const AstDeclaration& declaration, Scope& scope) {
   }
 
   if (declaration.name == "_") {
-    const std::string owner = wildcardImportOwner(declaration.importPath);
+    const std::string owner = importSymbolName(declaration, scope);
     if (owner.empty() || !globalSymbols_.contains(owner)) {
       diagnostics_.error(declaration.span,
                          "unresolved wildcard import: " + declaration.importPath);
@@ -2008,7 +2046,8 @@ void Typechecker::applyImport(const AstDeclaration& declaration, Scope& scope) {
     return;
   }
 
-  auto imported = globalSymbols_.find(declaration.importPath);
+  const std::string importedName = importSymbolName(declaration, scope);
+  auto imported = globalSymbols_.find(importedName);
   if (imported == globalSymbols_.end()) {
     diagnostics_.error(declaration.span,
                        "unresolved import: " + declaration.importPath);
@@ -2151,6 +2190,14 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
     if (found == scope.end()) {
       diagnostics_.error(expression.span, "unresolved identifier: " + expression.text);
       return TypeInfo{SimpleTypeKind::Unknown, "Unknown"};
+    }
+    if ((found->second.kind == AstDeclarationKind::Class ||
+         found->second.kind == AstDeclarationKind::Trait) &&
+        companionTypeNames_.contains(found->second.symbolName)) {
+      auto companion = globalSymbols_.find(found->second.symbolName + '$');
+      if (companion != globalSymbols_.end()) {
+        return companion->second.type;
+      }
     }
     if (found->second.kind == AstDeclarationKind::Def &&
         !found->second.typeParameters.empty()) {
@@ -6147,19 +6194,27 @@ bool Typechecker::isAssignable(const TypeInfo& expected, const TypeInfo& actual)
   return conforms(expected, actual, true);
 }
 
-std::vector<TypedContextArgument>
-Typechecker::resolveContextArguments(const SymbolInfo& callee,
-                                     std::size_t firstContextParameter, Scope& scope,
-                                     const support::SourceSpan& span) const {
+std::vector<TypedContextArgument> Typechecker::resolveContextArguments(
+    const SymbolInfo& callee, std::size_t firstContextParameter, Scope& scope,
+    const support::SourceSpan& span, std::unordered_set<std::string>* resolving) const {
   struct ContextCandidate {
     std::string referenceName;
-    const SymbolInfo* symbol = nullptr;
+    SymbolInfo symbol;
   };
   const auto sortCandidates = [](std::vector<ContextCandidate>& candidates) {
     std::sort(candidates.begin(), candidates.end(),
               [](const ContextCandidate& lhs, const ContextCandidate& rhs) {
-                return lhs.symbol->symbolName < rhs.symbol->symbolName;
+                return lhs.symbol.symbolName < rhs.symbol.symbolName;
               });
+  };
+  std::unordered_set<std::string> localResolving;
+  if (resolving == nullptr) {
+    resolving = &localResolving;
+  }
+  const auto unknownArgument = [] {
+    TypedContextArgument argument;
+    argument.type = TypeInfo{SimpleTypeKind::Unknown, "Unknown"};
+    return argument;
   };
 
   std::vector<TypedContextArgument> result;
@@ -6167,14 +6222,28 @@ Typechecker::resolveContextArguments(const SymbolInfo& callee,
     const TypeInfo& expected = callee.parameterTypes[i];
     std::vector<ContextCandidate> parameterCandidates;
     std::vector<ContextCandidate> givenCandidates;
-    for (const auto& [name, candidate] : scope) {
-      if ((!candidate.isGiven && !candidate.isContextParameter) ||
-          candidate.type.kind == SimpleTypeKind::Unknown ||
+    const auto addCandidate = [&](std::vector<ContextCandidate>& candidates,
+                                  const std::string& referenceName,
+                                  const SymbolInfo& rawCandidate) {
+      SymbolInfo candidate = rawCandidate;
+      if (!candidate.typeParameters.empty()) {
+        candidate = inferTypeApplication(candidate, {}, span, &expected, false);
+        if (!candidate.typeParameters.empty()) {
+          return;
+        }
+      }
+      if (candidate.type.kind == SimpleTypeKind::Unknown ||
           !isAssignable(expected, candidate.type)) {
+        return;
+      }
+      candidates.push_back(ContextCandidate{referenceName, std::move(candidate)});
+    };
+    for (const auto& [name, candidate] : scope) {
+      if (!candidate.isGiven && !candidate.isContextParameter) {
         continue;
       }
-      (candidate.isContextParameter ? parameterCandidates : givenCandidates)
-          .push_back(ContextCandidate{name, &candidate});
+      addCandidate(candidate.isContextParameter ? parameterCandidates : givenCandidates,
+                   name, candidate);
     }
 
     if (!givenCandidates.empty()) {
@@ -6182,12 +6251,12 @@ Typechecker::resolveContextArguments(const SymbolInfo& callee,
           std::max_element(
               givenCandidates.begin(), givenCandidates.end(),
               [](const ContextCandidate& lhs, const ContextCandidate& rhs) {
-                return lhs.symbol->contextualNestingDepth <
-                       rhs.symbol->contextualNestingDepth;
+                return lhs.symbol.contextualNestingDepth <
+                       rhs.symbol.contextualNestingDepth;
               })
-              ->symbol->contextualNestingDepth;
+              ->symbol.contextualNestingDepth;
       std::erase_if(givenCandidates, [&](const ContextCandidate& candidate) {
-        return candidate.symbol->contextualNestingDepth != innermostDepth;
+        return candidate.symbol.contextualNestingDepth != innermostDepth;
       });
     }
 
@@ -6220,12 +6289,10 @@ Typechecker::resolveContextArguments(const SymbolInfo& callee,
           continue;
         }
         for (const auto& [name, candidate] : members->second) {
-          if (!candidate.isGiven || candidate.type.kind == SimpleTypeKind::Unknown ||
-              !isAssignable(expected, candidate.type) ||
-              !seenSymbols.insert(candidate.symbolName).second) {
+          if (!candidate.isGiven || !seenSymbols.insert(candidate.symbolName).second) {
             continue;
           }
-          companionCandidates.push_back(ContextCandidate{name, &candidate});
+          addCandidate(companionCandidates, name, candidate);
         }
       }
     }
@@ -6242,8 +6309,7 @@ Typechecker::resolveContextArguments(const SymbolInfo& callee,
       diagnostics_.error(span, "no given value found for context parameter " +
                                    parameterNameText + " of type " + expected.name +
                                    " required by " + callee.name);
-      result.push_back(
-          TypedContextArgument{{}, {}, TypeInfo{SimpleTypeKind::Unknown, "Unknown"}});
+      result.push_back(unknownArgument());
       continue;
     }
     if (candidates.size() > 1) {
@@ -6255,18 +6321,46 @@ Typechecker::resolveContextArguments(const SymbolInfo& callee,
         if (candidateIndex != 0) {
           message += ", ";
         }
-        const SymbolInfo& candidate = *candidates[candidateIndex].symbol;
+        const SymbolInfo& candidate = candidates[candidateIndex].symbol;
         message += candidate.isAnonymousGiven ? candidate.type.name : candidate.name;
       }
       diagnostics_.error(span, std::move(message));
-      result.push_back(
-          TypedContextArgument{{}, {}, TypeInfo{SimpleTypeKind::Unknown, "Unknown"}});
+      result.push_back(unknownArgument());
       continue;
     }
     const ContextCandidate& candidate = candidates.front();
-    const SymbolInfo& selected = *candidate.symbol;
-    result.push_back(TypedContextArgument{candidate.referenceName, selected.symbolName,
-                                          selected.type, selected.isModuleMember});
+    const SymbolInfo& selected = candidate.symbol;
+    TypedContextArgument argument;
+    argument.name = candidate.referenceName;
+    argument.symbolName = selected.symbolName;
+    argument.type = selected.type;
+    argument.requiresAccessor = selected.isModuleMember;
+    argument.isCall = selected.kind == AstDeclarationKind::Def;
+    if (argument.isCall) {
+      const bool allContextual =
+          selected.contextualParameters.size() == selected.parameterTypes.size() &&
+          std::all_of(selected.contextualParameters.begin(),
+                      selected.contextualParameters.end(),
+                      [](bool contextual) { return contextual; });
+      if (!allContextual) {
+        diagnostics_.error(span, "given method " + selected.name +
+                                     " cannot be materialized because it has "
+                                     "ordinary parameters");
+        result.push_back(unknownArgument());
+        continue;
+      }
+      const std::string expansionKey =
+          selected.symbolName + " as " + selected.type.name;
+      if (!resolving->insert(expansionKey).second) {
+        diagnostics_.error(span, "diverging given expansion for type " +
+                                     selected.type.name + " via " + selected.name);
+        result.push_back(unknownArgument());
+        continue;
+      }
+      argument.arguments = resolveContextArguments(selected, 0, scope, span, resolving);
+      resolving->erase(expansionKey);
+    }
+    result.push_back(std::move(argument));
   }
   return result;
 }

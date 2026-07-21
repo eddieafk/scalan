@@ -917,10 +917,23 @@ Current scaffold status:
   takes precedence over companion evidence, and selected companion values lower
   through their module accessors so initialization remains lazy and reachable.
   Native coverage exercises named and anonymous locals, nested shadowing,
-  typeclass and type-argument companions, and companion ambiguity. Parameterized
-  and derived givens, direct companion-object term selection/imports,
-  contextual-only type inference, nested companion declarations, and Scala 2
-  `implicit` syntax remain later milestones.
+  typeclass and type-argument companions, and companion ambiguity.
+- Companion types now resolve to their `$` module identity in expression
+  position while retaining the unsuffixed type identity in annotations and
+  construction. This enables direct companion-member selection and top-level
+  single, wildcard, or braced/renamed imports without collapsing the term and
+  type namespaces again. Named parameterized givens may declare invariant type
+  parameters and `using` parameters; expected evidence specializes their result
+  type, then recursively materializes their contextual dependencies. The typed
+  contextual-argument tree lowers to nested ordinary calls through the same
+  erased ABI, with a focused diagnostic for diverging expansion. Optimized
+  native coverage includes direct and renamed-import access, one-level
+  parameterized evidence, recursively nested evidence, missing transitive
+  evidence, illegal ordinary factory parameters, unsupported local factories,
+  and expansion cycles. Anonymous or local parameterized givens, candidate
+  specificity ranking, `derives`/derived givens, contextual-only inference for
+  ordinary methods, nested companion declarations, and Scala 2 `implicit`
+  syntax remain later milestones.
 - Postfix type application now supports typed `value.isInstanceOf[Target]` and
   checked `value.asInstanceOf[Target]` for known classes and traits. NIR uses
   dedicated `is-instance-of[T]` and `as-instance-of[T]` values; verification

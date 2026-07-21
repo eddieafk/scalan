@@ -1,5 +1,6 @@
 #include "scalanative/frontend/AstValidator.h"
 
+#include <algorithm>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -63,8 +64,19 @@ bool AstValidator::validateDeclaration(const AstDeclaration& declaration,
                                        support::DiagnosticEngine& diagnostics,
                                        bool isTopLevel) const {
   bool ok = true;
-  if (declaration.isGiven && declaration.kind != AstDeclarationKind::Val) {
-    diagnostics.error(declaration.span, "given declaration must be a value");
+  if (declaration.isGiven && declaration.kind != AstDeclarationKind::Val &&
+      declaration.kind != AstDeclarationKind::Def) {
+    diagnostics.error(declaration.span, "given declaration must be a value or method");
+    ok = false;
+  }
+  if (declaration.isGiven && declaration.kind == AstDeclarationKind::Def &&
+      (declaration.isAnonymousGiven ||
+       std::any_of(declaration.contextualParameters.begin(),
+                   declaration.contextualParameters.end(),
+                   [](bool contextual) { return !contextual; }))) {
+    diagnostics.error(
+        declaration.span,
+        "parameterized given must be named and accept only using parameters");
     ok = false;
   }
   if (declaration.isAnonymousGiven && !declaration.isGiven) {

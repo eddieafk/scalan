@@ -5137,6 +5137,8 @@ int smokeContextualAbstractionsNativeRuntime() {
 class Dog(val name: String)
 class Cat(val name: String)
 class Bird(val name: String)
+class Fox(val name: String)
+class Box[A](val value: A)
 
 trait Show[A] {
   def show(value: A): String
@@ -5154,14 +5156,28 @@ class BirdShow(val prefix: String) extends Show[Bird] {
   override def show(value: Bird): String = prefix + value.name
 }
 
+class FoxShow(val prefix: String) extends Show[Fox] {
+  override def show(value: Fox): String = prefix + value.name
+}
+
+class BoxShow[A](val elementShow: Show[A]) extends Show[Box[A]] {
+  override def show(value: Box[A]): String = "box"
+}
+
 object Show {
-  given Show[Cat] = new CatShow("companion:")
+  given catShow: Show[Cat] = new CatShow("companion:")
+  given foxShow: Show[Fox] = new FoxShow("typeclass-companion:")
   given Show[Dog] = new DogShow("shadowed-companion:")
+
+  given boxShow[A](using elementShow: Show[A]): Show[Box[A]] =
+    new BoxShow[A](elementShow)
 }
 
 object Bird {
   given Show[Bird] = new BirdShow("argument-companion:")
 }
+
+import Show.{catShow => selectedCatShow}
 
 object Main {
   given dogShow: Show[Dog] = new DogShow("dog:")
@@ -5188,10 +5204,22 @@ object Main {
     render(value)
   }
 
-  def companion(value: Cat): String =
+  def companion(value: Fox): String =
     render(value)
 
   def argumentCompanion(value: Bird): String =
+    render(value)
+
+  def directCompanion(value: Cat): String =
+    Show.catShow.show(value)
+
+  def importedCompanion(value: Cat): String =
+    selectedCatShow.show(value)
+
+  def parameterized(value: Box[Cat]): String =
+    render(value)
+
+  def recursivelyParameterized(value: Box[Box[Cat]]): String =
     render(value)
 
   def nestedLocal(value: Dog): String = {
@@ -5209,8 +5237,13 @@ object Main {
     println(locally(new Dog("local"))(using new DogShow("local:")))
     println(localNamed(new Dog("dog")))
     println(localAnonymous(new Dog("dog")))
-    println(companion(new Cat("cat")))
+    println(companion(new Fox("fox")))
     println(argumentCompanion(new Bird("bird")))
+    println(directCompanion(new Cat("direct")))
+    println(importedCompanion(new Cat("imported")))
+    println(parameterized(new Box[Cat](new Cat("boxed"))))
+    println(recursivelyParameterized(
+      new Box[Box[Cat]](new Box[Cat](new Cat("recursive")))))
     println(nestedLocal(new Dog("dog")))
   }
 }
@@ -5219,6 +5252,7 @@ object Main {
 
 class Dog
 class Cat
+class Box[A](val value: A)
 
 trait Show[A] {
   def show(value: A): String
@@ -5232,8 +5266,15 @@ class CatShow extends Show[Cat] {
   override def show(value: Cat): String = "cat"
 }
 
+class BoxShow[A](val elementShow: Show[A]) extends Show[Box[A]] {
+  override def show(value: Box[A]): String = "box"
+}
+
 object Show {
   given typeclassGiven: Show[Cat] = new CatShow
+
+  given boxShow[A](using elementShow: Show[A]): Show[Box[A]] =
+    new BoxShow[A](elementShow)
 }
 
 object Cat {
@@ -5243,6 +5284,7 @@ object Cat {
 object MissingContext {
   def render[A](value: A)(using show: Show[A]): String = show.show(value)
   val missing = render(new Dog)
+  val missingParameterized = render(new Box[Dog](new Dog))
 }
 
 object AmbiguousContext {
@@ -5274,6 +5316,29 @@ object InvalidContextualClauses {
   def untyped(value: Int)(using show): Int = value
   def reversed(using show: Show[Int])(value: Int): Int = value
   given missingInitializer: Show[Int]
+  given invalidFactory[A](value: A): Show[A] = null
+
+  def localFactory = {
+    given nested[A](using show: Show[A]): Show[A] = show
+    1
+  }
+}
+)";
+  constexpr const char* divergingSource = R"(package demo.divergingcontext
+
+class Fish
+
+trait Show[A] {
+  def show(value: A): String
+}
+
+object Show {
+  given loop[A](using next: Show[A]): Show[A] = next
+}
+
+object Main {
+  def render[A](value: A)(using show: Show[A]): String = show.show(value)
+  val diverging = render(new Fish)
 }
 )";
 
@@ -5302,6 +5367,9 @@ object InvalidContextualClauses {
   const scalanative::tools::build::BuildResult invalidClause =
       driver.buildSource("InvalidContextualClauses.scala", invalidClauseSource, {},
                          invalidClauseDiagnostics);
+  scalanative::support::DiagnosticEngine divergingDiagnostics;
+  const scalanative::tools::build::BuildResult diverging = driver.buildSource(
+      "DivergingContext.scala", divergingSource, {}, divergingDiagnostics);
 
   if (!result.ok) {
     if (contains(result.diagnosticsText, "clang toolchain not found")) {
@@ -5320,8 +5388,10 @@ object InvalidContextualClauses {
   return expect(
       status == 0 &&
           text == "dog:inferred\ndog:forwarded\ndog:explicit\nlocal:local\n"
-                  "named-local:dog\nanonymous-local:dog\ncompanion:cat\n"
-                  "argument-companion:bird\ninner-local:dog\n" &&
+                  "named-local:dog\nanonymous-local:dog\n"
+                  "typeclass-companion:fox\n"
+                  "argument-companion:bird\ncompanion:direct\n"
+                  "companion:imported\nbox\nbox\ninner-local:dog\n" &&
           !invalid.ok &&
           contains(invalid.diagnosticsText,
                    "no given value found for context parameter show of type "
@@ -5337,6 +5407,10 @@ object InvalidContextualClauses {
                    "required by render: argumentGiven, typeclassGiven") &&
           contains(invalid.diagnosticsText,
                    "required by render: localFirst, localSecond") &&
+          contains(invalid.diagnosticsText,
+                   "no given value found for context parameter elementShow of type "
+                   "demo.invalidcontextual.Show [ demo.invalidcontextual.Dog ] "
+                   "required by boxShow") &&
           !invalidClause.ok &&
           contains(invalidClause.diagnosticsText,
                    "using parameter requires an explicit type") &&
@@ -5344,6 +5418,14 @@ object InvalidContextualClauses {
                    "ordinary parameter clauses cannot follow a using clause") &&
           contains(invalidClause.diagnosticsText,
                    "given declaration requires an initializer") &&
+          contains(invalidClause.diagnosticsText,
+                   "parameterized given parameters must use a using clause") &&
+          contains(invalidClause.diagnosticsText,
+                   "local parameterized givens are not supported yet") &&
+          !diverging.ok &&
+          contains(diverging.diagnosticsText,
+                   "diverging given expansion for type demo.divergingcontext.Show "
+                   "[ demo.divergingcontext.Fish ] via loop") &&
           contains(result.nirText, "define @demo.contextual.DogShow.show : "
                                    "(demo.contextual.DogShow,Object)String") &&
           contains(result.nirText,
@@ -5357,8 +5439,17 @@ object InvalidContextualClauses {
           contains(result.nirText, "call %demo.contextual.Main.dogShow()") &&
           contains(result.nirText, "module @demo.contextual.Show$") &&
           contains(result.nirText, "module @demo.contextual.Bird$") &&
-          contains(result.nirText, "call %demo.contextual.Show$.given$") &&
+          contains(result.nirText, "define @demo.contextual.Show$.given$") &&
           contains(result.nirText, "call %demo.contextual.Bird$.given$") &&
+          contains(result.nirText, "define @demo.contextual.Show$.boxShow : "
+                                   "(demo.contextual.Show)demo.contextual.Show") &&
+          contains(result.nirText, "call %demo.contextual.Show$.boxShow(call "
+                                   "%demo.contextual.Show$.catShow())") &&
+          contains(result.nirText, "call %demo.contextual.Show$.boxShow(call "
+                                   "%demo.contextual.Show$.boxShow(call "
+                                   "%demo.contextual.Show$.catShow()))") &&
+          countOccurrences(result.nirText,
+                           "call %demo.contextual.Show$.catShow.show(%value)") == 2 &&
           contains(result.nirText, "let %localShow : demo.contextual.Show = new "
                                    "demo.contextual.DogShow(\"named-local:\")") &&
           contains(result.nirText, "let %given$") &&
@@ -5367,7 +5458,8 @@ object InvalidContextualClauses {
       "diagnostics, or native execution diverged (status=" +
           std::to_string(status) + ", output='" + text + "', diagnostics='" +
           invalid.diagnosticsText + "', clause-diagnostics='" +
-          invalidClause.diagnosticsText + "')");
+          invalidClause.diagnosticsText + "', diverging-diagnostics='" +
+          diverging.diagnosticsText + "')");
 }
 
 int smokePrimitiveGenericsNativeRuntime() {
