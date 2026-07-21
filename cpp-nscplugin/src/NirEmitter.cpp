@@ -24,6 +24,7 @@ struct ValueContext {
   std::vector<support::SourceSpan> lexicalScopes;
   const std::vector<frontend::TypedDeclaration>* declarations = nullptr;
   const std::vector<frontend::TypedExpressionInfo>* expressionTypes = nullptr;
+  const std::vector<frontend::TypedContextApplication>* contextApplications = nullptr;
   std::unordered_set<std::string>* referenceArrayElementTypes = nullptr;
   std::map<std::string, std::string>* runtimeArrayDeclarations = nullptr;
   std::vector<std::string> superTypes;
@@ -590,6 +591,22 @@ const frontend::TypeInfo* annotatedTypeFor(const frontend::AstExpression& expres
     }
   }
   return nullptr;
+}
+
+const frontend::TypedContextApplication*
+contextApplicationFor(const frontend::AstExpression& expression,
+                      const ValueContext& context) {
+  if (context.contextApplications == nullptr || !expression.span.isValid()) {
+    return nullptr;
+  }
+  auto application = std::find_if(
+      context.contextApplications->rbegin(), context.contextApplications->rend(),
+      [&](const frontend::TypedContextApplication& candidate) {
+        return candidate.span.source == expression.span.source &&
+               candidate.span.start == expression.span.start &&
+               candidate.span.length == expression.span.length;
+      });
+  return application == context.contextApplications->rend() ? nullptr : &*application;
 }
 
 std::string byteBufferRuntimeName(const frontend::AstExpression& expression,
@@ -1838,8 +1855,7 @@ nir::Value valueFor(const frontend::AstExpression& expression,
       if (selectedDeclaration != nullptr && owner != nullptr &&
           owner->kind == frontend::AstDeclarationKind::Object &&
           (selectedDeclaration->kind == frontend::AstDeclarationKind::Val ||
-           selectedDeclaration->kind == frontend::AstDeclarationKind::Var) &&
-          runtimeTypeName(selectedDeclaration->inferredType) == "Object") {
+           selectedDeclaration->kind == frontend::AstDeclarationKind::Var)) {
         return nir::callValue(
             nir::localValue(context.currentOwner + "." + selectedDeclaration->name,
                             expression.span),
@@ -2641,6 +2657,31 @@ nir::Value valueFor(const frontend::AstExpression& expression,
       }
       arguments.push_back(std::move(argument));
     }
+    if (const frontend::TypedContextApplication* application =
+            contextApplicationFor(expression, context)) {
+      for (const frontend::TypedContextArgument& contextual : application->arguments) {
+        const std::size_t parameterIndex = arguments.size();
+        frontend::AstExpression argumentExpression;
+        argumentExpression.kind = AstExpressionKind::Identifier;
+        argumentExpression.text = contextual.name;
+        argumentExpression.span = expression.span;
+        nir::Value argument =
+            contextual.name.empty()
+                ? nir::unknownValue("<missing-given>", expression.span)
+                : expressionValueFor(argumentExpression, context);
+        if (target != nullptr && parameterIndex < target->parameterTypes.size()) {
+          const std::string targetType =
+              runtimeTypeName(target->parameterTypes[parameterIndex]);
+          if (targetType == "Object") {
+            if (const std::string primitive = boxedObjectTypeName(contextual.type.kind);
+                !primitive.empty()) {
+              argument = nir::boxValue(primitive, std::move(argument), expression.span);
+            }
+          }
+        }
+        arguments.push_back(std::move(argument));
+      }
+    }
     nir::Value call =
         nir::callValue(expressionValueFor(expression.children.front(), context, true),
                        std::move(arguments), expression.span);
@@ -2838,6 +2879,20 @@ nir::FunctionBody bodyFor(const frontend::TypedDeclaration& declaration,
                                         nir::localValue(abiName, declaration.span),
                                         declaration.span),
                         declaration.span);
+    } else if (semanticType != nullptr &&
+               semanticType->kind == frontend::SimpleTypeKind::Object &&
+               !semanticType->typeParameter && !semanticType->abstractTypeMember &&
+               semanticType->typeConstructorName.empty() &&
+               runtimeTypeName(*semanticType) != semanticType->name &&
+               semanticType->name != "Object") {
+      const std::string abiName = name + "$erased";
+      (void)body.addParameter(abiName, type, declaration.span);
+      (void)body.addLet(
+          name, semanticType->name,
+          nir::asInstanceOfValue(semanticType->name,
+                                 nir::localValue(abiName, declaration.span),
+                                 declaration.span),
+          declaration.span);
     } else {
       (void)body.addParameter(name, type, declaration.span);
     }
@@ -3934,6 +3989,7 @@ void NirEmitter::emitDeclaration(
   context.importAliases = importAliasesFor(module.declarations);
   context.declarations = &module.declarations;
   context.expressionTypes = &module.expressionTypes;
+  context.contextApplications = &module.contextApplications;
   context.referenceArrayElementTypes = referenceArrayElementTypes;
   context.runtimeArrayDeclarations = runtimeArrayDeclarations;
   context.hasImplicitReceiver = hasImplicitReceiver;

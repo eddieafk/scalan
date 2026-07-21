@@ -125,6 +125,7 @@ bool Parser::isDeclarationStart() const {
   case TokenKind::KeywordTrait:
   case TokenKind::KeywordType:
   case TokenKind::KeywordDef:
+  case TokenKind::KeywordGiven:
   case TokenKind::KeywordVal:
   case TokenKind::KeywordVar:
   case TokenKind::KeywordImport:
@@ -197,6 +198,9 @@ AstDeclaration Parser::parseDeclaration() {
   }
   if (match(TokenKind::KeywordDef)) {
     return parseDef(previous());
+  }
+  if (match(TokenKind::KeywordGiven)) {
+    return parseGiven(previous());
   }
   if (match(TokenKind::KeywordVal)) {
     return parseValOrVar(AstDeclarationKind::Val, previous());
@@ -429,8 +433,25 @@ AstDeclaration Parser::parseDef(const Token& keyword) {
     declaration.typeParameters = parseTypeParameterList();
   }
 
-  if (check(TokenKind::LeftParen)) {
-    declaration.parameters = parseParameterList();
+  bool sawParameterClause = false;
+  bool sawContextualClause = false;
+  while (check(TokenKind::LeftParen)) {
+    bool contextualClause = false;
+    std::vector<std::string> parameters = parseParameterList(false, &contextualClause);
+    if (sawContextualClause && !contextualClause) {
+      diagnostics_.error(keyword.span,
+                         "ordinary parameter clauses cannot follow a using clause");
+    } else if (sawParameterClause && !contextualClause) {
+      diagnostics_.error(keyword.span,
+                         "multiple ordinary parameter clauses are not supported; "
+                         "a trailing using clause is supported");
+    }
+    declaration.parameters.insert(declaration.parameters.end(), parameters.begin(),
+                                  parameters.end());
+    declaration.contextualParameters.insert(declaration.contextualParameters.end(),
+                                            parameters.size(), contextualClause);
+    sawParameterClause = true;
+    sawContextualClause = sawContextualClause || contextualClause;
   }
 
   if (match(TokenKind::Colon)) {
@@ -443,6 +464,40 @@ AstDeclaration Parser::parseDef(const Token& keyword) {
   } else if (match(TokenKind::LeftBrace)) {
     declaration.hasInitializer = true;
     declaration.initializer = parseBlockExpression();
+  }
+
+  consumeSeparators();
+  return declaration;
+}
+
+AstDeclaration Parser::parseGiven(const Token& keyword) {
+  AstDeclaration declaration;
+  declaration.kind = AstDeclarationKind::Val;
+  declaration.span = keyword.span;
+  declaration.isGiven = true;
+
+  if (!match(TokenKind::Identifier)) {
+    diagnostics_.error(peek().span,
+                       "expected named given declaration; anonymous givens are not "
+                       "supported in this milestone");
+    synchronize();
+    return declaration;
+  }
+  declaration.name = previous().text;
+
+  if (!consume(TokenKind::Colon, "expected ':' after given name")) {
+    synchronize();
+    return declaration;
+  }
+  declaration.declaredType = parseTypeName();
+  if (declaration.declaredType.empty()) {
+    diagnostics_.error(peek().span, "expected given result type");
+  }
+  if (match(TokenKind::Equals)) {
+    declaration.hasInitializer = true;
+    declaration.initializer = parseExpression();
+  } else {
+    diagnostics_.error(peek().span, "given declaration requires an initializer");
   }
 
   consumeSeparators();
@@ -529,12 +584,18 @@ std::vector<AstTypeParameter> Parser::parseTypeParameterList() {
   return parameters;
 }
 
-std::vector<std::string> Parser::parseParameterList(bool allowModifiers) {
+std::vector<std::string> Parser::parseParameterList(bool allowModifiers,
+                                                    bool* contextualClause) {
   std::vector<std::string> parameters;
   if (!consume(TokenKind::LeftParen, "expected '('")) {
     return parameters;
   }
 
+  consumeSeparators();
+  const bool contextual = match(TokenKind::KeywordUsing);
+  if (contextualClause != nullptr) {
+    *contextualClause = contextual;
+  }
   consumeSeparators();
   while (!isAtEnd() && !check(TokenKind::RightParen)) {
     std::string modifier;
@@ -830,11 +891,17 @@ AstExpression Parser::parsePostfixExpression() {
 
     if (check(TokenKind::LeftParen)) {
       const Token& callStart = advance();
+      const bool usingClause = match(TokenKind::KeywordUsing);
+      consumeSeparators();
       AstExpression call;
       call.kind = AstExpressionKind::Call;
       call.span = callStart.span;
-      call.children.push_back(std::move(expression));
-      consumeSeparators();
+      if (usingClause && expression.kind == AstExpressionKind::Call) {
+        call = std::move(expression);
+      } else {
+        call.children.push_back(std::move(expression));
+      }
+      const std::size_t firstArgument = call.children.size();
       while (!isAtEnd() && !check(TokenKind::RightParen)) {
         call.children.push_back(parseExpression());
         consumeSeparators();
@@ -844,6 +911,10 @@ AstExpression Parser::parsePostfixExpression() {
         consumeSeparators();
       }
       consume(TokenKind::RightParen, "expected ')' after argument list");
+      if (usingClause && call.children.size() == firstArgument) {
+        diagnostics_.error(callStart.span,
+                           "using argument clause requires at least one argument");
+      }
       expression = std::move(call);
       continue;
     }

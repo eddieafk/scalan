@@ -38,7 +38,9 @@ void writeExpression(std::ostringstream& out, const AstExpression& expression,
 void writeDeclaration(std::ostringstream& out, const AstDeclaration& declaration,
                       std::size_t depth) {
   std::string indent(depth * 2, ' ');
-  out << indent << declarationKindName(declaration.kind) << ' ' << declaration.name;
+  out << indent
+      << (declaration.isGiven ? "given" : declarationKindName(declaration.kind)) << ' '
+      << declaration.name;
   if (declaration.isOverride) {
     out << " override";
   }
@@ -65,9 +67,19 @@ void writeDeclaration(std::ostringstream& out, const AstDeclaration& declaration
     out << ']';
   }
   if (!declaration.parameters.empty()) {
+    bool contextualClause = false;
     out << '(';
     for (std::size_t i = 0; i < declaration.parameters.size(); ++i) {
-      if (i != 0) {
+      const bool contextual = i < declaration.contextualParameters.size() &&
+                              declaration.contextualParameters[i];
+      if (contextual && !contextualClause) {
+        if (i != 0) {
+          out << ")(using ";
+        } else {
+          out << "using ";
+        }
+        contextualClause = true;
+      } else if (i != 0) {
         out << ", ";
       }
       out << declaration.parameters[i];

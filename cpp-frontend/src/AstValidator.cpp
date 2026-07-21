@@ -51,6 +51,16 @@ bool AstValidator::validateDeclaration(const AstDeclaration& declaration,
                                        support::DiagnosticEngine& diagnostics,
                                        bool isTopLevel) const {
   bool ok = true;
+  if (declaration.isGiven && declaration.kind != AstDeclarationKind::Val) {
+    diagnostics.error(declaration.span, "given declaration must be a value");
+    ok = false;
+  }
+  if (declaration.isGiven &&
+      (declaration.declaredType.empty() || !declaration.hasInitializer)) {
+    diagnostics.error(declaration.span,
+                      "given declaration requires an explicit type and initializer");
+    ok = false;
+  }
   if (!declaration.typeParameters.empty() &&
       declaration.kind != AstDeclarationKind::Class &&
       declaration.kind != AstDeclarationKind::Trait &&
@@ -73,6 +83,33 @@ bool AstValidator::validateDeclaration(const AstDeclaration& declaration,
         parameter.variance != TypeVariance::Invariant) {
       diagnostics.error(parameter.span,
                         "method type parameters cannot declare variance");
+      ok = false;
+    }
+  }
+  if (!declaration.contextualParameters.empty() &&
+      declaration.contextualParameters.size() != declaration.parameters.size()) {
+    diagnostics.error(declaration.span,
+                      "contextual parameter metadata is inconsistent");
+    ok = false;
+  }
+  bool sawContextualParameter = false;
+  for (std::size_t i = 0; i < declaration.contextualParameters.size(); ++i) {
+    if (!declaration.contextualParameters[i]) {
+      if (sawContextualParameter) {
+        diagnostics.error(declaration.span,
+                          "ordinary parameters cannot follow using parameters");
+        ok = false;
+      }
+      continue;
+    }
+    sawContextualParameter = true;
+    if (declaration.kind != AstDeclarationKind::Def) {
+      diagnostics.error(declaration.span,
+                        "using parameters are currently supported only on methods");
+      ok = false;
+    }
+    if (declaration.parameters[i].find(':') == std::string::npos) {
+      diagnostics.error(declaration.span, "using parameter requires an explicit type");
       ok = false;
     }
   }

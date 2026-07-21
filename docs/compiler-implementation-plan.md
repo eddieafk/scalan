@@ -894,8 +894,21 @@ Current scaffold status:
   a concrete override. `cpp-examples/VarianceAndInheritance.scala` and optimized
   native smoke coverage exercise direct, transitive, and forwarded generic
   inheritance, inherited storage, both variance directions, illegal positions,
-  invariant rejection, and erased dispatch. Contextual Scala 3 `using`/`given`
-  search remains the next source-generics milestone.
+  invariant rejection, and erased dispatch.
+- The first Scala 3 contextual-abstraction slice supports named `given` values,
+  trailing method `using` clauses, explicit `(using ...)` applications, and
+  omission of contextual arguments at call sites. Generic method inference runs
+  from ordinary arguments before contextual search, so an inferred `A` can
+  specialize evidence such as `Show[A]`. Search considers visible contextual
+  parameters and named givens, prefers a matching contextual parameter, and
+  diagnoses missing or ambiguous evidence. Selected arguments are recorded on
+  the typed module and lowered as ordinary erased call arguments; concrete
+  reference overrides reconstruct their semantic parameter type inside the
+  erased body. `cpp-examples/ContextualAbstractions.scala` and optimized native
+  smoke coverage exercise inferred, forwarded, explicit, and locally overridden
+  evidence. Anonymous, local, parameterized, and derived givens, contextual-only
+  type inference, companion implicit scope, and Scala 2 `implicit` syntax remain
+  later milestones.
 - Postfix type application now supports typed `value.isInstanceOf[Target]` and
   checked `value.asInstanceOf[Target]` for known classes and traits. NIR uses
   dedicated `is-instance-of[T]` and `as-instance-of[T]` values; verification

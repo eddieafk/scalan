@@ -5131,6 +5131,154 @@ object InvalidVariance {
           invalid.diagnosticsText + "')");
 }
 
+int smokeContextualAbstractionsNativeRuntime() {
+  constexpr const char* source = R"(package demo.contextual
+
+class Dog(val name: String)
+
+trait Show[A] {
+  def show(value: A): String
+}
+
+class DogShow(val prefix: String) extends Show[Dog] {
+  override def show(value: Dog): String = prefix + value.name
+}
+
+object Main {
+  given dogShow: Show[Dog] = new DogShow("dog:")
+
+  def render[A](value: A)(using show: Show[A]): String =
+    show.show(value)
+
+  def forwarded[A](value: A)(using show: Show[A]): String =
+    render(value)
+
+  def explicit(value: Dog): String =
+    render(value)(using dogShow)
+
+  def locally(value: Dog)(using show: Show[Dog]): String =
+    render(value)
+
+  def main = {
+    println(render(new Dog("inferred")))
+    println(forwarded(new Dog("forwarded")))
+    println(explicit(new Dog("explicit")))
+    println(locally(new Dog("local"))(using new DogShow("local:")))
+  }
+}
+)";
+  constexpr const char* invalidSource = R"(package demo.invalidcontextual
+
+class Dog
+
+trait Show[A] {
+  def show(value: A): String
+}
+
+class DogShow extends Show[Dog] {
+  override def show(value: Dog): String = "dog"
+}
+
+object MissingContext {
+  def render[A](value: A)(using show: Show[A]): String = show.show(value)
+  val missing = render(new Dog)
+}
+
+object AmbiguousContext {
+  given first: Show[Dog] = new DogShow
+  given second: Show[Dog] = new DogShow
+
+  def render[A](value: A)(using show: Show[A]): String = show.show(value)
+  val ambiguous = render(new Dog)
+}
+)";
+  constexpr const char* invalidClauseSource = R"(trait Show[A]
+
+object InvalidContextualClauses {
+  def untyped(value: Int)(using show): Int = value
+  def reversed(using show: Show[Int])(value: Int): Int = value
+  given missingInitializer: Show[Int]
+}
+)";
+
+  const std::filesystem::path temporary = std::filesystem::temp_directory_path();
+  const std::filesystem::path binary =
+      temporary / "cpp-scalanative-smoke-contextual-abstractions";
+  const std::filesystem::path output =
+      temporary / "cpp-scalanative-smoke-contextual-abstractions.out";
+  std::error_code ignored;
+  std::filesystem::remove(binary, ignored);
+  std::filesystem::remove(output, ignored);
+
+  scalanative::tools::build::BuildDriver driver;
+  scalanative::tools::build::BuildOptions options;
+  options.action = scalanative::tools::build::BuildAction::BuildBinary;
+  options.optimize = true;
+  options.outputPath = binary;
+  scalanative::support::DiagnosticEngine diagnostics;
+  const scalanative::tools::build::BuildResult result =
+      driver.buildSource("ContextualAbstractions.scala", source, options, diagnostics);
+
+  scalanative::support::DiagnosticEngine invalidDiagnostics;
+  const scalanative::tools::build::BuildResult invalid = driver.buildSource(
+      "InvalidContextual.scala", invalidSource, {}, invalidDiagnostics);
+  scalanative::support::DiagnosticEngine invalidClauseDiagnostics;
+  const scalanative::tools::build::BuildResult invalidClause =
+      driver.buildSource("InvalidContextualClauses.scala", invalidClauseSource, {},
+                         invalidClauseDiagnostics);
+
+  if (!result.ok) {
+    if (contains(result.diagnosticsText, "clang toolchain not found")) {
+      return 0;
+    }
+    return fail("contextual-abstractions native build failed: " +
+                result.diagnosticsText);
+  }
+
+  const std::string command = binary.string() + " > " + output.string();
+  const int status = std::system(command.c_str());
+  const std::string text = readTextFile(output);
+  std::filesystem::remove(binary, ignored);
+  std::filesystem::remove(output, ignored);
+
+  return expect(
+      status == 0 &&
+          text == "dog:inferred\ndog:forwarded\ndog:explicit\nlocal:local\n" &&
+          !invalid.ok &&
+          contains(invalid.diagnosticsText,
+                   "no given value found for context parameter show of type "
+                   "demo.invalidcontextual.Show [ demo.invalidcontextual.Dog ] "
+                   "required by render") &&
+          contains(invalid.diagnosticsText,
+                   "ambiguous given values for context parameter show of type "
+                   "demo.invalidcontextual.Show [ demo.invalidcontextual.Dog ] "
+                   "required by render: first, second") &&
+          !invalidClause.ok &&
+          contains(invalidClause.diagnosticsText,
+                   "using parameter requires an explicit type") &&
+          contains(invalidClause.diagnosticsText,
+                   "ordinary parameter clauses cannot follow a using clause") &&
+          contains(invalidClause.diagnosticsText,
+                   "given declaration requires an initializer") &&
+          contains(result.nirText, "define @demo.contextual.DogShow.show : "
+                                   "(demo.contextual.DogShow,Object)String") &&
+          contains(result.nirText,
+                   "let %value : demo.contextual.Dog = "
+                   "as-instance-of[demo.contextual.Dog](%value$erased)") &&
+          contains(result.nirText, "define @demo.contextual.Main.render : "
+                                   "(Object,demo.contextual.Show)String") &&
+          contains(result.nirText, "define @demo.contextual.Main.forwarded : "
+                                   "(Object,demo.contextual.Show)String") &&
+          contains(result.nirText, "ret String call %render(%value, %show)") &&
+          contains(result.nirText, "call %demo.contextual.Main.dogShow()") &&
+          !contains(result.nirText, "demo.contextual.Show ["),
+      "contextual abstraction parsing, generic-aware search, erased lowering, "
+      "diagnostics, or native execution diverged (status=" +
+          std::to_string(status) + ", output='" + text + "', diagnostics='" +
+          invalid.diagnosticsText + "', clause-diagnostics='" +
+          invalidClause.diagnosticsText + "')");
+}
+
 int smokePrimitiveGenericsNativeRuntime() {
   constexpr const char* source = R"(package demo.primitivegenerics
 
@@ -11713,6 +11861,9 @@ int main() {
     return code;
   }
   if (int code = smokeVarianceAndGenericInheritanceNativeRuntime()) {
+    return code;
+  }
+  if (int code = smokeContextualAbstractionsNativeRuntime()) {
     return code;
   }
   if (int code = smokePrimitiveGenericsNativeRuntime()) {

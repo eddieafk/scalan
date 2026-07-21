@@ -842,6 +842,9 @@ TokenKind Lexer::keywordKind(std::string_view text) const {
   if (text == "for") {
     return TokenKind::KeywordFor;
   }
+  if (text == "given") {
+    return TokenKind::KeywordGiven;
+  }
   if (text == "if") {
     return TokenKind::KeywordIf;
   }
@@ -886,6 +889,9 @@ TokenKind Lexer::keywordKind(std::string_view text) const {
   }
   if (text == "type") {
     return TokenKind::KeywordType;
+  }
+  if (text == "using") {
+    return TokenKind::KeywordUsing;
   }
   if (text == "val") {
     return TokenKind::KeywordVal;
@@ -971,6 +977,7 @@ bool Lexer::canStartStatement(TokenKind kind) {
   case TokenKind::KeywordDef:
   case TokenKind::KeywordFalse:
   case TokenKind::KeywordFor:
+  case TokenKind::KeywordGiven:
   case TokenKind::KeywordIf:
   case TokenKind::KeywordImport:
   case TokenKind::KeywordNew:
@@ -1040,6 +1047,8 @@ const char* tokenKindName(TokenKind kind) {
     return "finally";
   case TokenKind::KeywordFor:
     return "for";
+  case TokenKind::KeywordGiven:
+    return "given";
   case TokenKind::KeywordIf:
     return "if";
   case TokenKind::KeywordImport:
@@ -1070,6 +1079,8 @@ const char* tokenKindName(TokenKind kind) {
     return "true";
   case TokenKind::KeywordType:
     return "type";
+  case TokenKind::KeywordUsing:
+    return "using";
   case TokenKind::KeywordVal:
     return "val";
   case TokenKind::KeywordVar:

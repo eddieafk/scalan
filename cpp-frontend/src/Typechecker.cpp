@@ -864,6 +864,7 @@ TypedModule Typechecker::typecheck(const AstModule& module) {
   memberScopes_.clear();
   globalSymbols_.clear();
   expressionTypes_.clear();
+  contextApplications_.clear();
   directZoneReceiverEscapes_.clear();
   receiverMethodCallSites_.clear();
   implicitReceiverMethodNames_.clear();
@@ -891,6 +892,7 @@ TypedModule Typechecker::typecheck(const AstModule& module) {
     (void)analyzeZoneExpression(body, arenaReferences, zoneLocals);
   }
   typed.expressionTypes = expressionTypes_;
+  typed.contextApplications = contextApplications_;
   return typed;
 }
 
@@ -912,6 +914,7 @@ TypedDeclaration Typechecker::typecheckDeclaration(const AstDeclaration& declara
   typed.importSelectors = declaration.importSelectors;
   typed.parentArguments = declaration.parentArguments;
   typed.isOverride = declaration.isOverride;
+  typed.isGiven = declaration.isGiven;
   typed.hasInitializer = declaration.hasInitializer;
   typed.initializer = declaration.initializer;
   typed.constructorBody = declaration.constructorBody;
@@ -922,6 +925,8 @@ TypedDeclaration Typechecker::typecheckDeclaration(const AstDeclaration& declara
                                                 typed.symbolName, signatureScope);
   typed.parameters = resolvedParameters(declaration.parameters, signatureScope,
                                         &typed.parameterTypes, &declaration.span);
+  typed.contextualParameters = declaration.contextualParameters;
+  typed.contextualParameters.resize(typed.parameters.size(), false);
   for (std::size_t i = 0; i < typed.parameters.size(); ++i) {
     const std::string name = parameterName(typed.parameters[i]);
     if (name.empty()) {
@@ -934,6 +939,7 @@ TypedDeclaration Typechecker::typecheckDeclaration(const AstDeclaration& declara
     parameter.type = i < typed.parameterTypes.size()
                          ? typed.parameterTypes[i]
                          : TypeInfo{SimpleTypeKind::Unknown, "Unknown"};
+    parameter.isContextParameter = typed.contextualParameters[i];
     signatureScope[name] = std::move(parameter);
   }
 
@@ -1044,7 +1050,10 @@ TypedDeclaration Typechecker::typecheckDeclaration(const AstDeclaration& declara
       imported.declaredType = symbol.type.name;
       imported.inferredType = symbol.type;
       imported.typeParameters = symbol.typeParameters;
+      imported.parameters = symbol.parameters;
       imported.parameterTypes = symbol.parameterTypes;
+      imported.contextualParameters = symbol.contextualParameters;
+      imported.isGiven = symbol.isGiven;
       typed.members.push_back(std::move(imported));
     }
   }
@@ -1076,7 +1085,10 @@ TypedDeclaration Typechecker::typecheckDeclaration(const AstDeclaration& declara
     symbol.lowerBound = lowerBound;
     symbol.upperBound = upperBound;
     symbol.typeParameters = typed.typeParameters;
+    symbol.parameters = typed.parameters;
     symbol.parameterTypes = typed.parameterTypes;
+    symbol.contextualParameters = typed.contextualParameters;
+    symbol.isGiven = typed.isGiven;
     symbol.hasImplementation =
         declarationHasImplementation(declaration.kind, declaration.hasInitializer);
     globalSymbols_[typed.symbolName] = symbol;
@@ -1311,7 +1323,10 @@ TypedDeclaration Typechecker::typecheckDeclaration(const AstDeclaration& declara
     updated.lowerBound = typeFromDeclaredName(typedMember.lowerBound, &memberScope);
     updated.upperBound = typeFromDeclaredName(typedMember.upperBound, &memberScope);
     updated.typeParameters = typedMember.typeParameters;
+    updated.parameters = typedMember.parameters;
     updated.parameterTypes = typedMember.parameterTypes;
+    updated.contextualParameters = typedMember.contextualParameters;
+    updated.isGiven = typedMember.isGiven;
     updated.hasImplementation =
         declarationHasImplementation(typedMember.kind, typedMember.hasInitializer);
     if ((declaration.kind == AstDeclarationKind::Class ||
@@ -1789,6 +1804,10 @@ void Typechecker::collectDeclaration(const AstDeclaration& declaration,
   Scope declarationScope = scope;
   symbol.typeParameters = resolvedTypeParameters(declaration.typeParameters,
                                                  symbol.symbolName, declarationScope);
+  symbol.parameters = declaration.parameters;
+  symbol.contextualParameters = declaration.contextualParameters;
+  symbol.contextualParameters.resize(declaration.parameters.size(), false);
+  symbol.isGiven = declaration.isGiven;
   if (isClassLikeDeclaration(declaration.kind)) {
     for (const std::string& parentName : sourceParentTypes(declaration)) {
       if (const SymbolInfo* parent =
@@ -3009,6 +3028,22 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
     }
 
     if (calleeSymbol != nullptr && calleeSymbol->typeParameters.empty()) {
+      std::size_t firstContextParameter = calleeSymbol->parameterTypes.size();
+      for (std::size_t i = 0; i < calleeSymbol->contextualParameters.size(); ++i) {
+        if (calleeSymbol->contextualParameters[i]) {
+          firstContextParameter = i;
+          break;
+        }
+      }
+      if (firstContextParameter < calleeSymbol->parameterTypes.size() &&
+          argumentTypes.size() == firstContextParameter) {
+        std::vector<TypedContextArgument> contextArguments = resolveContextArguments(
+            *calleeSymbol, firstContextParameter, scope, expression.span);
+        for (const TypedContextArgument& argument : contextArguments) {
+          argumentTypes.push_back(argument.type);
+        }
+        recordContextApplication(expression.span, std::move(contextArguments));
+      }
       if (argumentTypes.size() != calleeSymbol->parameterTypes.size()) {
         diagnostics_.error(expression.span,
                            "call to " + calleeSymbol->name + " has " +
@@ -6029,6 +6064,82 @@ bool Typechecker::isAssignable(const TypeInfo& expected, const TypeInfo& actual)
   return conforms(expected, actual, true);
 }
 
+std::vector<TypedContextArgument>
+Typechecker::resolveContextArguments(const SymbolInfo& callee,
+                                     std::size_t firstContextParameter, Scope& scope,
+                                     const support::SourceSpan& span) const {
+  std::vector<TypedContextArgument> result;
+  for (std::size_t i = firstContextParameter; i < callee.parameterTypes.size(); ++i) {
+    const TypeInfo& expected = callee.parameterTypes[i];
+    std::vector<const SymbolInfo*> parameterCandidates;
+    std::vector<const SymbolInfo*> givenCandidates;
+    for (const auto& [name, candidate] : scope) {
+      (void)name;
+      if ((!candidate.isGiven && !candidate.isContextParameter) ||
+          candidate.type.kind == SimpleTypeKind::Unknown ||
+          !isAssignable(expected, candidate.type)) {
+        continue;
+      }
+      (candidate.isContextParameter ? parameterCandidates : givenCandidates)
+          .push_back(&candidate);
+    }
+
+    std::vector<const SymbolInfo*>& candidates =
+        parameterCandidates.empty() ? givenCandidates : parameterCandidates;
+    std::sort(candidates.begin(), candidates.end(),
+              [](const SymbolInfo* lhs, const SymbolInfo* rhs) {
+                return lhs->symbolName < rhs->symbolName;
+              });
+    const std::string parameterNameText =
+        i < callee.parameters.size() ? parameterName(callee.parameters[i])
+                                     : std::to_string(i - firstContextParameter);
+    if (candidates.empty()) {
+      diagnostics_.error(span, "no given value found for context parameter " +
+                                   parameterNameText + " of type " + expected.name +
+                                   " required by " + callee.name);
+      result.push_back(
+          TypedContextArgument{{}, {}, TypeInfo{SimpleTypeKind::Unknown, "Unknown"}});
+      continue;
+    }
+    if (candidates.size() > 1) {
+      std::string message = "ambiguous given values for context parameter " +
+                            parameterNameText + " of type " + expected.name +
+                            " required by " + callee.name + ": ";
+      for (std::size_t candidateIndex = 0; candidateIndex < candidates.size();
+           ++candidateIndex) {
+        if (candidateIndex != 0) {
+          message += ", ";
+        }
+        message += candidates[candidateIndex]->name;
+      }
+      diagnostics_.error(span, std::move(message));
+      result.push_back(
+          TypedContextArgument{{}, {}, TypeInfo{SimpleTypeKind::Unknown, "Unknown"}});
+      continue;
+    }
+    const SymbolInfo& selected = *candidates.front();
+    result.push_back(
+        TypedContextArgument{selected.name, selected.symbolName, selected.type});
+  }
+  return result;
+}
+
+void Typechecker::recordContextApplication(
+    const support::SourceSpan& span, std::vector<TypedContextArgument> arguments) {
+  auto sameSpan = [&](const TypedContextApplication& application) {
+    return application.span.source == span.source &&
+           application.span.start == span.start &&
+           application.span.length == span.length;
+  };
+  auto existing =
+      std::find_if(contextApplications_.begin(), contextApplications_.end(), sameSpan);
+  if (existing == contextApplications_.end()) {
+    contextApplications_.push_back(TypedContextApplication{span, std::move(arguments)});
+  } else {
+    existing->arguments = std::move(arguments);
+  }
+}
+
 bool Typechecker::isSubtypeOf(const std::string& actual,
                               const std::string& expected) const {
   if (actual == expected) {
@@ -6059,7 +6170,8 @@ bool Typechecker::isSubtypeOf(const std::string& actual,
 
 void Typechecker::addParametersToScope(const AstDeclaration& declaration,
                                        Scope& scope) const {
-  for (const std::string& parameter : declaration.parameters) {
+  for (std::size_t i = 0; i < declaration.parameters.size(); ++i) {
+    const std::string& parameter = declaration.parameters[i];
     std::string name = parameterName(parameter);
     if (name.empty()) {
       continue;
@@ -6069,6 +6181,8 @@ void Typechecker::addParametersToScope(const AstDeclaration& declaration,
     symbol.name = name;
     symbol.symbolName = qualify(declaration.name, name);
     symbol.type = parameterType(parameter, &scope, &declaration.span);
+    symbol.isContextParameter = i < declaration.contextualParameters.size() &&
+                                declaration.contextualParameters[i];
     scope[name] = std::move(symbol);
   }
 }

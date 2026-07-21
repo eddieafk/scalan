@@ -67,6 +67,7 @@ struct TypedDeclaration {
   std::vector<TypeParameterInfo> typeParameters;
   std::vector<std::string> parameters;
   std::vector<TypeInfo> parameterTypes;
+  std::vector<bool> contextualParameters;
   std::vector<std::string> accessorParameters;
   std::string declaredType;
   std::string lowerBound;
@@ -78,6 +79,7 @@ struct TypedDeclaration {
   std::vector<AstImportSelector> importSelectors;
   TypeInfo inferredType;
   bool isOverride = false;
+  bool isGiven = false;
   bool hasInitializer = false;
   bool needsAccessor = false;
   AstExpression initializer;
@@ -91,10 +93,22 @@ struct TypedExpressionInfo {
   TypeInfo type;
 };
 
+struct TypedContextArgument {
+  std::string name;
+  std::string symbolName;
+  TypeInfo type;
+};
+
+struct TypedContextApplication {
+  support::SourceSpan span;
+  std::vector<TypedContextArgument> arguments;
+};
+
 struct TypedModule {
   std::string packageName;
   std::vector<TypedDeclaration> declarations;
   std::vector<TypedExpressionInfo> expressionTypes;
+  std::vector<TypedContextApplication> contextApplications;
 };
 
 struct SymbolInfo {
@@ -108,8 +122,12 @@ struct SymbolInfo {
   TypeInfo lowerBound;
   TypeInfo upperBound;
   std::vector<TypeParameterInfo> typeParameters;
+  std::vector<std::string> parameters;
   std::vector<TypeInfo> parameterTypes;
+  std::vector<bool> contextualParameters;
   bool hasImplementation = true;
+  bool isGiven = false;
+  bool isContextParameter = false;
 };
 
 class Typechecker {
@@ -230,6 +248,11 @@ private:
   [[nodiscard]] TypeInfo commonType(const TypeInfo& lhs, const TypeInfo& rhs) const;
   [[nodiscard]] bool isAssignable(const TypeInfo& expected,
                                   const TypeInfo& actual) const;
+  [[nodiscard]] std::vector<TypedContextArgument>
+  resolveContextArguments(const SymbolInfo& callee, std::size_t firstContextParameter,
+                          Scope& scope, const support::SourceSpan& span) const;
+  void recordContextApplication(const support::SourceSpan& span,
+                                std::vector<TypedContextArgument> arguments);
   [[nodiscard]] bool isSubtypeOf(const std::string& actual,
                                  const std::string& expected) const;
   void addParametersToScope(const AstDeclaration& declaration, Scope& scope) const;
@@ -251,6 +274,7 @@ private:
   std::unordered_map<std::string, Scope> memberScopes_;
   std::unordered_map<std::string, SymbolInfo> globalSymbols_;
   std::vector<TypedExpressionInfo> expressionTypes_;
+  std::vector<TypedContextApplication> contextApplications_;
   std::unordered_set<std::string> directZoneReceiverEscapes_;
   std::unordered_map<std::string, std::vector<AstExpression>> receiverMethodCallSites_;
   std::unordered_map<std::string, std::unordered_set<std::string>>

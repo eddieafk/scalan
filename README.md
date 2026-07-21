@@ -70,6 +70,11 @@ build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
 build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
   --output /tmp/variance-inheritance \
   cpp-examples/VarianceAndInheritance.scala
+
+# Compile named givens, using clauses, and inferred contextual arguments.
+build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
+  --output /tmp/contextual-abstractions \
+  cpp-examples/ContextualAbstractions.scala
 ```
 
 Optimization levels select distinct Interflow pipelines: `O1` performs one

@@ -90,6 +90,7 @@ struct AstDeclaration {
   support::SourceSpan span;
   std::vector<AstTypeParameter> typeParameters;
   std::vector<std::string> parameters;
+  std::vector<bool> contextualParameters;
   std::string declaredType;
   std::string lowerBound;
   std::string upperBound;
@@ -98,6 +99,7 @@ struct AstDeclaration {
   std::string importPath;
   std::vector<AstImportSelector> importSelectors;
   bool isOverride = false;
+  bool isGiven = false;
   bool hasInitializer = false;
   AstExpression initializer;
   std::vector<AstDeclaration> members;
