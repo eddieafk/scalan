@@ -56,6 +56,7 @@ struct TypeParameterInfo {
   std::string symbolName;
   TypeInfo lowerBound;
   TypeInfo upperBound;
+  TypeVariance variance = TypeVariance::Invariant;
 };
 
 struct TypedDeclaration {
@@ -71,6 +72,7 @@ struct TypedDeclaration {
   std::string lowerBound;
   std::string upperBound;
   std::vector<std::string> parentTypes;
+  std::vector<TypeInfo> parentTypeInfos;
   std::vector<AstExpression> parentArguments;
   std::string importPath;
   std::vector<AstImportSelector> importSelectors;
@@ -101,6 +103,7 @@ struct SymbolInfo {
   std::string symbolName;
   std::string parentSymbolName;
   std::vector<std::string> parentSymbolNames;
+  std::vector<TypeInfo> parentTypes;
   TypeInfo type;
   TypeInfo lowerBound;
   TypeInfo upperBound;
@@ -168,18 +171,30 @@ private:
   [[nodiscard]] std::vector<const SymbolInfo*>
   inheritedMembers(const std::vector<std::string>& parentSymbolNames,
                    const std::string& memberName) const;
+  [[nodiscard]] std::vector<SymbolInfo>
+  specializedInheritedMembers(const std::vector<std::string>& parentSymbolNames,
+                              const std::vector<TypeInfo>& parentTypes,
+                              const std::string& memberName, const Scope& scope) const;
   void validateInheritedMemberCompatibility(
       const AstDeclaration& declaration,
       const std::vector<std::string>& parentSymbolNames,
-      const Scope& effectiveScope) const;
+      const std::vector<TypeInfo>& parentTypes, const Scope& effectiveScope) const;
   void validateOverride(const TypedDeclaration& overriding,
                         const SymbolInfo& inherited) const;
   void mergeInheritedMembers(Scope& destination,
-                             const std::vector<std::string>& parentSymbolNames) const;
+                             const std::vector<std::string>& parentSymbolNames,
+                             const std::vector<TypeInfo>& parentTypes) const;
   [[nodiscard]] TypeInfo substituteTypeMembers(const TypeInfo& type,
                                                const Scope& scope) const;
-  [[nodiscard]] SymbolInfo specializeInheritedMember(const SymbolInfo& member,
-                                                     const Scope& scope) const;
+  [[nodiscard]] SymbolInfo
+  specializeInheritedMember(const SymbolInfo& member, const Scope& scope,
+                            const TypeInfo* appliedParent = nullptr) const;
+  [[nodiscard]] TypeInfo specializeTypeForReceiver(const TypeInfo& type,
+                                                   const TypeInfo& receiver) const;
+  [[nodiscard]] std::unordered_map<std::string, TypeInfo>
+  effectiveParentTypes(const std::vector<TypeInfo>& directParents) const;
+  void validateVariance(const AstDeclaration& declaration,
+                        const TypedDeclaration& typed) const;
   [[nodiscard]] std::vector<TypeParameterInfo>
   resolvedTypeParameters(const std::vector<AstTypeParameter>& parameters,
                          const std::string& owner, Scope& scope) const;

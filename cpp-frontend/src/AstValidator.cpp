@@ -69,6 +69,12 @@ bool AstValidator::validateDeclaration(const AstDeclaration& declaration,
       diagnostics.error(parameter.span, "duplicate type parameter: " + parameter.name);
       ok = false;
     }
+    if (declaration.kind == AstDeclarationKind::Def &&
+        parameter.variance != TypeVariance::Invariant) {
+      diagnostics.error(parameter.span,
+                        "method type parameters cannot declare variance");
+      ok = false;
+    }
   }
   switch (declaration.kind) {
   case AstDeclarationKind::Package:

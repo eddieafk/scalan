@@ -49,6 +49,11 @@ void writeDeclaration(std::ostringstream& out, const AstDeclaration& declaration
         out << ", ";
       }
       const AstTypeParameter& parameter = declaration.typeParameters[i];
+      if (parameter.variance == TypeVariance::Covariant) {
+        out << '+';
+      } else if (parameter.variance == TypeVariance::Contravariant) {
+        out << '-';
+      }
       out << parameter.name;
       if (!parameter.lowerBound.empty()) {
         out << " >: " << parameter.lowerBound;

@@ -4844,7 +4844,6 @@ class Bounded[A <: Base](val value: A)
 class LowerBounded[A >: Child]
 class Empty[A]
 trait Parent[A]
-class Covariant[+A]
 
 object InvalidGenerics {
   def identity[A](value: A): A = value
@@ -4857,7 +4856,7 @@ object InvalidGenerics {
   val missingTypeArguments: Box = new Box[Base](new Base)
 }
 
-class GenericChild extends Parent[Base]
+class MissingGenericChild extends Parent
 )";
 
   const std::filesystem::path temporary = std::filesystem::temp_directory_path();
@@ -4898,9 +4897,6 @@ class GenericChild extends Parent[Base]
   return expect(
       status == 0 && text == "42\n2\nreference\n" && !invalid.ok &&
           contains(invalid.diagnosticsText,
-                   "variance annotations are not supported in this generics "
-                   "milestone") &&
-          contains(invalid.diagnosticsText,
                    "type argument Nothing for Empty must be a supported primitive "
                    "or reference type") &&
           contains(invalid.diagnosticsText,
@@ -4917,8 +4913,7 @@ class GenericChild extends Parent[Base]
           contains(invalid.diagnosticsText,
                    "generic type Box requires 1 explicit type arguments") &&
           contains(invalid.diagnosticsText,
-                   "generic inheritance is deferred beyond this generics "
-                   "milestone") &&
+                   "generic parent Parent requires explicit type arguments") &&
           contains(result.nirText, "field @demo.generics.Box.value : Object") &&
           contains(result.nirText, "define @demo.generics.Box.get : "
                                    "(demo.generics.Box)Object") &&
@@ -4927,6 +4922,210 @@ class GenericChild extends Parent[Base]
           contains(result.nirText, "as-instance-of[demo.generics.Label]") &&
           !contains(result.nirText, "demo.generics.Box ["),
       "reference generic parsing, typing, erasure, diagnostics, or native "
+      "execution diverged (status=" +
+          std::to_string(status) + ", output='" + text + "', diagnostics='" +
+          invalid.diagnosticsText + "')");
+}
+
+int smokeVarianceAndGenericInheritanceNativeRuntime() {
+  constexpr const char* source = R"(package demo.variantgenerics
+
+class Animal(val name: String)
+class Dog(name: String) extends Animal(name)
+
+trait Source[+A] {
+  def get(): A
+}
+
+trait Sink[-A] {
+  def put(value: A): Int
+}
+
+trait Handler[-A] {
+  def handle(value: A): Int
+}
+
+trait Registry[+A] {
+  def register(handler: Handler[A]): Int
+}
+
+trait NamedSource[+A] extends Source[A]
+
+class DogSource(val dog: Dog) extends Source[Dog] {
+  override def get(): Dog = dog
+}
+
+class NamedDogSource(val dog: Dog) extends NamedSource[Dog] {
+  override def get(): Dog = dog
+}
+
+class ValueSource[+A](val value: A) extends Source[A] {
+  override def get(): A = value
+}
+
+class AnimalSink extends Sink[Animal] {
+  override def put(value: Animal): Int = 7
+}
+
+class Holder[A](val value: A)
+class DogHolder(value: Dog) extends Holder[Dog](value)
+class DefaultSource[A](val value: A) {
+  def get(): A = value
+}
+class DogDefaultSource(value: Dog) extends DefaultSource[Dog](value) {
+  override def get(): Dog = super.get()
+}
+
+object Main {
+  def main = {
+    val direct: Source[Animal] = new DogSource(new Dog("direct"))
+    val transitive: Source[Animal] =
+      new NamedDogSource(new Dog("transitive"))
+    val forwarded: Source[Animal] =
+      new ValueSource[Dog](new Dog("forwarded"))
+    val sink: Sink[Dog] = new AnimalSink
+    val holder: Holder[Dog] = new DogHolder(new Dog("inherited field"))
+    val defaulted = new DogDefaultSource(new Dog("generic super"))
+
+    println(direct.get().name)
+    println(transitive.get().name)
+    println(forwarded.get().name)
+    println(sink.put(new Dog("ignored")))
+    println(holder.value.name)
+    println(defaulted.get().name)
+  }
+}
+)";
+  constexpr const char* invalidSource = R"(class Animal
+class Dog extends Animal
+
+trait BadSource[+A] {
+  def consume(value: A): Unit = println("consume")
+}
+
+trait BadSink[-A] {
+  def produce(): A = null
+}
+
+class Mutable[+A](var value: A)
+class Invariant[A]
+trait NestedInvariant[+A] {
+  def nested(): Invariant[A]
+}
+trait Producer[+A] {
+  def get(): A
+}
+trait Consumer[-A] {
+  def put(value: A): Int
+}
+trait Exact[A] {
+  def get(): A
+}
+trait Parent[A]
+
+class WrongOverride extends Exact[Dog] {
+  override def get(): Animal = new Animal
+}
+class MissingParent extends Parent
+
+object InvalidVariance {
+  val invariant: Invariant[Animal] = new Invariant[Dog]()
+  val animals: Producer[Animal] = null
+  val wrongCovariance: Producer[Dog] = animals
+  val dogs: Consumer[Dog] = null
+  val wrongContravariance: Consumer[Animal] = dogs
+}
+)";
+  constexpr const char* invalidMethodVarianceSource = R"(object InvalidMethodVariance {
+  def identity[+A](value: A): A = value
+}
+)";
+
+  const std::filesystem::path temporary = std::filesystem::temp_directory_path();
+  const std::filesystem::path binary =
+      temporary / "cpp-scalanative-smoke-variance-inheritance";
+  const std::filesystem::path output =
+      temporary / "cpp-scalanative-smoke-variance-inheritance.out";
+  std::error_code ignored;
+  std::filesystem::remove(binary, ignored);
+  std::filesystem::remove(output, ignored);
+
+  scalanative::tools::build::BuildDriver driver;
+  scalanative::tools::build::BuildOptions options;
+  options.action = scalanative::tools::build::BuildAction::BuildBinary;
+  options.optimize = true;
+  options.outputPath = binary;
+  scalanative::support::DiagnosticEngine diagnostics;
+  const scalanative::tools::build::BuildResult result =
+      driver.buildSource("VarianceAndInheritance.scala", source, options, diagnostics);
+
+  scalanative::support::DiagnosticEngine invalidDiagnostics;
+  const scalanative::tools::build::BuildResult invalid = driver.buildSource(
+      "InvalidVariance.scala", invalidSource, {}, invalidDiagnostics);
+  scalanative::support::DiagnosticEngine invalidMethodDiagnostics;
+  const scalanative::tools::build::BuildResult invalidMethod =
+      driver.buildSource("InvalidMethodVariance.scala", invalidMethodVarianceSource, {},
+                         invalidMethodDiagnostics);
+
+  if (!result.ok) {
+    if (contains(result.diagnosticsText, "clang toolchain not found")) {
+      return 0;
+    }
+    return fail("variance and generic-inheritance native build failed: " +
+                result.diagnosticsText);
+  }
+
+  const std::string command = binary.string() + " > " + output.string();
+  const int status = std::system(command.c_str());
+  const std::string text = readTextFile(output);
+  std::filesystem::remove(binary, ignored);
+  std::filesystem::remove(output, ignored);
+
+  return expect(
+      status == 0 &&
+          text ==
+              "direct\ntransitive\nforwarded\n7\ninherited field\ngeneric super\n" &&
+          !invalid.ok &&
+          contains(invalid.diagnosticsText,
+                   "covariant type parameter A occurs in contravariant position in "
+                   "parameter value of method consume") &&
+          contains(invalid.diagnosticsText,
+                   "contravariant type parameter A occurs in covariant position in "
+                   "return type of method produce") &&
+          contains(invalid.diagnosticsText,
+                   "covariant type parameter A occurs in invariant position in "
+                   "constructor parameter value") &&
+          contains(invalid.diagnosticsText,
+                   "covariant type parameter A occurs in invariant position in "
+                   "return type of method nested") &&
+          contains(invalid.diagnosticsText,
+                   "initializer type Invariant [ Dog ] does not conform to declared "
+                   "type Invariant [ Animal ]") &&
+          contains(invalid.diagnosticsText,
+                   "initializer type Producer [ Animal ] does not conform to "
+                   "declared type Producer [ Dog ]") &&
+          contains(invalid.diagnosticsText,
+                   "initializer type Consumer [ Dog ] does not conform to declared "
+                   "type Consumer [ Animal ]") &&
+          contains(invalid.diagnosticsText,
+                   "override get return type Animal does not match inherited return "
+                   "type Dog") &&
+          contains(invalid.diagnosticsText,
+                   "generic parent Parent requires explicit type arguments") &&
+          !invalidMethod.ok &&
+          contains(invalidMethod.diagnosticsText,
+                   "method type parameters cannot declare variance") &&
+          contains(result.nirText, "declare @demo.variantgenerics.Source.get : "
+                                   "(demo.variantgenerics.Source)Object") &&
+          contains(result.nirText, "define @demo.variantgenerics.DogSource.get : "
+                                   "(demo.variantgenerics.DogSource)Object") &&
+          contains(result.nirText, "define @demo.variantgenerics.AnimalSink.put : "
+                                   "(demo.variantgenerics.AnimalSink,Object)Int") &&
+          contains(result.nirText,
+                   "field @demo.variantgenerics.Holder.value : Object") &&
+          contains(result.nirText, "as-instance-of[demo.variantgenerics.Animal]") &&
+          !contains(result.nirText, "demo.variantgenerics.Source ["),
+      "variance, generic inheritance, erased NIR, diagnostics, or native "
       "execution diverged (status=" +
           std::to_string(status) + ", output='" + text + "', diagnostics='" +
           invalid.diagnosticsText + "')");
@@ -11511,6 +11710,9 @@ int main() {
     return code;
   }
   if (int code = smokeReferenceGenericsNativeRuntime()) {
+    return code;
+  }
+  if (int code = smokeVarianceAndGenericInheritanceNativeRuntime()) {
     return code;
   }
   if (int code = smokePrimitiveGenericsNativeRuntime()) {

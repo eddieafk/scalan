@@ -3468,6 +3468,21 @@ bool devirtualizeExactReceiverCall(
     nir::Value& value, const std::unordered_map<std::string, std::string>& localTypes,
     const std::unordered_map<std::string, nir::Value>& localValues,
     const DefinitionIndex& definitions, const ParentMap& parentMap) {
+  const auto receiverForTarget = [&](nir::Value receiver, const std::string& target) {
+    auto definition = definitions.find(target);
+    if (definition == definitions.end() || definition->second == nullptr) {
+      return receiver;
+    }
+    const std::vector<std::string> parameterTypes =
+        signatureParameterTypes(definition->second->signature);
+    if (parameterTypes.empty() ||
+        knownValueType(receiver, localTypes) == parameterTypes.front()) {
+      return receiver;
+    }
+    const support::SourceSpan span = receiver.span;
+    return nir::asInstanceOfValue(parameterTypes.front(), std::move(receiver), span);
+  };
+
   if (value.kind == nir::ValueKind::Select) {
     std::optional<std::string> target =
         devirtualizedTarget(value, 1, localTypes, localValues, definitions, parentMap);
@@ -3476,7 +3491,7 @@ bool devirtualizeExactReceiverCall(
     }
 
     std::vector<nir::Value> arguments;
-    arguments.push_back(std::move(value.operands.front()));
+    arguments.push_back(receiverForTarget(std::move(value.operands.front()), *target));
     value = nir::callValue(nir::localValue(*target, value.span), std::move(arguments),
                            value.span);
     return true;
@@ -3497,7 +3512,8 @@ bool devirtualizeExactReceiverCall(
 
   std::vector<nir::Value> arguments;
   arguments.reserve(value.operands.size());
-  arguments.push_back(std::move(value.operands.front().operands.front()));
+  arguments.push_back(
+      receiverForTarget(std::move(value.operands.front().operands.front()), *target));
   for (std::size_t i = 1; i < value.operands.size(); ++i) {
     arguments.push_back(std::move(value.operands[i]));
   }

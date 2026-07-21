@@ -30,6 +30,15 @@ bool typesMatchForOverride(const TypeInfo& expected, const TypeInfo& actual) {
   return expected.name == actual.name;
 }
 
+TypeInfo staticExpressionType(TypeInfo type) {
+  if (!type.typeParameter && !type.abstractTypeMember &&
+      type.typeConstructorName.empty() && !type.runtimeName.empty() &&
+      type.runtimeName != type.name) {
+    type.runtimeName.clear();
+  }
+  return type;
+}
+
 bool declarationHasImplementation(AstDeclarationKind kind, bool hasInitializer) {
   return kind != AstDeclarationKind::Def && kind != AstDeclarationKind::Val &&
                  kind != AstDeclarationKind::Var && kind != AstDeclarationKind::Type
@@ -1060,6 +1069,9 @@ TypedDeclaration Typechecker::typecheckDeclaration(const AstDeclaration& declara
     symbol.parentSymbolNames = isClassLikeDeclaration(declaration.kind)
                                    ? typed.parentTypes
                                    : std::vector<std::string>{};
+    symbol.parentTypes = isClassLikeDeclaration(declaration.kind)
+                             ? typed.parentTypeInfos
+                             : std::vector<TypeInfo>{};
     symbol.type = typed.inferredType;
     symbol.lowerBound = lowerBound;
     symbol.upperBound = upperBound;
@@ -1090,8 +1102,9 @@ TypedDeclaration Typechecker::typecheckDeclaration(const AstDeclaration& declara
       collectMember(member);
     }
   }
-  mergeInheritedMembers(ownMemberScope, typed.parentTypes);
-  validateInheritedMemberCompatibility(declaration, typed.parentTypes, ownMemberScope);
+  mergeInheritedMembers(ownMemberScope, typed.parentTypes, typed.parentTypeInfos);
+  validateInheritedMemberCompatibility(declaration, typed.parentTypes,
+                                       typed.parentTypeInfos, ownMemberScope);
   if (declaration.kind == AstDeclarationKind::Class) {
     for (const std::string& parameter : typed.parameters) {
       const std::string name = parameterName(parameter);
@@ -1105,18 +1118,16 @@ TypedDeclaration Typechecker::typecheckDeclaration(const AstDeclaration& declara
       field.type = parameterType(parameter, &signatureScope);
       ownMemberScope[name] = std::move(field);
 
-      const std::vector<const SymbolInfo*> inherited =
-          inheritedMembers(typed.parentTypes, name);
+      const std::vector<SymbolInfo> inherited = specializedInheritedMembers(
+          typed.parentTypes, typed.parentTypeInfos, name, ownMemberScope);
       const bool hasConcreteInheritedMember =
-          std::any_of(inherited.begin(), inherited.end(), [](const SymbolInfo* member) {
-            return member->hasImplementation;
+          std::any_of(inherited.begin(), inherited.end(), [](const SymbolInfo& member) {
+            return member.hasImplementation;
           });
       if (hasConcreteInheritedMember) {
         continue;
       }
-      for (const SymbolInfo* inheritedMember : inherited) {
-        const SymbolInfo specialized =
-            specializeInheritedMember(*inheritedMember, ownMemberScope);
+      for (const SymbolInfo& specialized : inherited) {
         if (specialized.kind != AstDeclarationKind::Val &&
             specialized.kind != AstDeclarationKind::Var) {
           diagnostics_.error(declaration.span,
@@ -1174,16 +1185,22 @@ TypedDeclaration Typechecker::typecheckDeclaration(const AstDeclaration& declara
       super.kind = AstDeclarationKind::Val;
       super.name = "super";
       super.symbolName = typed.symbolName + ".super";
-      super.type = TypeInfo{SimpleTypeKind::Object, typed.parentTypes.back()};
+      super.type = typed.parentTypeInfos.empty()
+                       ? TypeInfo{SimpleTypeKind::Object, typed.parentTypes.back()}
+                       : typed.parentTypeInfos.back();
       super.parentSymbolNames = typed.parentTypes;
+      super.parentTypes = typed.parentTypeInfos;
       memberScope[super.name] = std::move(super);
     }
-    for (const std::string& parentType : typed.parentTypes) {
+    for (std::size_t i = 0; i < typed.parentTypes.size(); ++i) {
+      const std::string& parentType = typed.parentTypes[i];
       SymbolInfo qualifiedSuper;
       qualifiedSuper.kind = AstDeclarationKind::Val;
       qualifiedSuper.name = "super:" + parentType;
       qualifiedSuper.symbolName = typed.symbolName + ".super[" + parentType + "]";
-      qualifiedSuper.type = TypeInfo{SimpleTypeKind::Object, parentType};
+      qualifiedSuper.type = i < typed.parentTypeInfos.size()
+                                ? typed.parentTypeInfos[i]
+                                : TypeInfo{SimpleTypeKind::Object, parentType};
       memberScope[qualifiedSuper.name] = std::move(qualifiedSuper);
     }
   }
@@ -1213,12 +1230,10 @@ TypedDeclaration Typechecker::typecheckDeclaration(const AstDeclaration& declara
       ownMemberScope[typedMember.name] = resolved->second;
       globalSymbols_[resolved->second.symbolName] = resolved->second;
     }
-    const std::vector<const SymbolInfo*> inherited =
-        inheritedMembers(typed.parentTypes, typedMember.name);
+    const std::vector<SymbolInfo> inherited = specializedInheritedMembers(
+        typed.parentTypes, typed.parentTypeInfos, typedMember.name, memberScope);
     if (!inherited.empty()) {
-      for (const SymbolInfo* inheritedMember : inherited) {
-        const SymbolInfo specialized =
-            specializeInheritedMember(*inheritedMember, memberScope);
+      for (const SymbolInfo& specialized : inherited) {
         const bool matchingMethod = typedMember.kind == AstDeclarationKind::Def &&
                                     specialized.kind == AstDeclarationKind::Def;
         const bool matchingValue = (typedMember.kind == AstDeclarationKind::Val ||
@@ -1289,6 +1304,9 @@ TypedDeclaration Typechecker::typecheckDeclaration(const AstDeclaration& declara
     updated.parentSymbolNames = isClassLikeDeclaration(typedMember.kind)
                                     ? typedMember.parentTypes
                                     : std::vector<std::string>{};
+    updated.parentTypes = isClassLikeDeclaration(typedMember.kind)
+                              ? typedMember.parentTypeInfos
+                              : std::vector<TypeInfo>{};
     updated.type = typedMember.inferredType;
     updated.lowerBound = typeFromDeclaredName(typedMember.lowerBound, &memberScope);
     updated.upperBound = typeFromDeclaredName(typedMember.upperBound, &memberScope);
@@ -1376,6 +1394,11 @@ TypedDeclaration Typechecker::typecheckDeclaration(const AstDeclaration& declara
     for (const AstExpression& expression : declaration.constructorBody) {
       (void)inferExpressionType(expression, constructorScope);
     }
+  }
+
+  if (declaration.kind == AstDeclarationKind::Class ||
+      declaration.kind == AstDeclarationKind::Trait) {
+    validateVariance(declaration, typed);
   }
 
   if (declaration.kind == AstDeclarationKind::Object ||
@@ -1772,6 +1795,10 @@ void Typechecker::collectDeclaration(const AstDeclaration& declaration,
               typeSymbolForDeclaredName(parentName, &declarationScope);
           parent != nullptr && isInheritableDeclaration(parent->kind)) {
         symbol.parentSymbolNames.push_back(parent->symbolName);
+        const AppliedTypeSyntax applied = parseAppliedTypeSyntax(parentName);
+        symbol.parentTypes.push_back(
+            applied.applied ? typeFromDeclaredName(parentName, &declarationScope)
+                            : parent->type);
       }
     }
     if (!symbol.parentSymbolNames.empty()) {
@@ -1837,7 +1864,7 @@ void Typechecker::collectDeclaration(const AstDeclaration& declaration,
       }
     }
     declaredMemberScopes_[symbolName] = ownMembers;
-    mergeInheritedMembers(ownMembers, symbol.parentSymbolNames);
+    mergeInheritedMembers(ownMembers, symbol.parentSymbolNames, symbol.parentTypes);
     memberScopes_[symbolName] = std::move(ownMembers);
   }
 }
@@ -3006,7 +3033,8 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
         }
       }
     }
-    return calleeType;
+    return calleeSymbol == nullptr ? calleeType
+                                   : staticExpressionType(std::move(calleeType));
   }
   case AstExpressionKind::Block:
     if (expression.children.empty()) {
@@ -4153,7 +4181,7 @@ TypeInfo Typechecker::inferSelectType(const AstExpression& expression, Scope& sc
                            std::to_string(specializedMember.typeParameters.size()) +
                            " explicit type arguments");
   }
-  TypeInfo selected = specializedMember.type;
+  TypeInfo selected = staticExpressionType(specializedMember.type);
   if (expression.children.size() != 1 ||
       (!isAbstractTypeMember(selected) && selected.dependentMemberName.empty())) {
     return selected;
@@ -4336,9 +4364,15 @@ const SymbolInfo* Typechecker::selectedMember(const AstExpression& expression,
     return nullptr;
   }
 
-  const std::string& memberOwner =
-      receiver.runtimeName.empty() ? receiver.name : receiver.runtimeName;
+  std::string memberOwner = receiver.typeConstructorName.empty()
+                                ? receiver.name
+                                : receiver.typeConstructorName;
   auto members = memberScopes_.find(memberOwner);
+  if (members == memberScopes_.end() && !receiver.runtimeName.empty() &&
+      receiver.runtimeName != memberOwner) {
+    memberOwner = receiver.runtimeName;
+    members = memberScopes_.find(memberOwner);
+  }
   if (members == memberScopes_.end()) {
     diagnostics_.error(expression.span,
                        "no known members for receiver: " + receiver.name);
@@ -4362,9 +4396,15 @@ Typechecker::knownMemberForReceiverType(const TypeInfo& receiver,
     return nullptr;
   }
 
-  const std::string& memberOwner =
-      receiver.runtimeName.empty() ? receiver.name : receiver.runtimeName;
+  std::string memberOwner = receiver.typeConstructorName.empty()
+                                ? receiver.name
+                                : receiver.typeConstructorName;
   auto members = memberScopes_.find(memberOwner);
+  if (members == memberScopes_.end() && !receiver.runtimeName.empty() &&
+      receiver.runtimeName != memberOwner) {
+    memberOwner = receiver.runtimeName;
+    members = memberScopes_.find(memberOwner);
+  }
   if (members == memberScopes_.end()) {
     return nullptr;
   }
@@ -4405,10 +4445,12 @@ void Typechecker::validateInheritance(const AstDeclaration& declaration,
   if (parentNames.empty()) {
     typed.declaredType.clear();
     typed.parentTypes.clear();
+    typed.parentTypeInfos.clear();
     return;
   }
 
   typed.parentTypes.clear();
+  typed.parentTypeInfos.clear();
   std::unordered_set<std::string> seen;
   bool sawClassParent = false;
   for (std::size_t i = 0; i < parentNames.size(); ++i) {
@@ -4418,19 +4460,16 @@ void Typechecker::validateInheritance(const AstDeclaration& declaration,
       continue;
     }
     const AppliedTypeSyntax appliedParent = parseAppliedTypeSyntax(parentNames[i]);
+    TypeInfo resolvedParent = parent->type;
     if (!parent->typeParameters.empty()) {
       if (!appliedParent.applied) {
         diagnostics_.error(declaration.span, "generic parent " + parent->name +
                                                  " requires explicit type arguments");
-      } else {
-        (void)typeFromDeclaredName(parentNames[i], &scope, &declaration.span);
-        diagnostics_.error(
-            declaration.span,
-            "generic inheritance is deferred beyond this generics milestone");
+        continue;
       }
-      continue;
+      resolvedParent = typeFromDeclaredName(parentNames[i], &scope, &declaration.span);
     }
-    if (appliedParent.applied) {
+    if (parent->typeParameters.empty() && appliedParent.applied) {
       (void)typeFromDeclaredName(parentNames[i], &scope, &declaration.span);
       continue;
     }
@@ -4471,6 +4510,7 @@ void Typechecker::validateInheritance(const AstDeclaration& declaration,
       sawClassParent = true;
     }
     typed.parentTypes.push_back(parent->symbolName);
+    typed.parentTypeInfos.push_back(std::move(resolvedParent));
   }
   typed.declaredType =
       typed.parentTypes.empty() ? std::string{} : typed.parentTypes.front();
@@ -4519,7 +4559,12 @@ void Typechecker::validateParentConstructorArguments(const AstDeclaration& decla
     return;
   }
 
-  const std::vector<TypeInfo>& expected = parent->second.parameterTypes;
+  SymbolInfo specializedParent = parent->second;
+  if (!typed.parentTypeInfos.empty()) {
+    specializedParent =
+        specializeMemberForReceiver(parent->second, typed.parentTypeInfos.front());
+  }
+  const std::vector<TypeInfo>& expected = specializedParent.parameterTypes;
   if (declaration.parentArguments.size() != expected.size()) {
     diagnostics_.error(declaration.span,
                        "parent constructor for " + parent->second.name + " has " +
@@ -4567,11 +4612,44 @@ Typechecker::inheritedMembers(const std::vector<std::string>& parentSymbolNames,
   return result;
 }
 
+std::vector<SymbolInfo> Typechecker::specializedInheritedMembers(
+    const std::vector<std::string>& parentSymbolNames,
+    const std::vector<TypeInfo>& parentTypes, const std::string& memberName,
+    const Scope& scope) const {
+  std::vector<SymbolInfo> result;
+  if (parentSymbolNames.empty() || memberName.empty()) {
+    return result;
+  }
+
+  const std::unordered_map<std::string, TypeInfo> effectiveParents =
+      effectiveParentTypes(parentTypes);
+  std::unordered_set<std::string> seen;
+  for (const std::string& parentName :
+       linearizedParentsFor(parentSymbolNames, globalSymbols_)) {
+    auto parentScope = declaredMemberScopes_.find(parentName);
+    if (parentScope == declaredMemberScopes_.end()) {
+      continue;
+    }
+    auto member = parentScope->second.find(memberName);
+    if (member == parentScope->second.end() ||
+        !seen.insert(member->second.symbolName).second) {
+      continue;
+    }
+    auto appliedParent = effectiveParents.find(parentName);
+    result.push_back(specializeInheritedMember(
+        member->second, scope,
+        appliedParent == effectiveParents.end() ? nullptr : &appliedParent->second));
+  }
+  return result;
+}
+
 void Typechecker::validateInheritedMemberCompatibility(
     const AstDeclaration& declaration,
     const std::vector<std::string>& parentSymbolNames,
-    const Scope& effectiveScope) const {
-  std::unordered_map<std::string, std::vector<const SymbolInfo*>> members;
+    const std::vector<TypeInfo>& parentTypes, const Scope& effectiveScope) const {
+  const std::unordered_map<std::string, TypeInfo> effectiveParents =
+      effectiveParentTypes(parentTypes);
+  std::unordered_map<std::string, std::vector<SymbolInfo>> members;
   for (const std::string& parentName :
        linearizedParentsFor(parentSymbolNames, globalSymbols_)) {
     auto parentScope = declaredMemberScopes_.find(parentName);
@@ -4587,11 +4665,15 @@ void Typechecker::validateInheritedMemberCompatibility(
       }
       auto& candidates = members[name];
       const bool duplicate = std::any_of(
-          candidates.begin(), candidates.end(), [&](const SymbolInfo* candidate) {
-            return candidate->symbolName == symbol.symbolName;
+          candidates.begin(), candidates.end(), [&](const SymbolInfo& candidate) {
+            return candidate.symbolName == symbol.symbolName;
           });
       if (!duplicate) {
-        candidates.push_back(&symbol);
+        auto appliedParent = effectiveParents.find(parentName);
+        candidates.push_back(specializeInheritedMember(
+            symbol, effectiveScope,
+            appliedParent == effectiveParents.end() ? nullptr
+                                                    : &appliedParent->second));
       }
     }
   }
@@ -4605,11 +4687,9 @@ void Typechecker::validateInheritedMemberCompatibility(
     if (candidates.size() < 2) {
       continue;
     }
-    const SymbolInfo effective =
-        specializeInheritedMember(*candidates.front(), effectiveScope);
+    const SymbolInfo& effective = candidates.front();
     for (std::size_t i = 1; i < candidates.size(); ++i) {
-      const SymbolInfo required =
-          specializeInheritedMember(*candidates[i], effectiveScope);
+      const SymbolInfo& required = candidates[i];
       if (effective.kind == AstDeclarationKind::Type &&
           required.kind == AstDeclarationKind::Type) {
         if (required.hasImplementation) {
@@ -4817,13 +4897,16 @@ void Typechecker::validateOverride(const TypedDeclaration& overriding,
 }
 
 void Typechecker::mergeInheritedMembers(
-    Scope& destination, const std::vector<std::string>& parentSymbolNames) const {
+    Scope& destination, const std::vector<std::string>& parentSymbolNames,
+    const std::vector<TypeInfo>& parentTypes) const {
   if (parentSymbolNames.empty()) {
     return;
   }
 
   const std::vector<std::string> parents =
       linearizedParentsFor(parentSymbolNames, globalSymbols_);
+  const std::unordered_map<std::string, TypeInfo> effectiveParents =
+      effectiveParentTypes(parentTypes);
   for (const std::string& parentName : parents) {
     auto parentScope = declaredMemberScopes_.find(parentName);
     if (parentScope == declaredMemberScopes_.end()) {
@@ -4831,7 +4914,10 @@ void Typechecker::mergeInheritedMembers(
     }
     for (const auto& [name, symbol] : parentScope->second) {
       if (symbol.kind == AstDeclarationKind::Type && !destination.contains(name)) {
-        destination[name] = symbol;
+        auto appliedParent = effectiveParents.find(parentName);
+        destination[name] = specializeInheritedMember(
+            symbol, destination,
+            appliedParent == effectiveParents.end() ? nullptr : &appliedParent->second);
       }
     }
   }
@@ -4846,7 +4932,10 @@ void Typechecker::mergeInheritedMembers(
            symbol.kind == AstDeclarationKind::Val ||
            symbol.kind == AstDeclarationKind::Var) &&
           !destination.contains(name)) {
-        destination[name] = specializeInheritedMember(symbol, destination);
+        auto appliedParent = effectiveParents.find(parentName);
+        destination[name] = specializeInheritedMember(
+            symbol, destination,
+            appliedParent == effectiveParents.end() ? nullptr : &appliedParent->second);
       }
     }
   }
@@ -4883,14 +4972,179 @@ TypeInfo Typechecker::substituteTypeMembers(const TypeInfo& type,
   return substituted;
 }
 
+TypeInfo Typechecker::specializeTypeForReceiver(const TypeInfo& type,
+                                                const TypeInfo& receiver) const {
+  if (receiver.typeConstructorName.empty() || receiver.typeArguments.empty()) {
+    return type;
+  }
+  auto constructor = globalSymbols_.find(receiver.typeConstructorName);
+  if (constructor == globalSymbols_.end() ||
+      constructor->second.typeParameters.size() != receiver.typeArguments.size()) {
+    return type;
+  }
+  std::unordered_map<std::string, TypeInfo> substitutions;
+  for (std::size_t i = 0; i < receiver.typeArguments.size(); ++i) {
+    substitutions[constructor->second.typeParameters[i].symbolName] =
+        receiver.typeArguments[i];
+  }
+  return substituteTypeParameters(type, substitutions);
+}
+
+std::unordered_map<std::string, TypeInfo>
+Typechecker::effectiveParentTypes(const std::vector<TypeInfo>& directParents) const {
+  std::unordered_map<std::string, TypeInfo> result;
+  std::unordered_set<std::string> visiting;
+  std::function<void(const TypeInfo&)> visit = [&](const TypeInfo& parent) {
+    const std::string parentName =
+        parent.typeConstructorName.empty()
+            ? (parent.runtimeName.empty() ? parent.name : parent.runtimeName)
+            : parent.typeConstructorName;
+    if (parentName.empty() || result.contains(parentName) ||
+        !visiting.insert(parentName).second) {
+      return;
+    }
+    result[parentName] = parent;
+    auto symbol = globalSymbols_.find(parentName);
+    if (symbol != globalSymbols_.end()) {
+      for (const TypeInfo& inherited : symbol->second.parentTypes) {
+        visit(specializeTypeForReceiver(inherited, parent));
+      }
+    }
+    visiting.erase(parentName);
+  };
+  for (const TypeInfo& parent : directParents) {
+    visit(parent);
+  }
+  return result;
+}
+
 SymbolInfo Typechecker::specializeInheritedMember(const SymbolInfo& member,
-                                                  const Scope& scope) const {
+                                                  const Scope& scope,
+                                                  const TypeInfo* appliedParent) const {
   SymbolInfo specialized = member;
-  specialized.type = substituteTypeMembers(member.type, scope);
+  const auto specialize = [&](const TypeInfo& type) {
+    TypeInfo result = substituteTypeMembers(type, scope);
+    if (appliedParent != nullptr) {
+      result = specializeTypeForReceiver(result, *appliedParent);
+    }
+    if (!type.runtimeName.empty() && result.name != type.name) {
+      result.runtimeName = type.runtimeName;
+    }
+    return result;
+  };
+  specialized.type = specialize(member.type);
   for (TypeInfo& parameterType : specialized.parameterTypes) {
-    parameterType = substituteTypeMembers(parameterType, scope);
+    parameterType = specialize(parameterType);
+  }
+  specialized.lowerBound = specialize(member.lowerBound);
+  specialized.upperBound = specialize(member.upperBound);
+  for (TypeParameterInfo& typeParameter : specialized.typeParameters) {
+    typeParameter.lowerBound = specialize(typeParameter.lowerBound);
+    typeParameter.upperBound = specialize(typeParameter.upperBound);
   }
   return specialized;
+}
+
+void Typechecker::validateVariance(const AstDeclaration& declaration,
+                                   const TypedDeclaration& typed) const {
+  if (typed.typeParameters.empty()) {
+    return;
+  }
+
+  const auto parameterFor = [&](const TypeInfo& type) -> const TypeParameterInfo* {
+    if (!type.typeParameter) {
+      return nullptr;
+    }
+    auto found =
+        std::find_if(typed.typeParameters.begin(), typed.typeParameters.end(),
+                     [&](const TypeParameterInfo& parameter) {
+                       return parameter.symbolName == type.typeParameterSymbolName;
+                     });
+    return found == typed.typeParameters.end() ? nullptr : &*found;
+  };
+  const auto parameterSpan = [&](const std::string& name) {
+    auto found = std::find_if(
+        declaration.typeParameters.begin(), declaration.typeParameters.end(),
+        [&](const AstTypeParameter& parameter) { return parameter.name == name; });
+    return found == declaration.typeParameters.end() ? declaration.span : found->span;
+  };
+
+  std::function<void(const TypeInfo&, int, const std::string&)> inspect;
+  inspect = [&](const TypeInfo& type, int position, const std::string& context) {
+    if (const TypeParameterInfo* parameter = parameterFor(type);
+        parameter != nullptr && parameter->variance != TypeVariance::Invariant) {
+      const bool invalid =
+          (parameter->variance == TypeVariance::Covariant && position != 1) ||
+          (parameter->variance == TypeVariance::Contravariant && position != -1);
+      if (invalid) {
+        const std::string declaredVariance =
+            parameter->variance == TypeVariance::Covariant ? "covariant"
+                                                           : "contravariant";
+        const std::string positionName = position == 0  ? "invariant"
+                                         : position > 0 ? "covariant"
+                                                        : "contravariant";
+        diagnostics_.error(parameterSpan(parameter->name),
+                           declaredVariance + " type parameter " + parameter->name +
+                               " occurs in " + positionName + " position in " +
+                               context);
+      }
+      return;
+    }
+
+    if (type.typeConstructorName.empty() || type.typeArguments.empty()) {
+      return;
+    }
+    auto constructor = globalSymbols_.find(type.typeConstructorName);
+    for (std::size_t i = 0; i < type.typeArguments.size(); ++i) {
+      TypeVariance argumentVariance = TypeVariance::Invariant;
+      if (constructor != globalSymbols_.end() &&
+          i < constructor->second.typeParameters.size()) {
+        argumentVariance = constructor->second.typeParameters[i].variance;
+      }
+      int argumentPosition = 0;
+      if (position != 0 && argumentVariance != TypeVariance::Invariant) {
+        argumentPosition =
+            argumentVariance == TypeVariance::Covariant ? position : -position;
+      }
+      inspect(type.typeArguments[i], argumentPosition, context);
+    }
+  };
+
+  for (const TypeInfo& parent : typed.parentTypeInfos) {
+    inspect(parent, 1, "parent type " + parent.name);
+  }
+
+  if (declaration.kind == AstDeclarationKind::Class) {
+    const std::size_t parameterCount =
+        std::min(typed.parameters.size(), typed.parameterTypes.size());
+    for (std::size_t i = 0; i < parameterCount; ++i) {
+      if (!isExplicitValParameter(typed.parameters[i]) &&
+          !isExplicitVarParameter(typed.parameters[i])) {
+        continue;
+      }
+      const std::string name = parameterName(typed.parameters[i]);
+      inspect(typed.parameterTypes[i],
+              isExplicitVarParameter(typed.parameters[i]) ? 0 : 1,
+              "constructor parameter " + name);
+    }
+  }
+
+  for (const TypedDeclaration& member : typed.members) {
+    if (member.kind == AstDeclarationKind::Def) {
+      inspect(member.inferredType, 1, "return type of method " + member.name);
+      for (std::size_t i = 0; i < member.parameterTypes.size(); ++i) {
+        const std::string name = i < member.parameters.size()
+                                     ? parameterName(member.parameters[i])
+                                     : std::to_string(i);
+        inspect(member.parameterTypes[i], -1,
+                "parameter " + name + " of method " + member.name);
+      }
+    } else if (member.kind == AstDeclarationKind::Val) {
+      inspect(member.inferredType, 1, "value " + member.name);
+    } else if (member.kind == AstDeclarationKind::Var) {
+      inspect(member.inferredType, 0, "variable " + member.name);
+    }
+  }
 }
 
 std::vector<TypeParameterInfo>
@@ -4902,6 +5156,7 @@ Typechecker::resolvedTypeParameters(const std::vector<AstTypeParameter>& paramet
     TypeParameterInfo info;
     info.name = parameter.name;
     info.symbolName = qualify(owner, parameter.name);
+    info.variance = parameter.variance;
     info.lowerBound =
         parameter.lowerBound.empty()
             ? TypeInfo{SimpleTypeKind::Nothing, "Nothing"}
@@ -5644,71 +5899,134 @@ TypeInfo Typechecker::commonType(const TypeInfo& lhs, const TypeInfo& rhs) const
 }
 
 bool Typechecker::isAssignable(const TypeInfo& expected, const TypeInfo& actual) const {
-  if (expected.kind == SimpleTypeKind::Unknown ||
-      actual.kind == SimpleTypeKind::Unknown) {
-    return true;
-  }
-  if (actual.kind == SimpleTypeKind::Nothing) {
-    return true;
-  }
-  if (actual.kind == SimpleTypeKind::Null && isReferenceType(expected)) {
-    return true;
-  }
-  if (!expected.typeConstructorName.empty() || !actual.typeConstructorName.empty()) {
-    if (expected.typeConstructorName != actual.typeConstructorName ||
-        expected.typeArguments.size() != actual.typeArguments.size()) {
-      return false;
-    }
-    for (std::size_t i = 0; i < expected.typeArguments.size(); ++i) {
-      if (expected.typeArguments[i].name != actual.typeArguments[i].name) {
-        return false;
-      }
-    }
-    return true;
-  }
-  if (expected.kind == SimpleTypeKind::Object) {
-    if (expected.name == "Object") {
-      return actual.kind == SimpleTypeKind::Object ||
-             actual.kind == SimpleTypeKind::String;
-    }
-    if (actual.kind != SimpleTypeKind::Object) {
-      return false;
-    }
-    if (expected.typeProjection && actual.pathDependent &&
-        !expected.dependentOwnerName.empty() &&
-        expected.dependentMemberName == actual.dependentMemberName &&
-        (actual.dependentOwnerName == expected.dependentOwnerName ||
-         isSubtypeOf(actual.dependentOwnerName, expected.dependentOwnerName))) {
+  std::unordered_set<std::string> visiting;
+  std::function<bool(const TypeInfo&, const TypeInfo&, bool)> conforms;
+  conforms = [&](const TypeInfo& target, const TypeInfo& value,
+                 bool allowNumericWidening) {
+    if (target.kind == SimpleTypeKind::Unknown ||
+        value.kind == SimpleTypeKind::Unknown) {
       return true;
     }
-    const std::string& actualName =
-        actual.runtimeName.empty() ? actual.name : actual.runtimeName;
-    return expected.name == actual.name || expected.name == actualName ||
-           isSubtypeOf(actualName, expected.name);
-  }
-  if (expected.kind == actual.kind) {
-    return true;
-  }
-  if (expected.kind == SimpleTypeKind::Double) {
-    return actual.kind == SimpleTypeKind::Float ||
-           actual.kind == SimpleTypeKind::Long || actual.kind == SimpleTypeKind::Int ||
-           actual.kind == SimpleTypeKind::Short || actual.kind == SimpleTypeKind::Byte;
-  }
-  if (expected.kind == SimpleTypeKind::Float) {
-    return actual.kind == SimpleTypeKind::Long || actual.kind == SimpleTypeKind::Int ||
-           actual.kind == SimpleTypeKind::Short || actual.kind == SimpleTypeKind::Byte;
-  }
-  if (expected.kind == SimpleTypeKind::Long) {
-    return actual.kind == SimpleTypeKind::Int || actual.kind == SimpleTypeKind::Short ||
-           actual.kind == SimpleTypeKind::Byte;
-  }
-  if (expected.kind == SimpleTypeKind::Int) {
-    return actual.kind == SimpleTypeKind::Short || actual.kind == SimpleTypeKind::Byte;
-  }
-  if (expected.kind == SimpleTypeKind::Short) {
-    return actual.kind == SimpleTypeKind::Byte;
-  }
-  return false;
+    if (value.kind == SimpleTypeKind::Nothing) {
+      return true;
+    }
+    if (value.kind == SimpleTypeKind::Null && isReferenceType(target)) {
+      return true;
+    }
+
+    const std::string targetConstructor = target.typeConstructorName;
+    const std::string valueConstructor = value.typeConstructorName;
+    if (!targetConstructor.empty()) {
+      const std::string visitKey = target.name + " <- " + value.name;
+      if (!visiting.insert(visitKey).second) {
+        return false;
+      }
+
+      if (targetConstructor == valueConstructor &&
+          target.typeArguments.size() == value.typeArguments.size()) {
+        auto constructor = globalSymbols_.find(targetConstructor);
+        if (constructor == globalSymbols_.end() ||
+            constructor->second.typeParameters.size() != target.typeArguments.size()) {
+          visiting.erase(visitKey);
+          return false;
+        }
+        for (std::size_t i = 0; i < target.typeArguments.size(); ++i) {
+          const TypeInfo& targetArgument = target.typeArguments[i];
+          const TypeInfo& valueArgument = value.typeArguments[i];
+          const TypeVariance variance = constructor->second.typeParameters[i].variance;
+          bool argumentConforms = false;
+          if (variance == TypeVariance::Covariant) {
+            argumentConforms = conforms(targetArgument, valueArgument, false);
+          } else if (variance == TypeVariance::Contravariant) {
+            argumentConforms = conforms(valueArgument, targetArgument, false);
+          } else {
+            argumentConforms = targetArgument.name == valueArgument.name;
+          }
+          if (!argumentConforms) {
+            visiting.erase(visitKey);
+            return false;
+          }
+        }
+        visiting.erase(visitKey);
+        return true;
+      }
+
+      const std::string valueName =
+          valueConstructor.empty()
+              ? (value.runtimeName.empty() ? value.name : value.runtimeName)
+              : valueConstructor;
+      auto valueSymbol = globalSymbols_.find(valueName);
+      if (valueSymbol != globalSymbols_.end()) {
+        for (const TypeInfo& parentPattern : valueSymbol->second.parentTypes) {
+          const TypeInfo parent = specializeTypeForReceiver(parentPattern, value);
+          if (conforms(target, parent, false)) {
+            visiting.erase(visitKey);
+            return true;
+          }
+        }
+      }
+      visiting.erase(visitKey);
+      return false;
+    }
+
+    if (!valueConstructor.empty()) {
+      TypeInfo erasedValue{SimpleTypeKind::Object, value.runtimeName.empty()
+                                                       ? valueConstructor
+                                                       : value.runtimeName};
+      if (!conforms(target, erasedValue, allowNumericWidening)) {
+        return false;
+      }
+      return true;
+    }
+
+    if (target.kind == SimpleTypeKind::Object) {
+      if (target.name == "Object") {
+        return value.kind == SimpleTypeKind::Object ||
+               value.kind == SimpleTypeKind::String;
+      }
+      if (value.kind != SimpleTypeKind::Object) {
+        return false;
+      }
+      if (target.typeProjection && value.pathDependent &&
+          !target.dependentOwnerName.empty() &&
+          target.dependentMemberName == value.dependentMemberName &&
+          (value.dependentOwnerName == target.dependentOwnerName ||
+           isSubtypeOf(value.dependentOwnerName, target.dependentOwnerName))) {
+        return true;
+      }
+      const std::string& valueName =
+          value.runtimeName.empty() ? value.name : value.runtimeName;
+      return target.name == value.name || target.name == valueName ||
+             isSubtypeOf(valueName, target.name);
+    }
+    if (target.kind == value.kind) {
+      return true;
+    }
+    if (!allowNumericWidening) {
+      return false;
+    }
+    if (target.kind == SimpleTypeKind::Double) {
+      return value.kind == SimpleTypeKind::Float ||
+             value.kind == SimpleTypeKind::Long || value.kind == SimpleTypeKind::Int ||
+             value.kind == SimpleTypeKind::Short || value.kind == SimpleTypeKind::Byte;
+    }
+    if (target.kind == SimpleTypeKind::Float) {
+      return value.kind == SimpleTypeKind::Long || value.kind == SimpleTypeKind::Int ||
+             value.kind == SimpleTypeKind::Short || value.kind == SimpleTypeKind::Byte;
+    }
+    if (target.kind == SimpleTypeKind::Long) {
+      return value.kind == SimpleTypeKind::Int || value.kind == SimpleTypeKind::Short ||
+             value.kind == SimpleTypeKind::Byte;
+    }
+    if (target.kind == SimpleTypeKind::Int) {
+      return value.kind == SimpleTypeKind::Short || value.kind == SimpleTypeKind::Byte;
+    }
+    if (target.kind == SimpleTypeKind::Short) {
+      return value.kind == SimpleTypeKind::Byte;
+    }
+    return false;
+  };
+  return conforms(expected, actual, true);
 }
 
 bool Typechecker::isSubtypeOf(const std::string& actual,

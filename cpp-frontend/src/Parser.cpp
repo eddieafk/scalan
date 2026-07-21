@@ -482,10 +482,10 @@ std::vector<AstTypeParameter> Parser::parseTypeParameterList() {
 
   consumeSeparators();
   while (!isAtEnd() && !check(TokenKind::RightBracket)) {
+    TypeVariance variance = TypeVariance::Invariant;
     if (check(TokenKind::Operator) && (peek().text == "+" || peek().text == "-")) {
-      diagnostics_.error(
-          peek().span,
-          "variance annotations are not supported in this generics milestone");
+      variance =
+          peek().text == "+" ? TypeVariance::Covariant : TypeVariance::Contravariant;
       advance();
     }
     if (!match(TokenKind::Identifier)) {
@@ -497,6 +497,7 @@ std::vector<AstTypeParameter> Parser::parseTypeParameterList() {
     AstTypeParameter parameter;
     parameter.name = previous().text;
     parameter.span = previous().span;
+    parameter.variance = variance;
     if (check(TokenKind::Operator) && peek().text == ">") {
       advance();
       if (consume(TokenKind::Colon, "expected ':' after '>' in type bound")) {

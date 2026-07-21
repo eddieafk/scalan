@@ -877,8 +877,25 @@ Current scaffold status:
   branches valid after optimization.
   `cpp-examples/ExpectedGenericInference.scala` and optimized native smoke
   coverage exercise these paths and their focused failure diagnostics.
-  Variance, generic inheritance, and contextual `using`/`given` search remain
-  explicit next milestones.
+- Class and trait type parameters now preserve Scala 3 declaration-site `+` and
+  `-` variance. Applied-type conformance follows each constructor parameter's
+  variance without admitting numeric widening inside type arguments, and
+  declaration checking composes positive, negative, and invariant positions
+  through nested generic types. Illegal method parameters, returns, mutable
+  fields, constructor fields, and parent applications receive focused
+  diagnostics.
+- Class and trait parents now retain their applied static types alongside erased
+  runtime parent names. Direct and transitive generic ancestors specialize
+  inherited fields, methods, constructor parameters, override contracts, and
+  compatibility checks while keeping `Object` bridge signatures in NIR. The
+  subtype relation follows those applied parent patterns, enabling covariant and
+  contravariant widening across concrete and still-generic children. Exact
+  devirtualization also adapts a statically widened trait receiver before calling
+  a concrete override. `cpp-examples/VarianceAndInheritance.scala` and optimized
+  native smoke coverage exercise direct, transitive, and forwarded generic
+  inheritance, inherited storage, both variance directions, illegal positions,
+  invariant rejection, and erased dispatch. Contextual Scala 3 `using`/`given`
+  search remains the next source-generics milestone.
 - Postfix type application now supports typed `value.isInstanceOf[Target]` and
   checked `value.asInstanceOf[Target]` for known classes and traits. NIR uses
   dedicated `is-instance-of[T]` and `as-instance-of[T]` values; verification

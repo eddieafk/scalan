@@ -22,6 +22,8 @@ enum class AstDeclarationKind {
 
 enum class AstClassBodyItemKind { Declaration, Expression };
 
+enum class TypeVariance { Invariant, Covariant, Contravariant };
+
 enum class AstExpressionKind {
   Empty,
   Identifier,
@@ -79,6 +81,7 @@ struct AstTypeParameter {
   std::string lowerBound;
   std::string upperBound;
   support::SourceSpan span;
+  TypeVariance variance = TypeVariance::Invariant;
 };
 
 struct AstDeclaration {

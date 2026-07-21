@@ -65,6 +65,11 @@ build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
 build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
   --output /tmp/expected-generic-inference \
   cpp-examples/ExpectedGenericInference.scala
+
+# Compile declaration-site variance and applied generic inheritance.
+build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
+  --output /tmp/variance-inheritance \
+  cpp-examples/VarianceAndInheritance.scala
 ```
 
 Optimization levels select distinct Interflow pipelines: `O1` performs one
