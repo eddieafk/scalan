@@ -4842,12 +4842,13 @@ class Child extends Base
 class Box[A](val value: A)
 class Bounded[A <: Base](val value: A)
 class LowerBounded[A >: Child]
+class Empty[A]
 trait Parent[A]
 class Covariant[+A]
 
 object InvalidGenerics {
   def identity[A](value: A): A = value
-  val primitive = new Box[Int](1)
+  val unsupported = new Empty[Nothing]()
   val arity = new Box[Base, Child](new Base)
   val bounded = new Bounded[String]("no")
   val lowerBounded = new LowerBounded[String]()
@@ -4901,7 +4902,8 @@ class GenericChild extends Parent[Base]
                    "variance annotations are not supported in this generics "
                    "milestone") &&
           contains(invalid.diagnosticsText,
-                   "type argument Int for Box must be a reference type") &&
+                   "type argument Nothing for Empty must be a supported primitive "
+                   "or reference type") &&
           contains(invalid.diagnosticsText,
                    "type application to Box has 2 arguments but expected 1") &&
           contains(invalid.diagnosticsText,
@@ -4931,6 +4933,98 @@ class GenericChild extends Parent[Base]
       "execution diverged (status=" +
           std::to_string(status) + ", output='" + text + "', diagnostics='" +
           invalid.diagnosticsText + "')");
+}
+
+int smokePrimitiveGenericsNativeRuntime() {
+  constexpr const char* source = R"(package demo.primitivegenerics
+
+class Cell[A](var value: A) {
+  def get(): A = value
+
+  def set(next: A): Unit = {
+    value = next
+  }
+
+  def choose[B](next: B): B = next
+}
+
+object Main {
+  def identity[A](value: A): A = value
+
+  def main = {
+    val ints = new Cell[Int](40)
+    ints.value = identity[Int](41)
+    ints.set(ints.choose[Int](42))
+
+    println(ints.get())
+    println(new Cell[Long](7L).get())
+    println(if (new Cell[Boolean](true).get()) 1 else 0)
+    println(new Cell[Char]('Z').get())
+    println(new Cell[Byte](1.toByte).get().toInt)
+    println(new Cell[Short](2.toShort).get().toInt)
+    println(if (new Cell[Float](1.5f).get() > 1.0f) 1 else 0)
+    println(if (new Cell[Double](2.5).get() > 2.0) 1 else 0)
+    println(if (new Cell[Symbol]('ready).get() == 'ready) 1 else 0)
+    println(new Cell[Unit](println("unit")).get().toString)
+  }
+}
+)";
+
+  const std::filesystem::path temporary = std::filesystem::temp_directory_path();
+  const std::filesystem::path binary =
+      temporary / "cpp-scalanative-smoke-primitive-generics";
+  const std::filesystem::path output =
+      temporary / "cpp-scalanative-smoke-primitive-generics.out";
+  std::error_code ignored;
+  std::filesystem::remove(binary, ignored);
+  std::filesystem::remove(output, ignored);
+
+  scalanative::tools::build::BuildDriver driver;
+  scalanative::tools::build::BuildOptions options;
+  options.action = scalanative::tools::build::BuildAction::BuildBinary;
+  options.optimize = true;
+  options.outputPath = binary;
+  scalanative::support::DiagnosticEngine diagnostics;
+  const scalanative::tools::build::BuildResult result =
+      driver.buildSource("PrimitiveGenerics.scala", source, options, diagnostics);
+  if (!result.ok) {
+    if (contains(result.diagnosticsText, "clang toolchain not found")) {
+      return 0;
+    }
+    return fail("primitive-generics native build failed: " + result.diagnosticsText);
+  }
+
+  const std::string command = binary.string() + " > " + output.string();
+  const int status = std::system(command.c_str());
+  const std::string text = readTextFile(output);
+  std::filesystem::remove(binary, ignored);
+  std::filesystem::remove(output, ignored);
+
+  const std::vector<std::string_view> boxedTypes = {
+      "Unit", "Boolean", "Byte",   "Short", "Int",
+      "Long", "Float",   "Double", "Char",  "Symbol"};
+  const bool hasEveryBoxingPair =
+      std::all_of(boxedTypes.begin(), boxedTypes.end(), [&](std::string_view type) {
+        return contains(result.nirText, "box[" + std::string(type) + "]") &&
+               contains(result.nirText, "unbox[" + std::string(type) + "]");
+      });
+
+  return expect(
+      status == 0 && text == "42\n7\n1\nZ\n1\n2\n1\n1\n1\nunit\n()\n" &&
+          hasEveryBoxingPair &&
+          contains(result.nirText,
+                   "field @demo.primitivegenerics.Cell.value : Object") &&
+          contains(result.nirText, "define @demo.primitivegenerics.Cell.get : "
+                                   "(demo.primitivegenerics.Cell)Object") &&
+          contains(result.nirText, "define @demo.primitivegenerics.Cell.set : "
+                                   "(demo.primitivegenerics.Cell,Object)Unit") &&
+          contains(result.nirText,
+                   "assign %ints.value = box[Int](unbox[Int](call %identity") &&
+          !contains(result.nirText, "demo.primitivegenerics.Cell ["),
+      "primitive generic boxing, unboxing, mutation, erasure, optimization, or "
+      "native execution diverged (status=" +
+          std::to_string(status) + ", output='" + text + "', diagnostics='" +
+          result.diagnosticsText + "')");
 }
 
 int smokeByteAndShortNativeRuntime() {
@@ -11159,6 +11253,9 @@ int main() {
     return code;
   }
   if (int code = smokeReferenceGenericsNativeRuntime()) {
+    return code;
+  }
+  if (int code = smokePrimitiveGenericsNativeRuntime()) {
     return code;
   }
   if (int code = smokeByteAndShortNativeRuntime()) {

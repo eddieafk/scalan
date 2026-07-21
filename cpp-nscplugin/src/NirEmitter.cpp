@@ -2103,9 +2103,11 @@ nir::Value valueFor(const frontend::AstExpression& expression,
           const std::string staticType =
               selectedType == nullptr ? erasedType : runtimeTypeName(*selectedType);
           if (erasedType != staticType && staticType != "Object") {
-            if (selectedType != nullptr &&
-                selectedType->kind == frontend::SimpleTypeKind::String) {
-              return nir::unboxValue("String", std::move(selected), expression.span);
+            const std::string boxedType = selectedType == nullptr
+                                              ? std::string{}
+                                              : boxedObjectTypeName(selectedType->kind);
+            if (!boxedType.empty()) {
+              return nir::unboxValue(boxedType, std::move(selected), expression.span);
             }
             return nir::asInstanceOfValue(staticType, std::move(selected),
                                           expression.span);
@@ -2655,9 +2657,11 @@ nir::Value valueFor(const frontend::AstExpression& expression,
       const std::string staticRuntime =
           staticResult == nullptr ? erasedResult : runtimeTypeName(*staticResult);
       if (erasedResult != staticRuntime && staticRuntime != "Object") {
-        if (staticResult != nullptr &&
-            staticResult->kind == frontend::SimpleTypeKind::String) {
-          return nir::unboxValue("String", std::move(call), expression.span);
+        const std::string boxedType = staticResult == nullptr
+                                          ? std::string{}
+                                          : boxedObjectTypeName(staticResult->kind);
+        if (!boxedType.empty()) {
+          return nir::unboxValue(boxedType, std::move(call), expression.span);
         }
         return nir::asInstanceOfValue(staticRuntime, std::move(call), expression.span);
       }
@@ -2736,11 +2740,28 @@ nir::Value valueFor(const frontend::AstExpression& expression,
       }
     }
     nir::Value assignedValue = expressionValueFor(expression.children[1], context);
+    std::string targetRuntimeType;
     if (const frontend::TypeInfo* targetType =
             annotatedTypeFor(expression.children[0], context)) {
-      assignedValue =
-          boxForObjectStorage(std::move(assignedValue), runtimeTypeName(*targetType),
-                              expression.children[1], context);
+      targetRuntimeType = runtimeTypeName(*targetType);
+    }
+    if (expression.children[0].kind == AstExpressionKind::Select) {
+      const frontend::TypedDeclaration* selectedDeclaration =
+          declarationForExpression(expression.children[0], context);
+      const std::string selectedReceiver =
+          memberReceiverType(expression.children[0], context);
+      const frontend::TypeInfo* erasedSelectedType =
+          selectedDeclaration == nullptr
+              ? findConstructorParameterType(context, selectedReceiver,
+                                             expression.children[0].text)
+              : &selectedDeclaration->inferredType;
+      if (erasedSelectedType != nullptr) {
+        targetRuntimeType = runtimeTypeName(*erasedSelectedType);
+      }
+    }
+    if (!targetRuntimeType.empty()) {
+      assignedValue = boxForObjectStorage(std::move(assignedValue), targetRuntimeType,
+                                          expression.children[1], context);
     }
     if (expression.children[0].kind == AstExpressionKind::Identifier &&
         !context.localNames.contains(expression.children[0].text)) {
@@ -2762,7 +2783,7 @@ nir::Value valueFor(const frontend::AstExpression& expression,
             std::move(arguments), expression.span);
       }
     }
-    return nir::assignValue(expressionValueFor(expression.children[0], context),
+    return nir::assignValue(expressionValueFor(expression.children[0], context, true),
                             std::move(assignedValue), expression.span);
   }
   case AstExpressionKind::If:

@@ -5010,11 +5010,12 @@ SymbolInfo Typechecker::specializeTypeApplication(
   for (std::size_t i = 0; i < typeArguments.size(); ++i) {
     const TypeInfo argument = typeFromDeclaredName(typeArguments[i], &scope,
                                                    reportDiagnostics ? &span : nullptr);
-    if (argument.kind != SimpleTypeKind::Unknown && !isReferenceType(argument)) {
+    if (argument.kind != SimpleTypeKind::Unknown && !isReferenceType(argument) &&
+        !isBoxablePrimitiveType(argument.kind)) {
       if (reportDiagnostics) {
         diagnostics_.error(span,
                            "type argument " + argument.name + " for " + symbol.name +
-                               " must be a reference type in this generics milestone");
+                               " must be a supported primitive or reference type");
       }
     }
     const TypeInfo upper =

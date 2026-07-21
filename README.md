@@ -52,6 +52,10 @@ build/debug/cpp-driver/cpp-scalanative --build-binary --opt-level 3 \
 # Compile the explicit reference-generics example.
 build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
   --output /tmp/reference-generics cpp-examples/ReferenceGenerics.scala
+
+# Compile the boxed primitive-generics example.
+build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
+  --output /tmp/primitive-generics cpp-examples/PrimitiveGenerics.scala
 ```
 
 Optimization levels select distinct Interflow pipelines: `O1` performs one

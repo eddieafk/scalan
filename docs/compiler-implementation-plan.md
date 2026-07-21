@@ -840,9 +840,20 @@ Current scaffold status:
   `cpp-examples/ReferenceGenerics.scala` and optimized native smoke coverage
   exercise one- and two-parameter classes, a generic trait declaration, nested
   generic construction, generic member methods, invariant conformance, and
-  erased NIR. Primitive type arguments, omitted-argument inference, variance,
-  generic inheritance, and contextual `using`/`given` search remain explicit
-  next milestones and currently receive focused diagnostics.
+  erased NIR.
+- Explicit generic applications now also accept every scalar supported by the
+  boxed runtime (`Unit`, `Boolean`, `Byte`, `Short`, `Int`, `Long`, `Float`,
+  `Double`, `Char`, and `Symbol`). Generic fields and parameters retain their
+  erased `Object` ABI: constructors and calls box concrete scalar arguments,
+  while specialized field reads and method results unbox before arithmetic,
+  comparisons, mutation, or other typed use. Mutable generic constructor fields
+  preserve raw storage targets so assignments re-box instead of attempting to
+  write through an unboxed selection. `cpp-examples/PrimitiveGenerics.scala`
+  and optimized native smoke coverage exercise every supported scalar, generic
+  class and method round trips, direct mutation, and erased NIR signatures.
+  Primitive upper/lower bounds, omitted-argument inference, variance, generic
+  inheritance, and contextual `using`/`given` search remain explicit next
+  milestones.
 - Postfix type application now supports typed `value.isInstanceOf[Target]` and
   checked `value.asInstanceOf[Target]` for known classes and traits. NIR uses
   dedicated `is-instance-of[T]` and `as-instance-of[T]` values; verification
