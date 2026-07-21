@@ -863,9 +863,22 @@ Current scaffold status:
   and checked casts as explicit applications.
   `cpp-examples/GenericInference.scala` and optimized native smoke coverage
   exercise primitive, reference, bounded, nested, multiple-parameter,
-  receiver-member, and generic-inside-generic inference. Expected-result-type
-  inference, variance, generic inheritance, and contextual `using`/`given`
-  search remain explicit next milestones.
+  receiver-member, and generic-inside-generic inference.
+- Expected result types on fields, locals, and methods now complete omitted
+  method and constructor type arguments that value arguments cannot determine.
+  Expected types flow through final block expressions, explicit returns,
+  conditional branches, and try/catch results. Value-argument constraints are
+  collected first and remain authoritative; the expected result fills only
+  missing parameters, after which ordinary conformance and bound checks report
+  any conflict. This supports no-argument generic methods, phantom constructors,
+  partially inferred multi-parameter applications, and contextual inference
+  inside generic method bodies. Interflow also preserves the target reference
+  type when folding a cast of `null`, keeping contextually typed conditional
+  branches valid after optimization.
+  `cpp-examples/ExpectedGenericInference.scala` and optimized native smoke
+  coverage exercise these paths and their focused failure diagnostics.
+  Variance, generic inheritance, and contextual `using`/`given` search remain
+  explicit next milestones.
 - Postfix type application now supports typed `value.isInstanceOf[Target]` and
   checked `value.asInstanceOf[Target]` for known classes and traits. NIR uses
   dedicated `is-instance-of[T]` and `as-instance-of[T]` values; verification

@@ -127,9 +127,11 @@ private:
   void applyImport(const AstDeclaration& declaration, Scope& scope);
   void mergeScope(Scope& destination, const Scope& source) const;
   [[nodiscard]] TypeInfo inferExpressionType(const AstExpression& expression,
-                                             Scope& scope);
+                                             Scope& scope,
+                                             const TypeInfo* expectedType = nullptr);
   [[nodiscard]] TypeInfo inferExpressionTypeImpl(const AstExpression& expression,
-                                                 Scope& scope);
+                                                 Scope& scope,
+                                                 const TypeInfo* expectedType);
   [[nodiscard]] TypeInfo inferNewType(const AstExpression& expression, Scope& scope);
   [[nodiscard]] TypeInfo inferSelectType(const AstExpression& expression, Scope& scope);
   [[nodiscard]] std::string inferArrayElementTypeName(const AstExpression& expression,
@@ -196,7 +198,8 @@ private:
       const support::SourceSpan& span, bool reportDiagnostics = true) const;
   [[nodiscard]] SymbolInfo inferTypeApplication(
       const SymbolInfo& symbol, const std::vector<TypeInfo>& argumentTypes,
-      const support::SourceSpan& span, bool reportDiagnostics = true) const;
+      const support::SourceSpan& span, const TypeInfo* expectedResultType = nullptr,
+      bool reportDiagnostics = true) const;
   [[nodiscard]] bool isAbstractTypeMember(const TypeInfo& type) const;
   [[nodiscard]] bool runtimeSignatureUsesAbstractType(const SymbolInfo& member) const;
   [[nodiscard]] TypeInfo

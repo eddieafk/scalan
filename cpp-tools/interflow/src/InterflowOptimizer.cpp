@@ -819,8 +819,7 @@ bool isIntegerLiteralOfType(const nir::Value& value, long long expected,
 }
 
 bool isNullLiteral(const nir::Value& value) {
-  return value.kind == nir::ValueKind::Literal && value.type == "Null" &&
-         value.text == "null";
+  return value.kind == nir::ValueKind::Literal && value.text == "null";
 }
 
 bool isTypedNullReferenceValue(const nir::Value& value, std::string_view declaredType) {
@@ -4396,7 +4395,7 @@ bool foldValue(nir::Value& value,
   if (value.kind == nir::ValueKind::AsInstanceOf && value.operands.size() == 1) {
     const nir::Value& operand = value.operands.front();
     if (isNullLiteral(operand)) {
-      replaceValue(value, operand);
+      value = nir::literalValue("null", value.text, value.span);
       return true;
     }
     if (isTopObjectTarget(value.text) &&

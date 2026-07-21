@@ -60,6 +60,11 @@ build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
 # Compile the argument-driven generic-inference example.
 build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
   --output /tmp/generic-inference cpp-examples/GenericInference.scala
+
+# Compile the expected-result generic-inference example.
+build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
+  --output /tmp/expected-generic-inference \
+  cpp-examples/ExpectedGenericInference.scala
 ```
 
 Optimization levels select distinct Interflow pipelines: `O1` performs one

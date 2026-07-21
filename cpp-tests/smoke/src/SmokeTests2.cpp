@@ -5153,6 +5153,138 @@ object InvalidInference {
           invalid.diagnosticsText + "')");
 }
 
+int smokeExpectedGenericInferenceNativeRuntime() {
+  constexpr const char* source = R"(package demo.expectedinference
+
+class Label(val code: Int)
+class Token[A]
+class Duo[A, B](val value: A)
+
+object Main {
+  def empty[A](): A = null
+  def convert[A, B](value: A): B = null
+  def token[A](): Token[A] = new Token()
+  def delegated(): Label = {
+    empty()
+  }
+  def conditional(flag: Boolean): Label =
+    if (flag) new Label(1) else empty()
+  def returned(): Label = return empty()
+  def bounded[A <: Label](): A = null
+
+  val field: Label = empty()
+
+  def main = {
+    val label: Label = empty()
+    val partial: Label = convert(42)
+    val marker: Token[Label] = new Token()
+    val nested: Token[Label] = token()
+    val duo: Duo[Int, Label] = new Duo(7)
+    val boundedLabel: Label = bounded()
+
+    println(if (field == null) 1 else 0)
+    println(if (label == null) 1 else 0)
+    println(if (partial == null) 1 else 0)
+    println(if (delegated() == null) 1 else 0)
+    println(if (conditional(false) == null) 1 else 0)
+    println(if (returned() == null) 1 else 0)
+    println(if (marker == null) 0 else 1)
+    println(if (nested == null) 0 else 1)
+    println(if (boundedLabel == null) 1 else 0)
+    println(duo.value)
+  }
+}
+)";
+  constexpr const char* invalidSource = R"(class Label
+class Other
+class Token[A]
+class Duo[A, B](val value: A)
+
+object InvalidExpectedInference {
+  def empty[A](): A = null
+  def identity[A](value: A): A = value
+  def bounded[A <: Label](): A = null
+
+  val noExpected = empty()
+  val argumentWins: String = identity(1)
+  val wrongShape: Label = new Token()
+  val constructorArgumentWins: Duo[String, Label] = new Duo(1)
+  val badBound: Other = bounded()
+}
+)";
+
+  const std::filesystem::path temporary = std::filesystem::temp_directory_path();
+  const std::filesystem::path binary =
+      temporary / "cpp-scalanative-smoke-expected-generic-inference";
+  const std::filesystem::path output =
+      temporary / "cpp-scalanative-smoke-expected-generic-inference.out";
+  std::error_code ignored;
+  std::filesystem::remove(binary, ignored);
+  std::filesystem::remove(output, ignored);
+
+  scalanative::tools::build::BuildDriver driver;
+  scalanative::tools::build::BuildOptions options;
+  options.action = scalanative::tools::build::BuildAction::BuildBinary;
+  options.optimize = true;
+  options.outputPath = binary;
+  scalanative::support::DiagnosticEngine diagnostics;
+  const scalanative::tools::build::BuildResult result = driver.buildSource(
+      "ExpectedGenericInference.scala", source, options, diagnostics);
+
+  scalanative::support::DiagnosticEngine invalidDiagnostics;
+  const scalanative::tools::build::BuildResult invalid = driver.buildSource(
+      "InvalidExpectedGenericInference.scala", invalidSource, {}, invalidDiagnostics);
+
+  if (!result.ok) {
+    if (contains(result.diagnosticsText, "clang toolchain not found")) {
+      return 0;
+    }
+    return fail("expected generic-inference native build failed: " +
+                result.diagnosticsText);
+  }
+
+  const std::string command = binary.string() + " > " + output.string();
+  const int status = std::system(command.c_str());
+  const std::string text = readTextFile(output);
+  std::filesystem::remove(binary, ignored);
+  std::filesystem::remove(output, ignored);
+
+  return expect(
+      status == 0 && text == "1\n1\n1\n1\n1\n1\n1\n1\n1\n7\n" && !invalid.ok &&
+          contains(invalid.diagnosticsText,
+                   "cannot infer type argument A for empty from value arguments; "
+                   "use explicit type arguments") &&
+          contains(invalid.diagnosticsText,
+                   "initializer type Int does not conform to declared type String") &&
+          contains(invalid.diagnosticsText,
+                   "cannot infer type argument A for Token from value arguments or "
+                   "expected result type; use explicit type arguments") &&
+          contains(invalid.diagnosticsText,
+                   "initializer type Duo [ Int, Label ] does not conform to "
+                   "declared type Duo [ String, Label ]") &&
+          contains(invalid.diagnosticsText,
+                   "type argument Other for A does not conform to upper bound "
+                   "Label") &&
+          contains(result.nirText, "field @demo.expectedinference.Main.field$field : "
+                                   "demo.expectedinference.Label") &&
+          contains(result.nirText,
+                   "as-instance-of[demo.expectedinference.Label](call %convert("
+                   "box[Int](42)))") &&
+          contains(result.nirText,
+                   "if(%flag, new demo.expectedinference.Label(1), "
+                   "as-instance-of[demo.expectedinference.Label](call %empty()))") &&
+          contains(result.nirText, "define @demo.expectedinference.Main.token : "
+                                   "()demo.expectedinference.Token") &&
+          contains(result.nirText, "new demo.expectedinference.Token") &&
+          contains(result.nirText, "new demo.expectedinference.Duo(box[Int](7))") &&
+          !contains(result.nirText, "demo.expectedinference.Token [") &&
+          !contains(result.nirText, "demo.expectedinference.Duo ["),
+      "expected generic inference, constraint precedence, diagnostics, null-cast "
+      "optimization, erasure, or native execution diverged (status=" +
+          std::to_string(status) + ", output='" + text + "', diagnostics='" +
+          invalid.diagnosticsText + "')");
+}
+
 int smokeByteAndShortNativeRuntime() {
   constexpr const char* source = R"(package demo.narrow
 
@@ -11385,6 +11517,9 @@ int main() {
     return code;
   }
   if (int code = smokeGenericInferenceNativeRuntime()) {
+    return code;
+  }
+  if (int code = smokeExpectedGenericInferenceNativeRuntime()) {
     return code;
   }
   if (int code = smokeByteAndShortNativeRuntime()) {

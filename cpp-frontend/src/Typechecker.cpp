@@ -994,7 +994,9 @@ TypedDeclaration Typechecker::typecheckDeclaration(const AstDeclaration& declara
       if (declaration.kind == AstDeclarationKind::Def) {
         addParametersToScope(declaration, expressionScope);
       }
-      inferred = inferExpressionType(declaration.initializer, expressionScope);
+      inferred = inferExpressionType(
+          declaration.initializer, expressionScope,
+          declared.kind == SimpleTypeKind::Unknown ? nullptr : &declared);
     } else {
       inferred = TypeInfo{SimpleTypeKind::Unit, "Unit"};
     }
@@ -1909,9 +1911,9 @@ void Typechecker::mergeScope(Scope& destination, const Scope& source) const {
   }
 }
 
-TypeInfo Typechecker::inferExpressionType(const AstExpression& expression,
-                                          Scope& scope) {
-  TypeInfo type = inferExpressionTypeImpl(expression, scope);
+TypeInfo Typechecker::inferExpressionType(const AstExpression& expression, Scope& scope,
+                                          const TypeInfo* expectedType) {
+  TypeInfo type = inferExpressionTypeImpl(expression, scope, expectedType);
   if (expression.span.isValid()) {
     auto sameSpan = [&](const TypedExpressionInfo& info) {
       return info.span.source == expression.span.source &&
@@ -1962,7 +1964,8 @@ bool Typechecker::arrayElementConforms(const TypeInfo& expected,
 }
 
 TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
-                                              Scope& scope) {
+                                              Scope& scope,
+                                              const TypeInfo* expectedType) {
   switch (expression.kind) {
   case AstExpressionKind::Empty:
     return TypeInfo{SimpleTypeKind::Unknown, "Unknown"};
@@ -2881,8 +2884,8 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
               *classSymbol, typeArgumentsFor(callee), scope, callee.span, false);
           classSymbol = &specializedClass;
         } else if (!classSymbol->typeParameters.empty()) {
-          specializedClass =
-              inferTypeApplication(*classSymbol, argumentTypes, expression.span);
+          specializedClass = inferTypeApplication(*classSymbol, argumentTypes,
+                                                  expression.span, expectedType);
           classSymbol = &specializedClass;
           constructed = specializedClass.type;
         } else {
@@ -2970,8 +2973,8 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
     if (calleeSymbol != nullptr && callee.kind != AstExpressionKind::TypeApply &&
         !calleeSymbol->typeParameters.empty()) {
       const SymbolInfo inferenceTarget = *calleeSymbol;
-      specializedCallee =
-          inferTypeApplication(inferenceTarget, argumentTypes, expression.span);
+      specializedCallee = inferTypeApplication(inferenceTarget, argumentTypes,
+                                               expression.span, expectedType);
       calleeSymbol = &specializedCallee;
       calleeType = specializedCallee.type;
     } else {
@@ -3012,16 +3015,20 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
     {
       Scope blockScope = scope;
       auto localDeclarationType = [&](const AstExpression& local) {
+        TypeInfo declared{SimpleTypeKind::Unknown, "Unknown"};
+        if (!local.declaredType.empty()) {
+          declared = typeFromDeclaredName(local.declaredType, &blockScope, &local.span);
+        }
         TypeInfo initializerType =
             local.children.empty()
                 ? TypeInfo{SimpleTypeKind::Unit, "Unit"}
-                : inferExpressionType(local.children.front(), blockScope);
+                : inferExpressionType(
+                      local.children.front(), blockScope,
+                      declared.kind == SimpleTypeKind::Unknown ? nullptr : &declared);
         if (local.declaredType.empty()) {
           return initializerType;
         }
 
-        TypeInfo declared =
-            typeFromDeclaredName(local.declaredType, &blockScope, &local.span);
         const bool targetsAny = isAnyArrayElementType(declared);
         const bool initializerConforms =
             targetsAny ? isSupportedAnyArrayValueType(initializerType)
@@ -3059,13 +3066,13 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
         blockScope[last.text] = std::move(symbol);
         return TypeInfo{SimpleTypeKind::Unit, "Unit"};
       }
-      return inferExpressionType(last, blockScope);
+      return inferExpressionType(last, blockScope, expectedType);
     }
   case AstExpressionKind::Return:
     if (expression.children.empty()) {
       return TypeInfo{SimpleTypeKind::Unit, "Unit"};
     }
-    return inferExpressionType(expression.children.front(), scope);
+    return inferExpressionType(expression.children.front(), scope, expectedType);
   case AstExpressionKind::Throw: {
     if (expression.children.size() != 1) {
       return TypeInfo{SimpleTypeKind::Nothing, "Nothing"};
@@ -3088,7 +3095,8 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
     if (expression.children.size() < 2) {
       return TypeInfo{SimpleTypeKind::Unknown, "Unknown"};
     }
-    TypeInfo result = inferExpressionType(expression.children.front(), scope);
+    TypeInfo result =
+        inferExpressionType(expression.children.front(), scope, expectedType);
     bool sawCatchAll = false;
     std::vector<std::pair<std::string, std::string>> earlierCatchTypes;
     for (std::size_t index = 1; index < expression.children.size(); ++index) {
@@ -3165,13 +3173,14 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
       binding.symbolName = child.text;
       binding.type = exceptionType;
       handlerScope[child.text] = std::move(binding);
-      result = commonType(result, inferExpressionType(child, handlerScope));
+      result =
+          commonType(result, inferExpressionType(child, handlerScope, expectedType));
     }
     return result;
   }
   case AstExpressionKind::Catch:
     return expression.children.size() == 1
-               ? inferExpressionType(expression.children.front(), scope)
+               ? inferExpressionType(expression.children.front(), scope, expectedType)
                : TypeInfo{SimpleTypeKind::Unknown, "Unknown"};
   case AstExpressionKind::Finally:
     if (expression.children.size() == 1) {
@@ -3191,11 +3200,11 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
       }
     }
     if (expression.children.size() == 2) {
-      (void)inferExpressionType(expression.children[1], scope);
+      (void)inferExpressionType(expression.children[1], scope, expectedType);
       return TypeInfo{SimpleTypeKind::Unit, "Unit"};
     }
-    return commonType(inferExpressionType(expression.children[1], scope),
-                      inferExpressionType(expression.children[2], scope));
+    return commonType(inferExpressionType(expression.children[1], scope, expectedType),
+                      inferExpressionType(expression.children[2], scope, expectedType));
   case AstExpressionKind::While:
     if (expression.children.empty()) {
       return TypeInfo{SimpleTypeKind::Unit, "Unit"};
@@ -5107,6 +5116,7 @@ SymbolInfo Typechecker::specializeResolvedTypeApplication(
 SymbolInfo Typechecker::inferTypeApplication(const SymbolInfo& symbol,
                                              const std::vector<TypeInfo>& argumentTypes,
                                              const support::SourceSpan& span,
+                                             const TypeInfo* expectedResultType,
                                              bool reportDiagnostics) const {
   std::unordered_map<std::string, TypeInfo> substitutions;
   std::unordered_set<std::string> conflictingParameters;
@@ -5138,13 +5148,17 @@ SymbolInfo Typechecker::inferTypeApplication(const SymbolInfo& symbol,
     return commonType(current, candidate);
   };
 
-  std::function<void(const TypeInfo&, const TypeInfo&)> collectInference;
-  collectInference = [&](const TypeInfo& parameterType, const TypeInfo& argumentType) {
+  std::function<void(const TypeInfo&, const TypeInfo&, bool)> collectInference;
+  collectInference = [&](const TypeInfo& parameterType, const TypeInfo& argumentType,
+                         bool onlyIfMissing) {
     if (argumentType.kind == SimpleTypeKind::Unknown) {
       return;
     }
     if (isApplicationTypeParameter(parameterType)) {
       auto inferred = substitutions.find(parameterType.typeParameterSymbolName);
+      if (onlyIfMissing && inferred != substitutions.end()) {
+        return;
+      }
       if (inferred == substitutions.end()) {
         substitutions.emplace(parameterType.typeParameterSymbolName, argumentType);
         return;
@@ -5169,7 +5183,8 @@ SymbolInfo Typechecker::inferTypeApplication(const SymbolInfo& symbol,
         parameterType.typeConstructorName == argumentType.typeConstructorName &&
         parameterType.typeArguments.size() == argumentType.typeArguments.size()) {
       for (std::size_t i = 0; i < parameterType.typeArguments.size(); ++i) {
-        collectInference(parameterType.typeArguments[i], argumentType.typeArguments[i]);
+        collectInference(parameterType.typeArguments[i], argumentType.typeArguments[i],
+                         onlyIfMissing);
       }
     }
   };
@@ -5177,7 +5192,23 @@ SymbolInfo Typechecker::inferTypeApplication(const SymbolInfo& symbol,
   const std::size_t checkedArguments =
       std::min(symbol.parameterTypes.size(), argumentTypes.size());
   for (std::size_t i = 0; i < checkedArguments; ++i) {
-    collectInference(symbol.parameterTypes[i], argumentTypes[i]);
+    collectInference(symbol.parameterTypes[i], argumentTypes[i], false);
+  }
+
+  if (expectedResultType != nullptr &&
+      expectedResultType->kind != SimpleTypeKind::Unknown) {
+    if (symbol.kind == AstDeclarationKind::Class &&
+        expectedResultType->typeConstructorName == symbol.symbolName &&
+        expectedResultType->typeArguments.size() == symbol.typeParameters.size()) {
+      for (std::size_t i = 0; i < symbol.typeParameters.size(); ++i) {
+        TypeInfo parameterType{SimpleTypeKind::Object, symbol.typeParameters[i].name};
+        parameterType.typeParameter = true;
+        parameterType.typeParameterSymbolName = symbol.typeParameters[i].symbolName;
+        collectInference(parameterType, expectedResultType->typeArguments[i], true);
+      }
+    } else if (symbol.kind == AstDeclarationKind::Def) {
+      collectInference(symbol.type, *expectedResultType, true);
+    }
   }
 
   std::vector<TypeInfo> inferredArguments;
@@ -5191,8 +5222,11 @@ SymbolInfo Typechecker::inferTypeApplication(const SymbolInfo& symbol,
       if (reportDiagnostics) {
         diagnostics_.error(span, "cannot infer type argument " + parameter.name +
                                      " for " + symbol.name +
-                                     " from value arguments; use explicit type "
-                                     "arguments");
+                                     (expectedResultType == nullptr
+                                          ? " from value arguments"
+                                          : " from value arguments or expected "
+                                            "result type") +
+                                     "; use explicit type arguments");
       }
       continue;
     }
