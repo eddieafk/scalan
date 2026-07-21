@@ -2035,8 +2035,30 @@ void Typechecker::collectDerivedGivens(const std::vector<AstDeclaration>& declar
         continue;
       }
 
+      std::vector<TypeInfo> derivingTypeArguments;
+      derivingTypeArguments.reserve(target->second.typeParameters.size());
+      for (const TypeParameterInfo& parameter : target->second.typeParameters) {
+        TypeInfo parameterType{SimpleTypeKind::Object, parameter.name};
+        parameterType.runtimeName = parameter.upperBound.runtimeName.empty()
+                                        ? parameter.upperBound.name
+                                        : parameter.upperBound.runtimeName;
+        if (parameterType.runtimeName.empty() ||
+            parameterType.runtimeName == "Unknown") {
+          parameterType.runtimeName = "Object";
+        }
+        parameterType.typeParameterSymbolName = parameter.symbolName;
+        parameterType.typeParameter = true;
+        derivingTypeArguments.push_back(std::move(parameterType));
+      }
+      const TypeInfo derivingType =
+          derivingTypeArguments.empty()
+              ? target->second.type
+              : specializeResolvedTypeApplication(target->second,
+                                                  derivingTypeArguments,
+                                                  declaration.span, false)
+                    .type;
       const TypeInfo expected =
-          specializeResolvedTypeApplication(*typeclass, {target->second.type},
+          specializeResolvedTypeApplication(*typeclass, {derivingType},
                                             declaration.span, false)
               .type;
       auto companionMembers = memberScopes_.find(typeclass->symbolName + '$');
@@ -2076,6 +2098,29 @@ void Typechecker::collectDerivedGivens(const std::vector<AstDeclaration>& declar
                                ".derived may only have using parameters");
         continue;
       }
+
+      std::vector<std::string> prerequisiteParameters;
+      std::vector<TypeInfo> prerequisiteTypes;
+      prerequisiteParameters.reserve(derivingTypeArguments.size());
+      prerequisiteTypes.reserve(derivingTypeArguments.size());
+      for (const TypeInfo& argument : derivingTypeArguments) {
+        TypeInfo prerequisite = specializeResolvedTypeApplication(
+                                    *typeclass, {argument}, declaration.span, false)
+                                    .type;
+        prerequisiteParameters.push_back("derived$" + argument.name + ": " +
+                                         prerequisite.name);
+        prerequisiteTypes.push_back(std::move(prerequisite));
+      }
+      candidate.parameters.insert(candidate.parameters.begin(),
+                                  prerequisiteParameters.begin(),
+                                  prerequisiteParameters.end());
+      candidate.parameterTypes.insert(candidate.parameterTypes.begin(),
+                                      prerequisiteTypes.begin(),
+                                      prerequisiteTypes.end());
+      candidate.contextualParameters.insert(candidate.contextualParameters.begin(),
+                                            derivingTypeArguments.size(), true);
+      candidate.contextPrerequisiteCount = derivingTypeArguments.size();
+      candidate.typeParameters = target->second.typeParameters;
 
       candidate.name = "derived$" + typeclass->name;
       candidate.isGiven = true;
@@ -6545,6 +6590,7 @@ std::vector<TypedContextArgument> Typechecker::resolveContextArguments(
       argument.type = selected.type;
       argument.requiresAccessor = selected.isModuleMember;
       argument.isCall = selected.kind == AstDeclarationKind::Def;
+      argument.prerequisiteArgumentCount = selected.contextPrerequisiteCount;
       if (!argument.isCall) {
         return argument;
       }

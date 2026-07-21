@@ -953,24 +953,30 @@ Current scaffold status:
   retain the focused nested cause. Native coverage exercises fallback from all
   three recursive failure classes and diagnostic replay for all-failed missing,
   ambiguous, and divergent searches.
-- The first Scala 3 derivation slice parses and preserves `derives` clauses on
-  monomorphic classes, traits, and objects, including clauses following an
-  `extends` chain. Each requested unary type class is resolved through normal
+- The Scala 3 derivation slice parses and preserves `derives` clauses on
+  classes, traits, and objects, including clauses following an `extends` chain.
+  Each requested unary type class is resolved through normal
   type scope, its companion `derived` method is specialized from the expected
   `TypeClass[DerivingType]` result, and the synthesized evidence participates in
-  associated-type contextual search. A `derived` method may itself accept only
-  `using` parameters; those dependencies use the existing recursive evidence
-  materializer and lower as nested erased calls. Focused diagnostics cover
-  duplicate clauses, unsupported generic deriving types, missing or non-unary
-  type classes, missing companion methods, incompatible results, and ordinary
-  parameters. The contextual-abstractions example and optimized native smoke
-  coverage exercise class, trait, and object derivation, `extends ... derives`,
-  recursive companion evidence, NIR lowering, and native execution. Generic
-  derives clauses, `Mirror`-based structural derivation, and stable synthesized
-  instance storage remain later derivation milestones. Anonymous or local
-  parameterized givens, contextual-only inference for ordinary methods, nested
-  companion declarations, and Scala 2 `implicit` syntax also remain later
-  milestones.
+  associated-type contextual search. For a generic deriving type with ordinary
+  type parameters, the synthesized candidate requires one
+  `TypeClass[Parameter]` prerequisite per parameter, specializes those
+  prerequisites from the requested applied deriving type, and recursively
+  validates nested generic derivation. These generated prerequisites remain in
+  the typed evidence tree but are not passed to the companion method, preserving
+  its declared runtime ABI. A `derived` method may itself accept only `using`
+  parameters; those call arguments use the same recursive evidence materializer
+  and lower as nested erased calls. Focused diagnostics cover duplicate or empty
+  clauses, missing or non-unary type classes, missing companion methods,
+  incompatible results, ordinary parameters, and missing generic evidence. The
+  contextual-abstractions example and optimized native smoke coverage exercise
+  class, trait, and object derivation, `extends ... derives`, one- and
+  two-parameter generic derivation, recursive generic derivation, companion
+  dependencies, NIR lowering, and native execution. Higher-kinded derivation,
+  `Mirror`-based structural derivation, and stable synthesized instance storage
+  remain later derivation milestones. Anonymous or local parameterized givens,
+  contextual-only inference for ordinary methods, nested companion declarations,
+  and Scala 2 `implicit` syntax also remain later milestones.
 - Postfix type application now supports typed `value.isInstanceOf[Target]` and
   checked `value.asInstanceOf[Target]` for known classes and traits. NIR uses
   dedicated `is-instance-of[T]` and `as-instance-of[T]` values; verification

@@ -2677,9 +2677,14 @@ nir::Value valueFor(const frontend::AstExpression& expression,
         }
         if (contextual.isCall) {
           std::vector<nir::Value> nestedArguments;
-          nestedArguments.reserve(contextual.arguments.size());
-          for (const frontend::TypedContextArgument& nested : contextual.arguments) {
-            nestedArguments.push_back(materializeContextArgument(nested));
+          const std::size_t firstCallArgument =
+              std::min(contextual.prerequisiteArgumentCount,
+                       contextual.arguments.size());
+          nestedArguments.reserve(contextual.arguments.size() - firstCallArgument);
+          for (std::size_t index = firstCallArgument;
+               index < contextual.arguments.size(); ++index) {
+            nestedArguments.push_back(
+                materializeContextArgument(contextual.arguments[index]));
           }
           return nir::callValue(nir::localValue(contextual.symbolName, expression.span),
                                 std::move(nestedArguments), expression.span);

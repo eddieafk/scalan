@@ -101,6 +101,7 @@ struct TypedContextArgument {
   TypeInfo type;
   bool requiresAccessor = false;
   bool isCall = false;
+  std::size_t prerequisiteArgumentCount = 0;
   std::vector<TypedContextArgument> arguments;
 };
 
@@ -135,6 +136,7 @@ struct SymbolInfo {
   bool isAnonymousGiven = false;
   bool isContextParameter = false;
   bool isModuleMember = false;
+  std::size_t contextPrerequisiteCount = 0;
   std::size_t contextualNestingDepth = 0;
 };
 

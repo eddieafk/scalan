@@ -108,11 +108,6 @@ bool AstValidator::validateDeclaration(const AstDeclaration& declaration,
                       "objects");
     ok = false;
   }
-  if (!declaration.derivedTypes.empty() && !declaration.typeParameters.empty()) {
-    diagnostics.error(declaration.span,
-                      "generic derives clauses are not supported yet");
-    ok = false;
-  }
   std::unordered_set<std::string> derivedTypeNames;
   for (const std::string& derivedType : declaration.derivedTypes) {
     if (!derivedTypeNames.insert(derivedType).second) {

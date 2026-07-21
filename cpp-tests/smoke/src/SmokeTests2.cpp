@@ -5286,6 +5286,8 @@ class AutomaticallyShown extends DerivationBase derives Show
 trait AutomaticallyShownTrait derives Show
 class AutomaticallyShownTraitValue extends AutomaticallyShownTrait
 object AutomaticallyShownObject derives Show
+class AutomaticallyShownBox[A](val value: A) derives Show
+class AutomaticallyShownPair[A, B](val first: A, val second: B) derives Show
 
 object Bird {
   given Show[Bird] = new BirdShow("argument-companion:")
@@ -5348,6 +5350,17 @@ object Main {
 
   def automaticallyDerivedObject: String =
     render(AutomaticallyShownObject)
+
+  def automaticallyDerivedGeneric(value: AutomaticallyShownBox[Cat]): String =
+    render(value)
+
+  def automaticallyDerivedNestedGeneric(
+      value: AutomaticallyShownBox[AutomaticallyShownBox[Cat]]): String =
+    render(value)
+
+  def automaticallyDerivedGenericPair(
+      value: AutomaticallyShownPair[Cat, Fox]): String =
+    render(value)
 
   def format()(using formatter: Formatter): String =
     formatter.format()
@@ -5421,6 +5434,14 @@ object Main {
     println(automaticallyDerivedClass)
     println(automaticallyDerivedTrait(new AutomaticallyShownTraitValue))
     println(automaticallyDerivedObject)
+    println(automaticallyDerivedGeneric(
+      new AutomaticallyShownBox[Cat](new Cat("generic"))))
+    println(automaticallyDerivedNestedGeneric(
+      new AutomaticallyShownBox[AutomaticallyShownBox[Cat]](
+        new AutomaticallyShownBox[Cat](new Cat("nested-generic")))))
+    println(automaticallyDerivedGenericPair(
+      new AutomaticallyShownPair[Cat, Fox](
+        new Cat("generic-pair"), new Fox("generic-pair"))))
     println(generallyPreferred)
     println(nestedPreference)
     println(ownerPreferred)
@@ -5563,8 +5584,8 @@ object Show {
   def derived[A]: Show[A] = null
 }
 
-class Generic[A] derives Show
 class Duplicate derives Show, Show
+class MissingTarget derives {}
 )";
   constexpr const char* invalidDerivesSemanticsSource = R"(trait MissingDerived[A]
 object MissingDerived
@@ -5583,6 +5604,18 @@ object WrongResult {
 class BadResult derives WrongResult
 
 class UnknownTypeclass derives NotFound
+
+trait Supported[A]
+object Supported {
+  def derived[A]: Supported[A] = null
+}
+class MissingEvidence
+class GenericDerived[A] derives Supported
+
+object MissingGenericDerivationEvidence {
+  def choose[A](value: A)(using evidence: Supported[A]): Supported[A] = evidence
+  val missing = choose(new GenericDerived[MissingEvidence])
+}
 )";
   constexpr const char* divergingSource = R"(package demo.divergingcontext
 
@@ -5660,6 +5693,7 @@ object Main {
                   "typeclass-companion:fox\n"
                   "argument-companion:bird\ncompanion:direct\n"
                   "companion:imported\nbox\nbox\nderived\nderived\nderived\n"
+                  "derived\nderived\nderived\n"
                   "general\nnested\n"
                   "owner-high\ndirect\nspecific-factory\nmissing-fallback\n"
                   "ambiguous-fallback\ndivergent-fallback\ninner-local:dog\n" &&
@@ -5707,7 +5741,7 @@ object Main {
                    "local parameterized givens are not supported yet") &&
           !invalidDerivesSyntax.ok &&
           contains(invalidDerivesSyntax.diagnosticsText,
-                   "generic derives clauses are not supported yet") &&
+                   "expected type class name after 'derives'") &&
           contains(invalidDerivesSyntax.diagnosticsText,
                    "duplicate derived type class: Show") &&
           !invalidDerivesSemantics.ok &&
@@ -5721,6 +5755,9 @@ object Main {
                    "BadResult ]") &&
           contains(invalidDerivesSemantics.diagnosticsText,
                    "unresolved derived type class: NotFound") &&
+          contains(invalidDerivesSemantics.diagnosticsText,
+                   "no given value found for context parameter derived$A of type "
+                   "Supported [ MissingEvidence ] required by derived$Supported") &&
           !diverging.ok &&
           contains(diverging.diagnosticsText,
                    "diverging given expansion for type demo.divergingcontext.Show "
@@ -5747,8 +5784,10 @@ object Main {
           contains(result.nirText, "call %demo.contextual.Show$.boxShow(call "
                                    "%demo.contextual.Show$.boxShow(call "
                                    "%demo.contextual.Show$.catShow()))") &&
-          contains(result.nirText, "call %demo.contextual.Show$.derived(call "
-                                   "%demo.contextual.DerivationSeed$.seed())") &&
+          countOccurrences(
+              result.nirText,
+              "call %demo.contextual.Show$.derived(call "
+              "%demo.contextual.DerivationSeed$.seed())") == 6 &&
           contains(result.nirText,
                    "ret String call %format(call "
                    "%demo.contextual.Main.generalFormatter())") &&
