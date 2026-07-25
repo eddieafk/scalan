@@ -47,6 +47,17 @@ std::string productMirrorImplementationName(std::string_view targetSymbolName) {
   return name;
 }
 
+std::string sumMirrorImplementationName(std::string_view targetSymbolName) {
+  std::string name = "$mirror$Sum$";
+  name.reserve(name.size() + targetSymbolName.size());
+  for (char ch : targetSymbolName) {
+    const bool alphaNumeric = (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') ||
+                              (ch >= '0' && ch <= '9');
+    name.push_back(alphaNumeric || ch == '_' ? ch : '$');
+  }
+  return name;
+}
+
 std::string stringSingletonType(std::string_view value) {
   std::string literal{"\""};
   literal.reserve(value.size() + 2);
@@ -923,14 +934,42 @@ standardDerivationDeclarations(const AstModule& module) {
   emptyTuple.parentTypes = {"scala.Tuple"};
 
   std::vector<std::size_t> tupleArities;
+  const auto addTupleArity = [&](std::size_t arity) {
+    if (arity != 0 && std::find(tupleArities.begin(), tupleArities.end(), arity) ==
+                          tupleArities.end()) {
+      tupleArities.push_back(arity);
+    }
+  };
   for (const AstDeclaration& declaration : module.declarations) {
     if (declaration.kind != AstDeclarationKind::Class ||
-        declaration.derivedTypes.empty() || declaration.parameters.empty() ||
-        std::find(tupleArities.begin(), tupleArities.end(),
-                  declaration.parameters.size()) != tupleArities.end()) {
+        declaration.derivedTypes.empty()) {
       continue;
     }
-    tupleArities.push_back(declaration.parameters.size());
+    addTupleArity(declaration.parameters.size());
+  }
+  for (const AstDeclaration& declaration : module.declarations) {
+    if (declaration.kind != AstDeclarationKind::Trait || !declaration.isSealed ||
+        declaration.derivedTypes.empty()) {
+      continue;
+    }
+    const std::string qualifiedName = module.packageName.empty()
+                                          ? declaration.name
+                                          : module.packageName + "." + declaration.name;
+    std::size_t childCount = 0;
+    for (const AstDeclaration& candidate : module.declarations) {
+      if (candidate.kind != AstDeclarationKind::Class) {
+        continue;
+      }
+      const bool directChild = std::any_of(
+          candidate.parentTypes.begin(), candidate.parentTypes.end(),
+          [&](const std::string& parentType) {
+            const std::string constructor =
+                parseAppliedTypeSyntax(parentType).constructor;
+            return constructor == declaration.name || constructor == qualifiedName;
+          });
+      childCount += directChild ? 1 : 0;
+    }
+    addTupleArity(childCount);
   }
   std::sort(tupleArities.begin(), tupleArities.end());
 
@@ -1008,6 +1047,31 @@ standardDerivationDeclarations(const AstModule& module) {
                     std::move(mirroredElemTypes), std::move(mirroredLabel),
                     std::move(mirroredElemLabels)};
 
+  AstDeclaration mirrorOf;
+  mirrorOf.kind = AstDeclarationKind::Trait;
+  mirrorOf.name = "Of";
+  mirrorOf.span = noSpan;
+  mirrorOf.parentTypes = {"scala.deriving.Mirror"};
+  AstTypeParameter ofType;
+  ofType.name = "T";
+  ofType.span = noSpan;
+  mirrorOf.typeParameters.push_back(std::move(ofType));
+
+  AstDeclaration ofMirroredType;
+  ofMirroredType.kind = AstDeclarationKind::Type;
+  ofMirroredType.name = "MirroredType";
+  ofMirroredType.span = noSpan;
+  ofMirroredType.declaredType = "T";
+  ofMirroredType.hasInitializer = true;
+
+  AstDeclaration ofMirroredMonoType;
+  ofMirroredMonoType.kind = AstDeclarationKind::Type;
+  ofMirroredMonoType.name = "MirroredMonoType";
+  ofMirroredMonoType.span = noSpan;
+  ofMirroredMonoType.declaredType = "T";
+  ofMirroredMonoType.hasInitializer = true;
+  mirrorOf.members = {std::move(ofMirroredType), std::move(ofMirroredMonoType)};
+
   AstDeclaration mirrorProduct;
   mirrorProduct.kind = AstDeclarationKind::Trait;
   mirrorProduct.name = "Product";
@@ -1018,7 +1082,8 @@ standardDerivationDeclarations(const AstModule& module) {
   productOf.kind = AstDeclarationKind::Trait;
   productOf.name = "ProductOf";
   productOf.span = noSpan;
-  productOf.parentTypes = {"scala.deriving.Mirror.Product"};
+  productOf.parentTypes = {"scala.deriving.Mirror.Product",
+                           "scala.deriving.Mirror.Of[T]"};
   AstTypeParameter mirroredType;
   mirroredType.name = "T";
   mirroredType.span = noSpan;
@@ -1029,6 +1094,7 @@ standardDerivationDeclarations(const AstModule& module) {
   productOfMirroredType.name = "MirroredType";
   productOfMirroredType.span = noSpan;
   productOfMirroredType.declaredType = "T";
+  productOfMirroredType.isOverride = true;
   productOfMirroredType.hasInitializer = true;
 
   AstDeclaration productOfMirroredMonoType;
@@ -1036,6 +1102,7 @@ standardDerivationDeclarations(const AstModule& module) {
   productOfMirroredMonoType.name = "MirroredMonoType";
   productOfMirroredMonoType.span = noSpan;
   productOfMirroredMonoType.declaredType = "T";
+  productOfMirroredMonoType.isOverride = true;
   productOfMirroredMonoType.hasInitializer = true;
 
   AstDeclaration fromProduct;
@@ -1048,6 +1115,48 @@ standardDerivationDeclarations(const AstModule& module) {
   productOf.members = {std::move(productOfMirroredType),
                        std::move(productOfMirroredMonoType), std::move(fromProduct)};
 
+  AstDeclaration mirrorSum;
+  mirrorSum.kind = AstDeclarationKind::Trait;
+  mirrorSum.name = "Sum";
+  mirrorSum.span = noSpan;
+  mirrorSum.parentTypes = {"scala.deriving.Mirror"};
+
+  AstDeclaration sumOf;
+  sumOf.kind = AstDeclarationKind::Trait;
+  sumOf.name = "SumOf";
+  sumOf.span = noSpan;
+  sumOf.parentTypes = {"scala.deriving.Mirror.Sum", "scala.deriving.Mirror.Of[T]"};
+  AstTypeParameter sumType;
+  sumType.name = "T";
+  sumType.span = noSpan;
+  sumOf.typeParameters.push_back(std::move(sumType));
+
+  AstDeclaration sumOfMirroredType;
+  sumOfMirroredType.kind = AstDeclarationKind::Type;
+  sumOfMirroredType.name = "MirroredType";
+  sumOfMirroredType.span = noSpan;
+  sumOfMirroredType.declaredType = "T";
+  sumOfMirroredType.isOverride = true;
+  sumOfMirroredType.hasInitializer = true;
+
+  AstDeclaration sumOfMirroredMonoType;
+  sumOfMirroredMonoType.kind = AstDeclarationKind::Type;
+  sumOfMirroredMonoType.name = "MirroredMonoType";
+  sumOfMirroredMonoType.span = noSpan;
+  sumOfMirroredMonoType.declaredType = "T";
+  sumOfMirroredMonoType.isOverride = true;
+  sumOfMirroredMonoType.hasInitializer = true;
+
+  AstDeclaration ordinal;
+  ordinal.kind = AstDeclarationKind::Def;
+  ordinal.name = "ordinal";
+  ordinal.span = noSpan;
+  ordinal.parameters = {"value: T"};
+  ordinal.contextualParameters = {false};
+  ordinal.declaredType = "Int";
+  sumOf.members = {std::move(sumOfMirroredType), std::move(sumOfMirroredMonoType),
+                   std::move(ordinal)};
+
   std::vector<std::pair<std::string, AstDeclaration>> declarations;
   declarations.emplace_back("scala", std::move(tuple));
   declarations.emplace_back("scala", std::move(emptyTuple));
@@ -1056,8 +1165,11 @@ standardDerivationDeclarations(const AstModule& module) {
   }
   declarations.emplace_back("scala", std::move(product));
   declarations.emplace_back("scala.deriving", std::move(mirror));
+  declarations.emplace_back("scala.deriving.Mirror", std::move(mirrorOf));
   declarations.emplace_back("scala.deriving.Mirror", std::move(mirrorProduct));
   declarations.emplace_back("scala.deriving.Mirror", std::move(productOf));
+  declarations.emplace_back("scala.deriving.Mirror", std::move(mirrorSum));
+  declarations.emplace_back("scala.deriving.Mirror", std::move(sumOf));
   return declarations;
 }
 
@@ -1073,7 +1185,7 @@ TypedModule Typechecker::typecheck(const AstModule& module) {
   companionTypeNames_.clear();
   derivedGivens_.clear();
   derivedInstances_.clear();
-  productMirrorDeclarations_.clear();
+  mirrorDeclarations_.clear();
   expressionTypes_.clear();
   contextApplications_.clear();
   directZoneReceiverEscapes_.clear();
@@ -1125,6 +1237,7 @@ TypedModule Typechecker::typecheck(const AstModule& module) {
     applyImport(declaration, scope);
   }
   collectProductMirrors(module.declarations, module.packageName, scope);
+  collectSumMirrors(module.declarations, module.packageName, scope);
   collectDerivedGivens(module.declarations, module.packageName, scope);
   for (const auto& [owner, declaration] : derivationDeclarations) {
     typed.declarations.push_back(typecheckDeclaration(declaration, owner, scope));
@@ -1133,7 +1246,7 @@ TypedModule Typechecker::typecheck(const AstModule& module) {
     typed.declarations.push_back(
         typecheckDeclaration(declaration, module.packageName, scope));
   }
-  for (const AstDeclaration& declaration : productMirrorDeclarations_) {
+  for (const AstDeclaration& declaration : mirrorDeclarations_) {
     typed.declarations.push_back(
         typecheckDeclaration(declaration, module.packageName, scope));
   }
@@ -2222,12 +2335,14 @@ void Typechecker::collectDeclaration(const AstDeclaration& declaration,
 
 void Typechecker::collectProductMirrors(const std::vector<AstDeclaration>& declarations,
                                         const std::string& owner, Scope& scope) {
-  const auto productOfSymbol =
-      globalSymbols_.find("scala.deriving.Mirror.ProductOf");
-  if (productOfSymbol == globalSymbols_.end()) {
+  const auto productOfSymbol = globalSymbols_.find("scala.deriving.Mirror.ProductOf");
+  const auto mirrorOfSymbol = globalSymbols_.find("scala.deriving.Mirror.Of");
+  if (productOfSymbol == globalSymbols_.end() ||
+      mirrorOfSymbol == globalSymbols_.end()) {
     return;
   }
   const SymbolInfo productOf = productOfSymbol->second;
+  const SymbolInfo mirrorOf = mirrorOfSymbol->second;
 
   for (const AstDeclaration& declaration : declarations) {
     if (declaration.kind != AstDeclarationKind::Class ||
@@ -2262,9 +2377,10 @@ void Typechecker::collectProductMirrors(const std::vector<AstDeclaration>& decla
             const bool contextual =
                 parameterIndex < derived->second.contextualParameters.size() &&
                 derived->second.contextualParameters[parameterIndex];
-            if (contextual &&
-                derived->second.parameterTypes[parameterIndex].typeConstructorName ==
-                    productOf.symbolName) {
+            const std::string& constructor =
+                derived->second.parameterTypes[parameterIndex].typeConstructorName;
+            if (contextual && (constructor == productOf.symbolName ||
+                               constructor == mirrorOf.symbolName)) {
               return true;
             }
           }
@@ -2304,8 +2420,7 @@ void Typechecker::collectProductMirrors(const std::vector<AstDeclaration>& decla
                       .type
                 : target.type;
 
-    std::size_t syntheticSpanOffset =
-        1000000 + productMirrorDeclarations_.size() * 1000;
+    std::size_t syntheticSpanOffset = 1000000 + mirrorDeclarations_.size() * 1000;
     const auto nextSpan = [&]() {
       support::SourceSpan span = declaration.span;
       span.length += syntheticSpanOffset++;
@@ -2376,8 +2491,8 @@ void Typechecker::collectProductMirrors(const std::vector<AstDeclaration>& decla
     construction.span = nextSpan();
     construction.children.push_back(std::move(constructorTarget));
 
-    for (std::size_t parameterIndex = 0;
-         parameterIndex < target.parameterTypes.size(); ++parameterIndex) {
+    for (std::size_t parameterIndex = 0; parameterIndex < target.parameterTypes.size();
+         ++parameterIndex) {
       AstExpression productReference;
       productReference.kind = AstExpressionKind::Identifier;
       productReference.text = "product";
@@ -2418,16 +2533,15 @@ void Typechecker::collectProductMirrors(const std::vector<AstDeclaration>& decla
     fromProduct.initializer = std::move(construction);
     implementation.members.push_back(std::move(fromProduct));
 
-    productMirrorDeclarations_.push_back(std::move(implementation));
-    AstDeclaration& storedImplementation = productMirrorDeclarations_.back();
+    mirrorDeclarations_.push_back(std::move(implementation));
+    AstDeclaration& storedImplementation = mirrorDeclarations_.back();
     collectDeclaration(storedImplementation, owner, scope);
     const std::string implementationName =
         declarationSymbolName(storedImplementation, owner);
 
-    const TypeInfo mirrorType =
-        specializeResolvedTypeApplication(productOf, {derivingType},
-                                          declaration.span, false)
-            .type;
+    const TypeInfo mirrorType = specializeResolvedTypeApplication(
+                                    productOf, {derivingType}, declaration.span, false)
+                                    .type;
     const std::string instanceOwner = targetName + '$';
     const std::string instanceName = "$mirror$Product$type";
 
@@ -2470,6 +2584,263 @@ void Typechecker::collectProductMirrors(const std::vector<AstDeclaration>& decla
     candidate.hasImplementation = true;
     candidate.isGiven = true;
     candidate.isModuleMember = !generic;
+    derivedGivens_[targetName].push_back(std::move(candidate));
+  }
+}
+
+void Typechecker::collectSumMirrors(const std::vector<AstDeclaration>& declarations,
+                                    const std::string& owner, Scope& scope) {
+  const auto sumOfSymbol = globalSymbols_.find("scala.deriving.Mirror.SumOf");
+  const auto mirrorOfSymbol = globalSymbols_.find("scala.deriving.Mirror.Of");
+  if (sumOfSymbol == globalSymbols_.end() || mirrorOfSymbol == globalSymbols_.end()) {
+    return;
+  }
+  const SymbolInfo sumOf = sumOfSymbol->second;
+  const SymbolInfo mirrorOf = mirrorOfSymbol->second;
+
+  for (const AstDeclaration& declaration : declarations) {
+    if (declaration.kind != AstDeclarationKind::Trait ||
+        declaration.derivedTypes.empty()) {
+      continue;
+    }
+
+    Scope declarationScope = scope;
+    const std::string targetName = declarationSymbolName(declaration, owner);
+    if (auto members = memberScopes_.find(targetName); members != memberScopes_.end()) {
+      mergeScope(declarationScope, members->second);
+    }
+    const bool requiresSumMirror = std::any_of(
+        declaration.derivedTypes.begin(), declaration.derivedTypes.end(),
+        [&](const std::string& derivedTypeName) {
+          const SymbolInfo* typeclass =
+              typeSymbolForDeclaredName(derivedTypeName, &declarationScope);
+          if (typeclass == nullptr) {
+            return false;
+          }
+          auto companionMembers = memberScopes_.find(typeclass->symbolName + '$');
+          if (companionMembers == memberScopes_.end()) {
+            return false;
+          }
+          auto derived = companionMembers->second.find("derived");
+          if (derived == companionMembers->second.end()) {
+            return false;
+          }
+          for (std::size_t parameterIndex = 0;
+               parameterIndex < derived->second.parameterTypes.size();
+               ++parameterIndex) {
+            const bool contextual =
+                parameterIndex < derived->second.contextualParameters.size() &&
+                derived->second.contextualParameters[parameterIndex];
+            const std::string& constructor =
+                derived->second.parameterTypes[parameterIndex].typeConstructorName;
+            if (contextual && (constructor == sumOf.symbolName ||
+                               constructor == mirrorOf.symbolName)) {
+              return true;
+            }
+          }
+          return false;
+        });
+    if (!requiresSumMirror) {
+      continue;
+    }
+
+    auto targetSymbol = globalSymbols_.find(targetName);
+    if (targetSymbol == globalSymbols_.end()) {
+      continue;
+    }
+    if (!declaration.isSealed) {
+      diagnostics_.error(declaration.span,
+                         "sum mirror derivation requires a sealed trait: " +
+                             targetName);
+      continue;
+    }
+    if (!targetSymbol->second.typeParameters.empty()) {
+      diagnostics_.error(
+          declaration.span,
+          "sum mirror derivation does not yet support generic sealed traits: " +
+              targetName);
+      continue;
+    }
+    const SymbolInfo target = targetSymbol->second;
+
+    struct SumChild {
+      const AstDeclaration* declaration = nullptr;
+      SymbolInfo symbol;
+    };
+    std::vector<SumChild> children;
+    std::unordered_set<std::string> childSymbols;
+    bool unsupportedChild = false;
+    for (const AstDeclaration& candidateDeclaration : declarations) {
+      if (!isClassLikeDeclaration(candidateDeclaration.kind)) {
+        continue;
+      }
+      const std::string candidateName =
+          declarationSymbolName(candidateDeclaration, owner);
+      auto candidate = globalSymbols_.find(candidateName);
+      if (candidate == globalSymbols_.end() ||
+          std::find(candidate->second.parentSymbolNames.begin(),
+                    candidate->second.parentSymbolNames.end(),
+                    targetName) == candidate->second.parentSymbolNames.end()) {
+        continue;
+      }
+      childSymbols.insert(candidateName);
+      if (candidateDeclaration.kind != AstDeclarationKind::Class ||
+          !candidateDeclaration.typeParameters.empty()) {
+        diagnostics_.error(
+            candidateDeclaration.span,
+            "sum mirror child must be a top-level, non-generic concrete class: " +
+                candidateName);
+        unsupportedChild = true;
+        continue;
+      }
+      children.push_back(SumChild{&candidateDeclaration, candidate->second});
+    }
+    for (const auto& [symbolName, symbol] : globalSymbols_) {
+      if (std::find(symbol.parentSymbolNames.begin(), symbol.parentSymbolNames.end(),
+                    targetName) == symbol.parentSymbolNames.end() ||
+          childSymbols.contains(symbolName)) {
+        continue;
+      }
+      diagnostics_.error(
+          declaration.span,
+          "sum mirror child must be a top-level, non-generic concrete class: " +
+              symbolName);
+      unsupportedChild = true;
+    }
+    if (unsupportedChild) {
+      continue;
+    }
+    if (children.empty()) {
+      diagnostics_.error(declaration.span,
+                         "sum mirror derivation requires at least one direct child: " +
+                             targetName);
+      continue;
+    }
+
+    std::size_t syntheticSpanOffset = 1000000 + mirrorDeclarations_.size() * 1000;
+    const auto nextSpan = [&]() {
+      support::SourceSpan span = declaration.span;
+      span.length += syntheticSpanOffset++;
+      return span;
+    };
+
+    AstDeclaration implementation;
+    implementation.kind = AstDeclarationKind::Class;
+    implementation.name = sumMirrorImplementationName(targetName);
+    implementation.span = nextSpan();
+    implementation.parentTypes = {"scala.deriving.Mirror.SumOf[" + target.type.name +
+                                  "]"};
+
+    const auto addTypeAlias = [&](std::string name, std::string aliasTarget) {
+      AstDeclaration alias;
+      alias.kind = AstDeclarationKind::Type;
+      alias.name = std::move(name);
+      alias.span = nextSpan();
+      alias.declaredType = std::move(aliasTarget);
+      alias.isOverride = true;
+      alias.hasInitializer = true;
+      implementation.members.push_back(std::move(alias));
+    };
+
+    std::vector<std::string> elementTypes;
+    std::vector<std::string> elementLabels;
+    elementTypes.reserve(children.size());
+    elementLabels.reserve(children.size());
+    for (const SumChild& child : children) {
+      elementTypes.push_back(child.symbol.type.name);
+      elementLabels.push_back(stringSingletonType(child.declaration->name));
+    }
+    addTypeAlias("MirroredElemTypes", tupleTypeName(elementTypes));
+    addTypeAlias("MirroredLabel", stringSingletonType(declaration.name));
+    addTypeAlias("MirroredElemLabels", tupleTypeName(elementLabels));
+
+    AstExpression fallback;
+    fallback.kind = AstExpressionKind::IntegerLiteral;
+    fallback.text = std::to_string(children.size() - 1);
+    fallback.span = nextSpan();
+    for (std::size_t reverseIndex = children.size() - 1; reverseIndex > 0;
+         --reverseIndex) {
+      const std::size_t childIndex = reverseIndex - 1;
+
+      AstExpression value;
+      value.kind = AstExpressionKind::Identifier;
+      value.text = "value";
+      value.span = nextSpan();
+
+      AstExpression typeTestMember;
+      typeTestMember.kind = AstExpressionKind::Select;
+      typeTestMember.text = support::StdNames::IsInstanceOf;
+      typeTestMember.span = nextSpan();
+      typeTestMember.children.push_back(std::move(value));
+
+      AstExpression typeTest;
+      typeTest.kind = AstExpressionKind::TypeApply;
+      typeTest.declaredType = children[childIndex].symbol.type.name;
+      typeTest.typeArguments = {children[childIndex].symbol.type.name};
+      typeTest.span = nextSpan();
+      typeTest.children.push_back(std::move(typeTestMember));
+
+      AstExpression ordinalValue;
+      ordinalValue.kind = AstExpressionKind::IntegerLiteral;
+      ordinalValue.text = std::to_string(childIndex);
+      ordinalValue.span = nextSpan();
+
+      AstExpression branch;
+      branch.kind = AstExpressionKind::If;
+      branch.span = nextSpan();
+      branch.children.push_back(std::move(typeTest));
+      branch.children.push_back(std::move(ordinalValue));
+      branch.children.push_back(std::move(fallback));
+      fallback = std::move(branch);
+    }
+
+    AstDeclaration ordinal;
+    ordinal.kind = AstDeclarationKind::Def;
+    ordinal.name = "ordinal";
+    ordinal.span = nextSpan();
+    ordinal.parameters = {"value: " + target.type.name};
+    ordinal.contextualParameters = {false};
+    ordinal.declaredType = "Int";
+    ordinal.isOverride = true;
+    ordinal.hasInitializer = true;
+    ordinal.initializer = std::move(fallback);
+    implementation.members.push_back(std::move(ordinal));
+
+    mirrorDeclarations_.push_back(std::move(implementation));
+    AstDeclaration& storedImplementation = mirrorDeclarations_.back();
+    collectDeclaration(storedImplementation, owner, scope);
+    const std::string implementationName =
+        declarationSymbolName(storedImplementation, owner);
+
+    const TypeInfo mirrorType =
+        specializeResolvedTypeApplication(sumOf, {target.type}, declaration.span, false)
+            .type;
+    const std::string instanceOwner = targetName + '$';
+    const std::string instanceName = "$mirror$Sum$type";
+
+    TypedDeclaration member;
+    member.kind = AstDeclarationKind::Val;
+    member.name = instanceName;
+    member.symbolName = qualify(instanceOwner, instanceName);
+    member.span = declaration.span;
+    member.declaredType = mirrorType.name;
+    member.inferredType = mirrorType;
+    member.isGiven = true;
+    member.hasInitializer = true;
+    member.initializer.kind = AstExpressionKind::New;
+    member.initializer.text = implementationName;
+    member.initializer.span = nextSpan();
+    derivedInstances_.push_back(
+        DerivedInstanceInfo{instanceOwner, std::move(member), {}});
+
+    SymbolInfo candidate;
+    candidate.kind = AstDeclarationKind::Val;
+    candidate.name = "derived$Mirror$Sum";
+    candidate.symbolName = qualify(instanceOwner, instanceName);
+    candidate.type = mirrorType;
+    candidate.hasImplementation = true;
+    candidate.isGiven = true;
+    candidate.isModuleMember = true;
     derivedGivens_[targetName].push_back(std::move(candidate));
   }
 }

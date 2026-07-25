@@ -982,7 +982,7 @@ Current scaffold status:
   distinguish stable monomorphic evidence from fresh generic factory results,
   and NIR coverage checks generated modules, fields, accessors, and initializer
   calls. The first structural-derivation layer also provides compiler-owned
-  `scala.Product` and `scala.deriving.Mirror.ProductOf[T]` traits. When a
+  `scala.Product` and the Scala 3 `scala.deriving.Mirror` hierarchy. When a
   resolved `derived` method directly requests `Mirror.ProductOf[T]`, its
   deriving class receives a generated mirror implementation whose `fromProduct`
   reads constructor elements in declaration order, casts or unboxes them to the
@@ -1014,8 +1014,21 @@ Current scaffold status:
   versus fresh evidence identity, generic factory NIR, precise monomorphic and
   generic element metadata, singleton product/field labels, path-dependent
   metadata signatures, and a focused diagnostic for a non-product trait.
-  `Mirror.Of`, `Mirror.SumOf`, tuple-value operations, compile-time tuple
-  recursion, and higher-kinded derivation remain later derivation milestones.
+  `Mirror.Of[T]` now fixes `MirroredType` and `MirroredMonoType` to `T`;
+  `ProductOf[T]` inherits that common evidence shape, so an existing product
+  mirror also satisfies a direct `Mirror.Of[T]` contextual request. The first
+  sum layer adds `Mirror.Sum`, `Mirror.SumOf[T]`, and the `sealed` class/trait
+  modifier. A monomorphic top-level sealed trait whose direct children are
+  top-level, non-generic concrete classes receives ordered child-type and
+  child-label tuples plus a stable companion mirror. Its generated `ordinal`
+  uses definition-order type tests and returns the corresponding zero-based
+  index; a normal `derived` method can request either `SumOf[T]` or the common
+  `Of[T]` evidence. Optimized native coverage checks all ordinal branches,
+  stable evidence identity, `Of` compatibility, metadata, stored-given
+  initialization, and focused diagnostics for unsealed sums, generic sums, and
+  unsupported direct-child shapes. Generic sums, abstract/object/nested direct
+  children, tuple-value operations, compile-time tuple recursion, and
+  higher-kinded derivation remain later derivation milestones.
   Anonymous or local parameterized givens,
   contextual-only inference for ordinary methods, nested companion declarations,
   and Scala 2 `implicit` syntax also remain later milestones.

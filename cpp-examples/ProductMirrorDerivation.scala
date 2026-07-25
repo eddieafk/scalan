@@ -52,6 +52,9 @@ object ProductMirrorDerivation {
   def mirror[A]()(using instance: scala.deriving.Mirror.ProductOf[A]):
       scala.deriving.Mirror.ProductOf[A] = instance
 
+  def mirrorOf[A]()(using instance: scala.deriving.Mirror.Of[A]):
+      scala.deriving.Mirror.Of[A] = instance
+
   def mono[A](instance: scala.deriving.Mirror.ProductOf[A], value: A):
       instance.MirroredMonoType = value
 
@@ -74,6 +77,7 @@ object ProductMirrorDerivation {
     println(pair.text)
     println(mono[Pair](mirror[Pair](), pair).number)
     println(mirror[Pair]() == mirror[Pair]())
+    println(mirrorOf[Pair]() == mirror[Pair]())
     val generic: GenericPair[String, String] =
       rebuild[GenericPair[String, String]](new Product3("generic", "label", 7))
     println(generic.value)

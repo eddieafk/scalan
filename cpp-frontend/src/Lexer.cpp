@@ -875,6 +875,9 @@ TokenKind Lexer::keywordKind(std::string_view text) const {
   if (text == "return") {
     return TokenKind::KeywordReturn;
   }
+  if (text == "sealed") {
+    return TokenKind::KeywordSealed;
+  }
   if (text == "throw") {
     return TokenKind::KeywordThrow;
   }
@@ -988,6 +991,7 @@ bool Lexer::canStartStatement(TokenKind kind) {
   case TokenKind::KeywordObject:
   case TokenKind::KeywordOverride:
   case TokenKind::KeywordReturn:
+  case TokenKind::KeywordSealed:
   case TokenKind::KeywordThrow:
   case TokenKind::KeywordThis:
   case TokenKind::KeywordTrait:
@@ -1072,6 +1076,8 @@ const char* tokenKindName(TokenKind kind) {
     return "package";
   case TokenKind::KeywordReturn:
     return "return";
+  case TokenKind::KeywordSealed:
+    return "sealed";
   case TokenKind::KeywordThrow:
     return "throw";
   case TokenKind::KeywordTry:

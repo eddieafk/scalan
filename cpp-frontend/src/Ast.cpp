@@ -41,7 +41,7 @@ void writeExpression(std::ostringstream& out, const AstExpression& expression,
 void writeDeclaration(std::ostringstream& out, const AstDeclaration& declaration,
                       std::size_t depth) {
   std::string indent(depth * 2, ' ');
-  out << indent
+  out << indent << (declaration.isSealed ? "sealed " : "")
       << (declaration.isGiven ? "given" : declarationKindName(declaration.kind)) << ' '
       << (declaration.isAnonymousGiven ? "<anonymous>" : declaration.name);
   if (declaration.isOverride) {

@@ -102,6 +102,7 @@ struct AstDeclaration {
   std::string importPath;
   std::vector<AstImportSelector> importSelectors;
   bool isOverride = false;
+  bool isSealed = false;
   bool isGiven = false;
   bool isAnonymousGiven = false;
   bool hasInitializer = false;

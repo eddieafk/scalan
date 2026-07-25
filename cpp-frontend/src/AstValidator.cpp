@@ -64,6 +64,12 @@ bool AstValidator::validateDeclaration(const AstDeclaration& declaration,
                                        support::DiagnosticEngine& diagnostics,
                                        bool isTopLevel) const {
   bool ok = true;
+  if (declaration.isSealed && declaration.kind != AstDeclarationKind::Class &&
+      declaration.kind != AstDeclarationKind::Trait) {
+    diagnostics.error(declaration.span,
+                      "sealed modifier is only supported on classes and traits");
+    ok = false;
+  }
   if (declaration.isGiven && declaration.kind != AstDeclarationKind::Val &&
       declaration.kind != AstDeclarationKind::Def) {
     diagnostics.error(declaration.span, "given declaration must be a value or method");

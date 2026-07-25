@@ -5945,6 +5945,9 @@ object Main {
   def mirror[A]()(using instance: scala.deriving.Mirror.ProductOf[A]):
       scala.deriving.Mirror.ProductOf[A] = instance
 
+  def mirrorOf[A]()(using instance: scala.deriving.Mirror.Of[A]):
+      scala.deriving.Mirror.Of[A] = instance
+
   def mono[A](instance: scala.deriving.Mirror.ProductOf[A], value: A):
       instance.MirroredMonoType = value
 
@@ -5967,6 +5970,7 @@ object Main {
     println(pair.text)
     println(mono[Pair](mirror[Pair](), pair).number)
     println(mirror[Pair]() == mirror[Pair]())
+    println(mirrorOf[Pair]() == mirror[Pair]())
     val generic: GenericPair[String, String] =
       rebuild[GenericPair[String, String]](new Product3("generic", "label", 7))
     println(generic.value)
@@ -6036,7 +6040,8 @@ object Labels {
   std::filesystem::remove(output, ignored);
 
   return expect(
-      status == 0 && text == "0\n42\nanswer\n42\ntrue\ngeneric\nlabel\n7\ntrue\n" &&
+      status == 0 &&
+          text == "0\n42\nanswer\n42\ntrue\ntrue\ngeneric\nlabel\n7\ntrue\n" &&
           !invalid.ok &&
           contains(invalid.diagnosticsText,
                    "no given value found for context parameter mirror of type "
@@ -6053,6 +6058,8 @@ object Labels {
           contains(result.nirText, "trait @scala.Tuple3 : @scala.Tuple") &&
           contains(result.nirText,
                    "trait @scala.deriving.Mirror : @java.lang.Object") &&
+          contains(result.nirText, "trait @scala.deriving.Mirror.Of : "
+                                   "@scala.deriving.Mirror") &&
           contains(result.nirText, "type @scala.deriving.Mirror.MirroredLabel : "
                                    "abstract <: String") &&
           contains(result.nirText, "type @scala.deriving.Mirror.MirroredElemLabels : "
@@ -6060,7 +6067,8 @@ object Labels {
           contains(result.nirText, "trait @scala.deriving.Mirror.Product : "
                                    "@scala.deriving.Mirror") &&
           contains(result.nirText, "trait @scala.deriving.Mirror.ProductOf : "
-                                   "@scala.deriving.Mirror.Product") &&
+                                   "@scala.deriving.Mirror.Product with "
+                                   "@scala.deriving.Mirror.Of") &&
           contains(result.nirText,
                    "type @scala.deriving.Mirror.ProductOf.MirroredType : T") &&
           contains(result.nirText,
@@ -6104,7 +6112,7 @@ object Labels {
                    "%demo.mirrorproduct.Rebuild$.derived(call "
                    "%demo.mirrorproduct.Pair$.$mirror$Product$type())") &&
           countOccurrences(result.nirText, "call %demo.mirrorproduct.Pair$."
-                                           "$mirror$Product$type()") == 4 &&
+                                           "$mirror$Product$type()") == 6 &&
           contains(result.nirText, "class @demo.mirrorproduct."
                                    "$mirror$Product$demo$mirrorproduct$GenericPair : "
                                    "@scala.deriving.Mirror.ProductOf") &&
@@ -6150,6 +6158,197 @@ object Labels {
           result.diagnosticsText + "', invalid-diagnostics='" +
           invalid.diagnosticsText + "', invalid-label-diagnostics='" +
           invalidLabel.diagnosticsText + "')");
+}
+
+int smokeSumMirrorDerivationNativeRuntime() {
+  constexpr const char* source = R"(package demo.mirrorsum
+
+trait Ordinal[A] {
+  def ordinal(value: A): Int
+}
+
+class DerivedOrdinal[A](val mirror: scala.deriving.Mirror.SumOf[A])
+    extends Ordinal[A] {
+  override def ordinal(value: A): Int = mirror.ordinal(value)
+}
+
+object Ordinal {
+  def derived[A](using mirror: scala.deriving.Mirror.SumOf[A]): Ordinal[A] =
+    new DerivedOrdinal[A](mirror)
+}
+
+sealed trait Event derives Ordinal
+class Started(val id: Int) extends Event
+class Stopped(val reason: String) extends Event
+class Failed(val code: Int) extends Event
+
+object Main {
+  def ordinal[A](value: A)(using instance: Ordinal[A]): Int =
+    instance.ordinal(value)
+
+  def sumMirror[A]()(using instance: scala.deriving.Mirror.SumOf[A]):
+      scala.deriving.Mirror.SumOf[A] = instance
+
+  def mirror[A]()(using instance: scala.deriving.Mirror.Of[A]):
+      scala.deriving.Mirror.Of[A] = instance
+
+  def mono[A](instance: scala.deriving.Mirror.SumOf[A], value: A):
+      instance.MirroredMonoType = value
+
+  def label[A](
+      instance: scala.deriving.Mirror.SumOf[A],
+      value: instance.MirroredLabel): instance.MirroredLabel = value
+
+  def main = {
+    println(ordinal[Event](new Started(1)))
+    println(ordinal[Event](new Stopped("done")))
+    println(ordinal[Event](new Failed(2)))
+    println(sumMirror[Event]().ordinal(new Failed(3)))
+    println(sumMirror[Event]() == sumMirror[Event]())
+    println(mirror[Event]() == sumMirror[Event]())
+    println(mono[Event](sumMirror[Event](), new Started(4)).isInstanceOf[Started])
+  }
+}
+)";
+  constexpr const char* unsealedSource =
+      R"(package demo.invalidmirrorsum.open
+
+trait Ordinal[A]
+object Ordinal {
+  def derived[A](using mirror: scala.deriving.Mirror.SumOf[A]): Ordinal[A] = null
+}
+
+trait OpenEvent derives Ordinal
+class OpenChild extends OpenEvent
+)";
+  constexpr const char* genericSource =
+      R"(package demo.invalidmirrorsum.generic
+
+trait Ordinal[A]
+object Ordinal {
+  def derived[A](using mirror: scala.deriving.Mirror.SumOf[A]): Ordinal[A] = null
+}
+
+sealed trait GenericEvent[A] derives Ordinal
+class GenericChild extends GenericEvent[Int]
+)";
+  constexpr const char* nonConcreteChildSource =
+      R"(package demo.invalidmirrorsum.child
+
+trait Ordinal[A]
+object Ordinal {
+  def derived[A](using mirror: scala.deriving.Mirror.SumOf[A]): Ordinal[A] = null
+}
+
+sealed trait Event derives Ordinal
+trait Branch extends Event
+class Leaf extends Branch
+)";
+
+  const std::filesystem::path temporary = std::filesystem::temp_directory_path();
+  const std::filesystem::path binary =
+      temporary / "cpp-scalanative-smoke-sum-mirror-derivation";
+  const std::filesystem::path output =
+      temporary / "cpp-scalanative-smoke-sum-mirror-derivation.out";
+  std::error_code ignored;
+  std::filesystem::remove(binary, ignored);
+  std::filesystem::remove(output, ignored);
+
+  scalanative::tools::build::BuildDriver driver;
+  scalanative::tools::build::BuildOptions options;
+  options.action = scalanative::tools::build::BuildAction::BuildBinary;
+  options.optimize = true;
+  options.outputPath = binary;
+  scalanative::support::DiagnosticEngine diagnostics;
+  const scalanative::tools::build::BuildResult result =
+      driver.buildSource("SumMirrorDerivation.scala", source, options, diagnostics);
+
+  scalanative::support::DiagnosticEngine unsealedDiagnostics;
+  const scalanative::tools::build::BuildResult unsealed = driver.buildSource(
+      "UnsealedSumMirror.scala", unsealedSource, {}, unsealedDiagnostics);
+  scalanative::support::DiagnosticEngine genericDiagnostics;
+  const scalanative::tools::build::BuildResult generic = driver.buildSource(
+      "GenericSumMirror.scala", genericSource, {}, genericDiagnostics);
+  scalanative::support::DiagnosticEngine nonConcreteChildDiagnostics;
+  const scalanative::tools::build::BuildResult nonConcreteChild =
+      driver.buildSource("NonConcreteSumMirrorChild.scala", nonConcreteChildSource, {},
+                         nonConcreteChildDiagnostics);
+
+  if (!result.ok) {
+    if (contains(result.diagnosticsText, "clang toolchain not found")) {
+      return 0;
+    }
+    return fail("sum-mirror derivation native build failed: " + result.diagnosticsText);
+  }
+
+  const std::string command = binary.string() + " > " + output.string();
+  const int status = std::system(command.c_str());
+  const std::string text = readTextFile(output);
+  std::filesystem::remove(binary, ignored);
+  std::filesystem::remove(output, ignored);
+
+  return expect(
+      status == 0 && text == "0\n1\n2\n2\ntrue\ntrue\ntrue\n" && !unsealed.ok &&
+          contains(unsealed.diagnosticsText,
+                   "sum mirror derivation requires a sealed trait: "
+                   "demo.invalidmirrorsum.open.OpenEvent") &&
+          !generic.ok &&
+          contains(generic.diagnosticsText,
+                   "sum mirror derivation does not yet support generic sealed "
+                   "traits: demo.invalidmirrorsum.generic.GenericEvent") &&
+          !nonConcreteChild.ok &&
+          contains(nonConcreteChild.diagnosticsText,
+                   "sum mirror child must be a top-level, non-generic concrete "
+                   "class: demo.invalidmirrorsum.child.Branch") &&
+          contains(result.nirText, "trait @scala.deriving.Mirror.Sum : "
+                                   "@scala.deriving.Mirror") &&
+          contains(result.nirText, "trait @scala.deriving.Mirror.SumOf : "
+                                   "@scala.deriving.Mirror.Sum with "
+                                   "@scala.deriving.Mirror.Of") &&
+          contains(result.nirText,
+                   "type @scala.deriving.Mirror.SumOf.MirroredType : T") &&
+          contains(result.nirText,
+                   "type @scala.deriving.Mirror.SumOf.MirroredMonoType : T") &&
+          contains(result.nirText, "declare @scala.deriving.Mirror.SumOf.ordinal : "
+                                   "(scala.deriving.Mirror.SumOf,Object)Int") &&
+          contains(result.nirText,
+                   "class @demo.mirrorsum.$mirror$Sum$demo$mirrorsum$Event : "
+                   "@scala.deriving.Mirror.SumOf") &&
+          contains(result.nirText,
+                   "$mirror$Sum$demo$mirrorsum$Event.MirroredElemTypes : "
+                   "scala.Tuple3 [ demo.mirrorsum.Started, "
+                   "demo.mirrorsum.Stopped, demo.mirrorsum.Failed ]") &&
+          contains(result.nirText,
+                   "$mirror$Sum$demo$mirrorsum$Event.MirroredLabel : \"Event\"") &&
+          contains(result.nirText,
+                   "$mirror$Sum$demo$mirrorsum$Event.MirroredElemLabels : "
+                   "scala.Tuple3 [ \"Started\", \"Stopped\", \"Failed\" ]") &&
+          contains(result.nirText,
+                   "ret Int if(is-instance-of[demo.mirrorsum.Started](%value), "
+                   "0, if(is-instance-of[demo.mirrorsum.Stopped](%value), "
+                   "1, 2))") &&
+          contains(result.nirText,
+                   "field @demo.mirrorsum.Event$.$mirror$Sum$type$field : "
+                   "scala.deriving.Mirror.SumOf") &&
+          contains(result.nirText,
+                   "eval assign %demo.mirrorsum.Event$.$mirror$Sum$type$field = "
+                   "new demo.mirrorsum.$mirror$Sum$demo$mirrorsum$Event") &&
+          contains(result.nirText, "eval assign %demo.mirrorsum.Event$."
+                                   "$derived$demo$mirrorsum$Ordinal$type$field = call "
+                                   "%demo.mirrorsum.Ordinal$.derived(call "
+                                   "%demo.mirrorsum.Event$.$mirror$Sum$type())") &&
+          contains(result.nirText, "define @demo.mirrorsum.Main.mono : "
+                                   "(scala.deriving.Mirror.SumOf,Object)Object") &&
+          contains(result.nirText, "define @demo.mirrorsum.Main.label : "
+                                   "(scala.deriving.Mirror.SumOf,String)String"),
+      "Scala 3 sum Mirror synthesis, Mirror.Of compatibility, ordered ordinal "
+      "lowering, metadata, supported-shape diagnostics, or native execution "
+      "diverged (status=" +
+          std::to_string(status) + ", output='" + text + "', diagnostics='" +
+          result.diagnosticsText + "', unsealed-diagnostics='" +
+          unsealed.diagnosticsText + "', generic-diagnostics='" +
+          generic.diagnosticsText + "', child-diagnostics='" +
+          nonConcreteChild.diagnosticsText + "')");
 }
 
 int smokePrimitiveGenericsNativeRuntime() {
@@ -12740,6 +12939,9 @@ int main() {
     return code;
   }
   if (int code = smokeProductMirrorDerivationNativeRuntime()) {
+    return code;
+  }
+  if (int code = smokeSumMirrorDerivationNativeRuntime()) {
     return code;
   }
   if (int code = smokePrimitiveGenericsNativeRuntime()) {

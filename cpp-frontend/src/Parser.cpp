@@ -130,6 +130,7 @@ bool Parser::isDeclarationStart() const {
   case TokenKind::KeywordVar:
   case TokenKind::KeywordImport:
   case TokenKind::KeywordOverride:
+  case TokenKind::KeywordSealed:
     return true;
   default:
     return false;
@@ -184,6 +185,26 @@ void Parser::parsePackage(AstModule& module) {
 
 AstDeclaration Parser::parseDeclaration() {
   consumeSeparators();
+  if (match(TokenKind::KeywordSealed)) {
+    const Token modifier = previous();
+    if (match(TokenKind::KeywordClass)) {
+      AstDeclaration declaration =
+          parseObjectLike(AstDeclarationKind::Class, previous());
+      declaration.isSealed = true;
+      declaration.span = modifier.span;
+      return declaration;
+    }
+    if (match(TokenKind::KeywordTrait)) {
+      AstDeclaration declaration =
+          parseObjectLike(AstDeclarationKind::Trait, previous());
+      declaration.isSealed = true;
+      declaration.span = modifier.span;
+      return declaration;
+    }
+    diagnostics_.error(peek().span, "'sealed' must modify a class or trait");
+    synchronize();
+    return {};
+  }
   if (match(TokenKind::KeywordObject)) {
     return parseObjectLike(AstDeclarationKind::Object, previous());
   }

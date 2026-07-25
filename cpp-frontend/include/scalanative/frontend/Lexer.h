@@ -44,6 +44,7 @@ enum class TokenKind {
   KeywordOverride,
   KeywordPackage,
   KeywordReturn,
+  KeywordSealed,
   KeywordThrow,
   KeywordTry,
   KeywordThis,
