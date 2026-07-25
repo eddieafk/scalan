@@ -6487,6 +6487,13 @@ recomputedReachableAfterInlining(const linker::LinkedProgram& program) {
       if (definition == definitions.end()) {
         continue;
       }
+      const std::string ownerName = ownerNameOf(definition->second->name);
+      auto owner = definitions.find(ownerName);
+      if (owner != definitions.end() &&
+          owner->second->kind == nir::DefinitionKind::Module) {
+        addReachable(ownerName);
+        addReachable(ownerName + "." + std::string(support::StdNames::Constructor));
+      }
       std::string moduleName;
       auto module = modules.find(name);
       if (module != modules.end()) {

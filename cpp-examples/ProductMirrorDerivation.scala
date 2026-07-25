@@ -23,6 +23,14 @@ object Rebuild {
 
 class Pair(val number: Int, val text: String) derives Rebuild
 class GenericPair[A, B](val value: A, val label: B, val count: Int) derives Rebuild
+class Empty() derives Rebuild {
+  def marker(): Int = 0
+}
+
+class Product0() extends scala.Product {
+  override def productArity(): Int = 0
+  override def productElement(index: Int): Object = null
+}
 
 class Product2(val first: Object, val second: Object) extends scala.Product {
   override def productArity(): Int = 2
@@ -44,10 +52,27 @@ object ProductMirrorDerivation {
   def mirror[A]()(using instance: scala.deriving.Mirror.ProductOf[A]):
       scala.deriving.Mirror.ProductOf[A] = instance
 
+  def mono[A](instance: scala.deriving.Mirror.ProductOf[A], value: A):
+      instance.MirroredMonoType = value
+
+  def elementTypes[A](
+      instance: scala.deriving.Mirror.ProductOf[A],
+      value: instance.MirroredElemTypes): instance.MirroredElemTypes = value
+
+  def elementLabels[A](
+      instance: scala.deriving.Mirror.ProductOf[A],
+      value: instance.MirroredElemLabels): instance.MirroredElemLabels = value
+
+  def label[A](
+      instance: scala.deriving.Mirror.ProductOf[A],
+      value: instance.MirroredLabel): instance.MirroredLabel = value
+
   def main = {
+    println(rebuild[Empty](new Product0()).marker())
     val pair: Pair = rebuild[Pair](new Product2(42, "answer"))
     println(pair.number)
     println(pair.text)
+    println(mono[Pair](mirror[Pair](), pair).number)
     println(mirror[Pair]() == mirror[Pair]())
     val generic: GenericPair[String, String] =
       rebuild[GenericPair[String, String]](new Product3("generic", "label", 7))

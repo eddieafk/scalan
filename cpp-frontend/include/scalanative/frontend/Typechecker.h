@@ -49,6 +49,7 @@ struct TypeInfo {
   bool pathDependent = false;
   bool typeProjection = false;
   bool typeParameter = false;
+  bool stringSingleton = false;
 };
 
 struct TypeParameterInfo {

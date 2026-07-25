@@ -47,6 +47,34 @@ std::string productMirrorImplementationName(std::string_view targetSymbolName) {
   return name;
 }
 
+std::string stringSingletonType(std::string_view value) {
+  std::string literal{"\""};
+  literal.reserve(value.size() + 2);
+  for (char ch : value) {
+    if (ch == '"' || ch == '\\') {
+      literal.push_back('\\');
+    }
+    literal.push_back(ch);
+  }
+  literal.push_back('"');
+  return literal;
+}
+
+std::string tupleTypeName(const std::vector<std::string>& elements) {
+  if (elements.empty()) {
+    return "scala.EmptyTuple";
+  }
+  std::string type = "scala.Tuple" + std::to_string(elements.size()) + "[";
+  for (std::size_t i = 0; i < elements.size(); ++i) {
+    if (i != 0) {
+      type += ",";
+    }
+    type += elements[i];
+  }
+  type += "]";
+  return type;
+}
+
 bool typesMatchForOverride(const TypeInfo& expected, const TypeInfo& actual) {
   if (expected.kind == SimpleTypeKind::Unknown ||
       actual.kind == SimpleTypeKind::Unknown) {
@@ -879,8 +907,50 @@ std::vector<TypedDeclaration> standardExceptionDeclarations() {
           std::move(bufferOverflow),      std::move(stackTraceElement)};
 }
 
-std::vector<std::pair<std::string, AstDeclaration>> standardDerivationDeclarations() {
+std::vector<std::pair<std::string, AstDeclaration>>
+standardDerivationDeclarations(const AstModule& module) {
   const support::SourceSpan noSpan = support::SourceSpan::none();
+
+  AstDeclaration tuple;
+  tuple.kind = AstDeclarationKind::Trait;
+  tuple.name = "Tuple";
+  tuple.span = noSpan;
+
+  AstDeclaration emptyTuple;
+  emptyTuple.kind = AstDeclarationKind::Trait;
+  emptyTuple.name = "EmptyTuple";
+  emptyTuple.span = noSpan;
+  emptyTuple.parentTypes = {"scala.Tuple"};
+
+  std::vector<std::size_t> tupleArities;
+  for (const AstDeclaration& declaration : module.declarations) {
+    if (declaration.kind != AstDeclarationKind::Class ||
+        declaration.derivedTypes.empty() || declaration.parameters.empty() ||
+        std::find(tupleArities.begin(), tupleArities.end(),
+                  declaration.parameters.size()) != tupleArities.end()) {
+      continue;
+    }
+    tupleArities.push_back(declaration.parameters.size());
+  }
+  std::sort(tupleArities.begin(), tupleArities.end());
+
+  std::vector<AstDeclaration> tupleTypes;
+  tupleTypes.reserve(tupleArities.size());
+  for (std::size_t arity : tupleArities) {
+    AstDeclaration tupleType;
+    tupleType.kind = AstDeclarationKind::Trait;
+    tupleType.name = "Tuple" + std::to_string(arity);
+    tupleType.span = noSpan;
+    tupleType.parentTypes = {"scala.Tuple"};
+    for (std::size_t index = 1; index <= arity; ++index) {
+      AstTypeParameter element;
+      element.name = "T" + std::to_string(index);
+      element.span = noSpan;
+      element.variance = TypeVariance::Covariant;
+      tupleType.typeParameters.push_back(std::move(element));
+    }
+    tupleTypes.push_back(std::move(tupleType));
+  }
 
   AstDeclaration product;
   product.kind = AstDeclarationKind::Trait;
@@ -902,14 +972,71 @@ std::vector<std::pair<std::string, AstDeclaration>> standardDerivationDeclaratio
   productElement.declaredType = "Object";
   product.members = {std::move(productArity), std::move(productElement)};
 
+  AstDeclaration mirror;
+  mirror.kind = AstDeclarationKind::Trait;
+  mirror.name = "Mirror";
+  mirror.span = noSpan;
+
+  AstDeclaration mirroredTypeMember;
+  mirroredTypeMember.kind = AstDeclarationKind::Type;
+  mirroredTypeMember.name = "MirroredType";
+  mirroredTypeMember.span = noSpan;
+
+  AstDeclaration mirroredMonoType;
+  mirroredMonoType.kind = AstDeclarationKind::Type;
+  mirroredMonoType.name = "MirroredMonoType";
+  mirroredMonoType.span = noSpan;
+
+  AstDeclaration mirroredElemTypes;
+  mirroredElemTypes.kind = AstDeclarationKind::Type;
+  mirroredElemTypes.name = "MirroredElemTypes";
+  mirroredElemTypes.span = noSpan;
+
+  AstDeclaration mirroredLabel;
+  mirroredLabel.kind = AstDeclarationKind::Type;
+  mirroredLabel.name = "MirroredLabel";
+  mirroredLabel.span = noSpan;
+  mirroredLabel.upperBound = "String";
+
+  AstDeclaration mirroredElemLabels;
+  mirroredElemLabels.kind = AstDeclarationKind::Type;
+  mirroredElemLabels.name = "MirroredElemLabels";
+  mirroredElemLabels.span = noSpan;
+  mirroredElemLabels.upperBound = "scala.Tuple";
+
+  mirror.members = {std::move(mirroredTypeMember), std::move(mirroredMonoType),
+                    std::move(mirroredElemTypes), std::move(mirroredLabel),
+                    std::move(mirroredElemLabels)};
+
+  AstDeclaration mirrorProduct;
+  mirrorProduct.kind = AstDeclarationKind::Trait;
+  mirrorProduct.name = "Product";
+  mirrorProduct.span = noSpan;
+  mirrorProduct.parentTypes = {"scala.deriving.Mirror"};
+
   AstDeclaration productOf;
   productOf.kind = AstDeclarationKind::Trait;
   productOf.name = "ProductOf";
   productOf.span = noSpan;
+  productOf.parentTypes = {"scala.deriving.Mirror.Product"};
   AstTypeParameter mirroredType;
   mirroredType.name = "T";
   mirroredType.span = noSpan;
   productOf.typeParameters.push_back(std::move(mirroredType));
+
+  AstDeclaration productOfMirroredType;
+  productOfMirroredType.kind = AstDeclarationKind::Type;
+  productOfMirroredType.name = "MirroredType";
+  productOfMirroredType.span = noSpan;
+  productOfMirroredType.declaredType = "T";
+  productOfMirroredType.hasInitializer = true;
+
+  AstDeclaration productOfMirroredMonoType;
+  productOfMirroredMonoType.kind = AstDeclarationKind::Type;
+  productOfMirroredMonoType.name = "MirroredMonoType";
+  productOfMirroredMonoType.span = noSpan;
+  productOfMirroredMonoType.declaredType = "T";
+  productOfMirroredMonoType.hasInitializer = true;
 
   AstDeclaration fromProduct;
   fromProduct.kind = AstDeclarationKind::Def;
@@ -918,10 +1045,18 @@ std::vector<std::pair<std::string, AstDeclaration>> standardDerivationDeclaratio
   fromProduct.parameters = {"product: scala.Product"};
   fromProduct.contextualParameters = {false};
   fromProduct.declaredType = "T";
-  productOf.members.push_back(std::move(fromProduct));
+  productOf.members = {std::move(productOfMirroredType),
+                       std::move(productOfMirroredMonoType), std::move(fromProduct)};
 
   std::vector<std::pair<std::string, AstDeclaration>> declarations;
+  declarations.emplace_back("scala", std::move(tuple));
+  declarations.emplace_back("scala", std::move(emptyTuple));
+  for (AstDeclaration& tupleType : tupleTypes) {
+    declarations.emplace_back("scala", std::move(tupleType));
+  }
   declarations.emplace_back("scala", std::move(product));
+  declarations.emplace_back("scala.deriving", std::move(mirror));
+  declarations.emplace_back("scala.deriving.Mirror", std::move(mirrorProduct));
   declarations.emplace_back("scala.deriving.Mirror", std::move(productOf));
   return declarations;
 }
@@ -952,7 +1087,7 @@ TypedModule Typechecker::typecheck(const AstModule& module) {
   addRuntimeBuiltins(scope);
   typed.declarations = standardExceptionDeclarations();
   std::vector<std::pair<std::string, AstDeclaration>> derivationDeclarations =
-      standardDerivationDeclarations();
+      standardDerivationDeclarations(module);
   for (const auto& [owner, declaration] : derivationDeclarations) {
     collectDeclaration(declaration, owner, scope);
   }
@@ -2184,6 +2319,31 @@ void Typechecker::collectProductMirrors(const std::vector<AstDeclaration>& decla
     implementation.typeParameters = declaration.typeParameters;
     implementation.parentTypes = {"scala.deriving.Mirror.ProductOf[" +
                                   derivingType.name + "]"};
+
+    const auto addTypeAlias = [&](std::string name, std::string aliasTarget) {
+      AstDeclaration alias;
+      alias.kind = AstDeclarationKind::Type;
+      alias.name = std::move(name);
+      alias.span = nextSpan();
+      alias.declaredType = std::move(aliasTarget);
+      alias.isOverride = true;
+      alias.hasInitializer = true;
+      implementation.members.push_back(std::move(alias));
+    };
+
+    std::vector<std::string> elementTypes;
+    std::vector<std::string> elementLabels;
+    elementTypes.reserve(target.parameterTypes.size());
+    elementLabels.reserve(target.parameters.size());
+    for (const TypeInfo& parameterType : target.parameterTypes) {
+      elementTypes.push_back(parameterType.name);
+    }
+    for (const std::string& parameter : target.parameters) {
+      elementLabels.push_back(stringSingletonType(parameterName(parameter)));
+    }
+    addTypeAlias("MirroredElemTypes", tupleTypeName(elementTypes));
+    addTypeAlias("MirroredLabel", stringSingletonType(declaration.name));
+    addTypeAlias("MirroredElemLabels", tupleTypeName(elementLabels));
 
     AstDeclaration fromProduct;
     fromProduct.kind = AstDeclarationKind::Def;
@@ -6250,6 +6410,12 @@ TypeInfo Typechecker::typeFromDeclaredName(const std::string& name, const Scope*
   if (normalized == "Boolean") {
     return TypeInfo{SimpleTypeKind::Boolean, "Boolean"};
   }
+  if (normalized.size() >= 2 && normalized.front() == '"' && normalized.back() == '"') {
+    TypeInfo literal{SimpleTypeKind::String, normalized};
+    literal.runtimeName = "String";
+    literal.stringSingleton = true;
+    return literal;
+  }
   if (normalized == "String" || normalized == "java.lang.String" ||
       normalized == "scala.Predef.String") {
     return TypeInfo{SimpleTypeKind::String, "String"};
@@ -6462,7 +6628,15 @@ TypeInfo Typechecker::typeFromDeclaredName(const std::string& name, const Scope*
         const std::string segment = normalized.substr(
             segmentStart,
             nextDot == std::string::npos ? std::string::npos : nextDot - segmentStart);
-        auto members = memberScopes_.find(receiverType.name);
+        std::string memberOwner = receiverType.typeConstructorName.empty()
+                                      ? receiverType.name
+                                      : receiverType.typeConstructorName;
+        auto members = memberScopes_.find(memberOwner);
+        if (members == memberScopes_.end() && !receiverType.runtimeName.empty() &&
+            receiverType.runtimeName != memberOwner) {
+          memberOwner = receiverType.runtimeName;
+          members = memberScopes_.find(memberOwner);
+        }
         if (receiverType.kind != SimpleTypeKind::Object ||
             members == memberScopes_.end()) {
           if (span != nullptr) {
@@ -6480,10 +6654,12 @@ TypeInfo Typechecker::typeFromDeclaredName(const std::string& name, const Scope*
           }
           return TypeInfo{SimpleTypeKind::Unknown, normalized};
         }
+        const SymbolInfo specializedMember =
+            specializeMemberForReceiver(member->second, receiverType);
 
         const bool isFinal = nextDot == std::string::npos;
         if (isFinal) {
-          if (member->second.kind != AstDeclarationKind::Type) {
+          if (specializedMember.kind != AstDeclarationKind::Type) {
             if (span != nullptr) {
               diagnostics_.error(*span, "selected path member " + segment + " on " +
                                             receiverType.name +
@@ -6491,41 +6667,41 @@ TypeInfo Typechecker::typeFromDeclaredName(const std::string& name, const Scope*
             }
             return TypeInfo{SimpleTypeKind::Unknown, normalized};
           }
-          if (member->second.hasImplementation) {
-            TypeInfo selected = member->second.type;
+          if (specializedMember.hasImplementation) {
+            TypeInfo selected = specializedMember.type;
             selected.dependentOwnerName = receiverType.name;
             selected.dependentMemberName = segment;
             selected.dependentPathName = normalized;
-            selected.resolvedAliasName = member->second.symbolName;
+            selected.resolvedAliasName = specializedMember.symbolName;
             selected.pathDependent = true;
             return selected;
           }
-          TypeInfo selected = member->second.type;
+          TypeInfo selected = specializedMember.type;
           selected.name = normalized;
           selected.dependentOwnerName = receiverType.name;
           selected.dependentMemberName = segment;
           selected.dependentPathName = normalized;
           selected.abstractTypeMember = true;
           selected.pathDependent = true;
-          if (isReferenceType(member->second.upperBound) &&
-              !member->second.upperBound.abstractTypeMember) {
-            selected.runtimeName = member->second.upperBound.name;
-          } else if (member->second.upperBound.kind == SimpleTypeKind::Unknown ||
-                     isBoxablePrimitiveType(member->second.upperBound.kind)) {
+          if (isReferenceType(specializedMember.upperBound) &&
+              !specializedMember.upperBound.abstractTypeMember) {
+            selected.runtimeName = specializedMember.upperBound.name;
+          } else if (specializedMember.upperBound.kind == SimpleTypeKind::Unknown ||
+                     isBoxablePrimitiveType(specializedMember.upperBound.kind)) {
             selected.runtimeName = "Object";
           }
           return selected;
         }
 
-        if (member->second.kind != AstDeclarationKind::Val &&
-            member->second.kind != AstDeclarationKind::Object) {
+        if (specializedMember.kind != AstDeclarationKind::Val &&
+            specializedMember.kind != AstDeclarationKind::Object) {
           if (span != nullptr) {
             diagnostics_.error(*span, "unstable nested path-dependent type prefix: " +
                                           segment);
           }
           return TypeInfo{SimpleTypeKind::Unknown, normalized};
         }
-        receiverType = member->second.type;
+        receiverType = specializedMember.type;
         segmentStart = nextDot + 1;
       }
     }
@@ -6612,6 +6788,9 @@ bool Typechecker::isAssignable(const TypeInfo& expected, const TypeInfo& actual)
     }
     if (value.kind == SimpleTypeKind::Nothing) {
       return true;
+    }
+    if (target.stringSingleton) {
+      return value.stringSingleton && target.name == value.name;
     }
     if (value.kind == SimpleTypeKind::Null && isReferenceType(target)) {
       return true;

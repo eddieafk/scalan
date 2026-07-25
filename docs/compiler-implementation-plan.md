@@ -992,12 +992,30 @@ Current scaffold status:
   product type, with type-parameter fields retaining their bound as the runtime
   cast target. Consequently a normal `derived` method can request
   `Mirror.ProductOf[T]` through a `using` parameter and use it at native runtime.
+  The compiler-owned `Mirror` hierarchy now also exposes `MirroredType`,
+  `MirroredMonoType`, `MirroredElemTypes`, `MirroredLabel`, and
+  `MirroredElemLabels` as type members. `ProductOf[T]` fixes its mirrored and
+  monomorphic types to `T`; each generated product implementation records
+  constructor element types in declaration order, the unqualified product name
+  as a string singleton, and constructor parameter names as an ordered tuple of
+  string singletons. Tuple constructors are synthesized only for arities used by
+  deriving products in the current module, while `EmptyTuple` represents a
+  zero-field product. Generic path-dependent selection specializes aliases
+  through receivers such as `ProductOf[A]`, allowing declarations whose result
+  is `mirror.MirroredMonoType`; bounded abstract metadata erases to its runtime
+  upper bound. NIR verification recognizes the erased nominal parents of
+  singleton strings and applied metadata tuples while retaining their precise
+  type-member text.
+  Interflow recomputation retains a module initializer whenever a surviving
+  module member can trigger lazy initialization, so a mirror used only as a
+  prerequisite of another derived given still initializes both stored values.
   Optimized coverage checks primitive and reference reconstruction, mixed
   generic/primitive reconstruction, one-time monomorphic initialization, stable
-  versus fresh evidence identity, generic factory NIR, and a focused diagnostic
-  for a non-product trait. This intentionally value-level milestone does not yet
-  model `Mirror.Of`, `Mirror.SumOf`, singleton labels, or element-type tuples;
-  those and higher-kinded derivation remain later derivation milestones.
+  versus fresh evidence identity, generic factory NIR, precise monomorphic and
+  generic element metadata, singleton product/field labels, path-dependent
+  metadata signatures, and a focused diagnostic for a non-product trait.
+  `Mirror.Of`, `Mirror.SumOf`, tuple-value operations, compile-time tuple
+  recursion, and higher-kinded derivation remain later derivation milestones.
   Anonymous or local parameterized givens,
   contextual-only inference for ordinary methods, nested companion declarations,
   and Scala 2 `implicit` syntax also remain later milestones.

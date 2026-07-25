@@ -5916,6 +5916,14 @@ object Rebuild {
 
 class Pair(val number: Int, val text: String) derives Rebuild
 class GenericPair[A, B](val value: A, val label: B, val count: Int) derives Rebuild
+class Empty() derives Rebuild {
+  def marker(): Int = 0
+}
+
+class Product0() extends scala.Product {
+  override def productArity(): Int = 0
+  override def productElement(index: Int): Object = null
+}
 
 class Product2(val first: Object, val second: Object) extends scala.Product {
   override def productArity(): Int = 2
@@ -5937,10 +5945,27 @@ object Main {
   def mirror[A]()(using instance: scala.deriving.Mirror.ProductOf[A]):
       scala.deriving.Mirror.ProductOf[A] = instance
 
+  def mono[A](instance: scala.deriving.Mirror.ProductOf[A], value: A):
+      instance.MirroredMonoType = value
+
+  def elementTypes[A](
+      instance: scala.deriving.Mirror.ProductOf[A],
+      value: instance.MirroredElemTypes): instance.MirroredElemTypes = value
+
+  def elementLabels[A](
+      instance: scala.deriving.Mirror.ProductOf[A],
+      value: instance.MirroredElemLabels): instance.MirroredElemLabels = value
+
+  def label[A](
+      instance: scala.deriving.Mirror.ProductOf[A],
+      value: instance.MirroredLabel): instance.MirroredLabel = value
+
   def main = {
+    println(rebuild[Empty](new Product0()).marker())
     val pair: Pair = rebuild[Pair](new Product2(42, "answer"))
     println(pair.number)
     println(pair.text)
+    println(mono[Pair](mirror[Pair](), pair).number)
     println(mirror[Pair]() == mirror[Pair]())
     val generic: GenericPair[String, String] =
       rebuild[GenericPair[String, String]](new Product3("generic", "label", 7))
@@ -5962,6 +5987,13 @@ object Rebuild {
 }
 
 trait UnsupportedSum derives Rebuild
+)";
+  constexpr const char* invalidLabelSource =
+      R"(package demo.invalidmirrorlabel
+
+object Labels {
+  def mismatch(value: "Other"): "Pair" = value
+}
 )";
 
   const std::filesystem::path temporary = std::filesystem::temp_directory_path();
@@ -5985,6 +6017,9 @@ trait UnsupportedSum derives Rebuild
   scalanative::support::DiagnosticEngine invalidDiagnostics;
   const scalanative::tools::build::BuildResult invalid = driver.buildSource(
       "InvalidProductMirrorDerivation.scala", invalidSource, {}, invalidDiagnostics);
+  scalanative::support::DiagnosticEngine invalidLabelDiagnostics;
+  const scalanative::tools::build::BuildResult invalidLabel = driver.buildSource(
+      "InvalidMirrorLabel.scala", invalidLabelSource, {}, invalidLabelDiagnostics);
 
   if (!result.ok) {
     if (contains(result.diagnosticsText, "clang toolchain not found")) {
@@ -6001,21 +6036,57 @@ trait UnsupportedSum derives Rebuild
   std::filesystem::remove(output, ignored);
 
   return expect(
-      status == 0 && text == "42\nanswer\ntrue\ngeneric\nlabel\n7\ntrue\n" &&
+      status == 0 && text == "0\n42\nanswer\n42\ntrue\ngeneric\nlabel\n7\ntrue\n" &&
           !invalid.ok &&
           contains(invalid.diagnosticsText,
                    "no given value found for context parameter mirror of type "
                    "scala.deriving.Mirror.ProductOf [ "
                    "demo.invalidmirrorproduct.UnsupportedSum ] required by "
                    "derived$Rebuild") &&
+          !invalidLabel.ok &&
+          contains(invalidLabel.diagnosticsText,
+                   "initializer type \"Other\" does not conform to declared type "
+                   "\"Pair\"") &&
           contains(result.nirText, "trait @scala.Product : @java.lang.Object") &&
           contains(result.nirText, "declare @scala.Product.productElement : "
                                    "(scala.Product,Int)Object") &&
+          contains(result.nirText, "trait @scala.Tuple3 : @scala.Tuple") &&
           contains(result.nirText,
-                   "trait @scala.deriving.Mirror.ProductOf : @java.lang.Object") &&
+                   "trait @scala.deriving.Mirror : @java.lang.Object") &&
+          contains(result.nirText, "type @scala.deriving.Mirror.MirroredLabel : "
+                                   "abstract <: String") &&
+          contains(result.nirText, "type @scala.deriving.Mirror.MirroredElemLabels : "
+                                   "abstract <: scala.Tuple") &&
+          contains(result.nirText, "trait @scala.deriving.Mirror.Product : "
+                                   "@scala.deriving.Mirror") &&
+          contains(result.nirText, "trait @scala.deriving.Mirror.ProductOf : "
+                                   "@scala.deriving.Mirror.Product") &&
+          contains(result.nirText,
+                   "type @scala.deriving.Mirror.ProductOf.MirroredType : T") &&
+          contains(result.nirText,
+                   "type @scala.deriving.Mirror.ProductOf.MirroredMonoType : T") &&
+          contains(result.nirText,
+                   "$mirror$Product$demo$mirrorproduct$Empty.MirroredElemTypes : "
+                   "scala.EmptyTuple") &&
+          contains(result.nirText,
+                   "$mirror$Product$demo$mirrorproduct$Empty.MirroredLabel : "
+                   "\"Empty\"") &&
+          contains(result.nirText,
+                   "$mirror$Product$demo$mirrorproduct$Empty.MirroredElemLabels : "
+                   "scala.EmptyTuple") &&
+          contains(result.nirText, "ret Object new demo.mirrorproduct.Empty") &&
           contains(result.nirText,
                    "class @demo.mirrorproduct.$mirror$Product$demo$mirrorproduct$Pair "
                    ": @scala.deriving.Mirror.ProductOf") &&
+          contains(result.nirText,
+                   "$mirror$Product$demo$mirrorproduct$Pair.MirroredElemTypes : "
+                   "scala.Tuple2 [ Int, String ]") &&
+          contains(result.nirText,
+                   "$mirror$Product$demo$mirrorproduct$Pair.MirroredLabel : "
+                   "\"Pair\"") &&
+          contains(result.nirText,
+                   "$mirror$Product$demo$mirrorproduct$Pair.MirroredElemLabels : "
+                   "scala.Tuple2 [ \"number\", \"text\" ]") &&
           contains(result.nirText,
                    "ret Object new demo.mirrorproduct.Pair(unbox[Int](call "
                    "%product.productElement(0)), unbox[String](call "
@@ -6033,10 +6104,27 @@ trait UnsupportedSum derives Rebuild
                    "%demo.mirrorproduct.Rebuild$.derived(call "
                    "%demo.mirrorproduct.Pair$.$mirror$Product$type())") &&
           countOccurrences(result.nirText, "call %demo.mirrorproduct.Pair$."
-                                           "$mirror$Product$type()") == 3 &&
+                                           "$mirror$Product$type()") == 4 &&
           contains(result.nirText, "class @demo.mirrorproduct."
                                    "$mirror$Product$demo$mirrorproduct$GenericPair : "
                                    "@scala.deriving.Mirror.ProductOf") &&
+          contains(result.nirText, "$mirror$Product$demo$mirrorproduct$GenericPair."
+                                   "MirroredElemTypes : scala.Tuple3 [ A, B, Int ]") &&
+          contains(result.nirText, "$mirror$Product$demo$mirrorproduct$GenericPair."
+                                   "MirroredLabel : \"GenericPair\"") &&
+          contains(result.nirText,
+                   "$mirror$Product$demo$mirrorproduct$GenericPair."
+                   "MirroredElemLabels : "
+                   "scala.Tuple3 [ \"value\", \"label\", \"count\" ]") &&
+          contains(result.nirText, "define @demo.mirrorproduct.Main.mono : "
+                                   "(scala.deriving.Mirror.ProductOf,Object)Object") &&
+          contains(result.nirText, "define @demo.mirrorproduct.Main.elementTypes : "
+                                   "(scala.deriving.Mirror.ProductOf,Object)Object") &&
+          contains(result.nirText,
+                   "define @demo.mirrorproduct.Main.elementLabels : "
+                   "(scala.deriving.Mirror.ProductOf,scala.Tuple)scala.Tuple") &&
+          contains(result.nirText, "define @demo.mirrorproduct.Main.label : "
+                                   "(scala.deriving.Mirror.ProductOf,String)String") &&
           contains(result.nirText,
                    "ret Object new demo.mirrorproduct.GenericPair(call "
                    "%product.productElement(0), call %product.productElement(1), "
@@ -6054,13 +6142,14 @@ trait UnsupportedSum derives Rebuild
                                    "$mirror$Product$type())") &&
           countOccurrences(result.nirText, "call %demo.mirrorproduct.GenericPair$."
                                            "$mirror$Product$type()") == 3,
-      "Scala 3 product Mirror synthesis, stable contextual evidence, generated "
+      "Scala 3 product Mirror synthesis, type metadata, singleton labels, "
       "generic factories, fromProduct lowering, diagnostics, or native execution "
       "diverged "
       "(status=" +
           std::to_string(status) + ", output='" + text + "', diagnostics='" +
           result.diagnosticsText + "', invalid-diagnostics='" +
-          invalid.diagnosticsText + "')");
+          invalid.diagnosticsText + "', invalid-label-diagnostics='" +
+          invalidLabel.diagnosticsText + "')");
 }
 
 int smokePrimitiveGenericsNativeRuntime() {

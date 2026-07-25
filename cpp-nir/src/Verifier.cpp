@@ -751,11 +751,24 @@ TypeMemberMetadata typeMemberMetadata(const Definition& definition) {
 bool metadataTypeIsSubtype(
     const std::string& actual, const std::string& expected,
     const std::unordered_map<std::string, std::vector<std::string>>& parentMap) {
-  if (actual == expected) {
+  const auto erasedMetadataType = [](const std::string& type) {
+    const std::string normalized = trim(type);
+    if (normalized.size() >= 2 && normalized.front() == '"' &&
+        normalized.back() == '"') {
+      return std::string{"String"};
+    }
+    const std::size_t application = normalized.find('[');
+    return trim(application == std::string::npos
+                    ? std::string_view(normalized)
+                    : std::string_view(normalized).substr(0, application));
+  };
+  const std::string erasedActual = erasedMetadataType(actual);
+  const std::string erasedExpected = erasedMetadataType(expected);
+  if (erasedActual == erasedExpected) {
     return true;
   }
-  const std::vector<std::string> types = linearizedTypeNames(actual, parentMap);
-  return std::find(types.begin(), types.end(), expected) != types.end();
+  const std::vector<std::string> types = linearizedTypeNames(erasedActual, parentMap);
+  return std::find(types.begin(), types.end(), erasedExpected) != types.end();
 }
 
 void verifyTypeMemberDefinition(
