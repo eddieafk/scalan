@@ -1021,22 +1021,29 @@ Current scaffold status:
   modifier. A top-level sealed trait whose direct children are top-level
   concrete classes or singleton objects receives ordered child-type and
   child-label tuples. The monomorphic form uses a stable companion mirror. A
-  generic sum is supported when every class child forwards all sealed-trait type
-  parameters and bounds once and in the same order; its mirror is an erased
-  factory with exact applied metadata such as
-  `Tuple2[Started[A], Stopped[A]]`. Its generated `ordinal` uses
+  generic sum accepts direct parent mappings that forward, select, or reorder
+  child type parameters. Fixed parent arguments are accepted only when the
+  sealed trait parameter's variance and bounds prove that the child conforms to
+  every generated parent instantiation. This covers shapes such as an
+  `Empty extends Maybe[Nothing]` singleton under covariant `Maybe[+A]` and
+  `First[A] extends Choice[A, Nothing]`/`Second[B] extends Choice[Nothing, B]`,
+  as well as an `Ignore extends Handler[Object]` singleton under contravariant
+  `Handler[-A]`. `Nothing` is consequently valid as a generic type argument. The
+  mirror is an erased factory with exact applied child metadata such as
+  `Tuple2[First[A], Second[B]]`; its own parameters are invariant so variant
+  deriving types remain well-formed. Its generated `ordinal` uses
   definition-order type tests against erased child classes or modules and
   returns the corresponding zero-based index. A normal `derived` method can
   request either `SumOf[T]` or the common `Of[T]` evidence, including when
   generic result-type inference must follow the generated evidence's applied
-  parent. Optimized native coverage checks monomorphic class/object and generic
-  class ordinal branches, stable versus fresh evidence identity, `Of`
-  compatibility, metadata, stored-given initialization, and focused diagnostics
-  for unsealed sums, non-uniform generic child mappings, generic singleton
-  children, and unsupported direct-child shapes. Non-uniform generic child
-  substitutions, generic singleton children, abstract/nested direct children,
-  tuple-value operations, compile-time tuple recursion, and higher-kinded
-  derivation remain later derivation milestones.
+  parent. Optimized native coverage checks monomorphic class/object children,
+  generic singleton and parameter-subset children, reordered mappings, stable
+  versus fresh evidence identity, `Of` compatibility, metadata, stored-given
+  initialization, and focused diagnostics for unsealed sums, fixed arguments
+  that are invalid under the parent's variance, and unsupported direct-child
+  shapes. Nested or otherwise non-invertible generic parent mappings,
+  abstract/nested direct children, tuple-value operations, compile-time tuple
+  recursion, and higher-kinded derivation remain later derivation milestones.
   Anonymous or local parameterized givens,
   contextual-only inference for ordinary methods, nested companion declarations,
   and Scala 2 `implicit` syntax also remain later milestones.

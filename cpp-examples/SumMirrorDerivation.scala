@@ -29,6 +29,22 @@ sealed trait GenericEvent[A] derives Ordinal
 class GenericStarted[A](val value: A) extends GenericEvent[A]
 class GenericStopped[A](val value: A) extends GenericEvent[A]
 
+sealed trait Maybe[+A] derives Ordinal
+object Empty extends Maybe[Nothing]
+class Present[+A](val value: A) extends Maybe[A]
+
+sealed trait Choice[+A, +B] derives Ordinal
+class First[+A](val value: A) extends Choice[A, Nothing]
+class Second[+B](val value: B) extends Choice[Nothing, B]
+
+sealed trait Routed[A, B] derives Ordinal
+class Straight[A, B] extends Routed[A, B]
+class Reversed[X, Y] extends Routed[Y, X]
+
+sealed trait Handler[-A] derives Ordinal
+object Ignore extends Handler[Object]
+class Use[-A](value: A) extends Handler[A]
+
 sealed trait Signal derives Ordinal
 object Idle extends Signal
 class Active(val value: Int) extends Signal
@@ -72,5 +88,14 @@ object SumMirrorDerivation {
     println(ordinal[Signal](Idle))
     println(ordinal[Signal](new Active(1)))
     println(ordinal[Signal](Done))
+    println(ordinal[Maybe[String]](Empty))
+    println(ordinal[Maybe[String]](new Present[String]("value")))
+    println(ordinal[Choice[String, String]](new First[String]("left")))
+    println(ordinal[Choice[String, String]](new Second[String]("right")))
+    println(
+      sumMirror[Routed[Object, String]]().ordinal(
+        new Reversed[String, Object]))
+    println(ordinal[Handler[String]](Ignore))
+    println(ordinal[Handler[String]](new Use[String]("value")))
   }
 }

@@ -2682,6 +2682,24 @@ void Typechecker::collectSumMirrors(const std::vector<AstDeclaration>& declarati
       SymbolInfo symbol;
       std::string elementType;
     };
+    const auto fixedParentArgumentAppliesToEveryTarget =
+        [&](const TypeParameterInfo& parameter, const TypeInfo& argument) {
+          if (argument.kind == SimpleTypeKind::Unknown) {
+            return false;
+          }
+          switch (parameter.variance) {
+          case TypeVariance::Covariant:
+            return isAssignable(parameter.lowerBound, argument);
+          case TypeVariance::Contravariant:
+            return isAssignable(argument, parameter.upperBound);
+          case TypeVariance::Invariant:
+            return parameter.lowerBound.kind != SimpleTypeKind::Unknown &&
+                   parameter.upperBound.kind != SimpleTypeKind::Unknown &&
+                   parameter.lowerBound.name == parameter.upperBound.name &&
+                   argument.name == parameter.lowerBound.name;
+          }
+          return false;
+        };
     std::vector<SumChild> children;
     std::unordered_set<std::string> childSymbols;
     bool unsupportedChild = false;
@@ -2708,15 +2726,6 @@ void Typechecker::collectSumMirrors(const std::vector<AstDeclaration>& declarati
         unsupportedChild = true;
         continue;
       }
-      if (candidateDeclaration.kind == AstDeclarationKind::Object && generic) {
-        diagnostics_.error(
-            candidateDeclaration.span,
-            "generic sum mirror object children require non-uniform type "
-            "substitution: " +
-                candidateName);
-        unsupportedChild = true;
-        continue;
-      }
       if (!generic && !candidate->second.typeParameters.empty()) {
         diagnostics_.error(
             candidateDeclaration.span,
@@ -2726,6 +2735,7 @@ void Typechecker::collectSumMirrors(const std::vector<AstDeclaration>& declarati
         continue;
       }
 
+      std::vector<TypeInfo> childTypeArguments;
       if (generic) {
         const auto directParent =
             std::find(candidate->second.parentSymbolNames.begin(),
@@ -2735,47 +2745,74 @@ void Typechecker::collectSumMirrors(const std::vector<AstDeclaration>& declarati
         const TypeInfo* parentType = parentIndex < candidate->second.parentTypes.size()
                                          ? &candidate->second.parentTypes[parentIndex]
                                          : nullptr;
-        bool forwardsTypeParameters =
-            candidate->second.typeParameters.size() == target.typeParameters.size() &&
-            parentType != nullptr &&
-            parentType->typeArguments.size() == target.typeParameters.size();
-        for (std::size_t parameterIndex = 0;
-             forwardsTypeParameters && parameterIndex < target.typeParameters.size();
-             ++parameterIndex) {
-          const TypeInfo& argument = parentType->typeArguments[parameterIndex];
-          forwardsTypeParameters =
-              argument.typeParameter &&
-              argument.typeParameterSymbolName ==
-                  candidate->second.typeParameters[parameterIndex].symbolName;
+        bool applicable = parentType != nullptr && parentType->typeArguments.size() ==
+                                                       target.typeParameters.size();
+        std::vector<std::size_t> childParameterMappings(
+            candidate->second.typeParameters.size(), target.typeParameters.size());
+        for (std::size_t targetIndex = 0;
+             applicable && targetIndex < target.typeParameters.size(); ++targetIndex) {
+          const TypeInfo& parentArgument = parentType->typeArguments[targetIndex];
+          if (!parentArgument.typeParameter) {
+            applicable = fixedParentArgumentAppliesToEveryTarget(
+                target.typeParameters[targetIndex], parentArgument);
+            continue;
+          }
+
+          const auto childParameter = std::find_if(
+              candidate->second.typeParameters.begin(),
+              candidate->second.typeParameters.end(),
+              [&](const TypeParameterInfo& parameter) {
+                return parameter.symbolName == parentArgument.typeParameterSymbolName;
+              });
+          if (childParameter == candidate->second.typeParameters.end()) {
+            applicable = false;
+            continue;
+          }
+          const std::size_t childIndex = static_cast<std::size_t>(
+              std::distance(candidate->second.typeParameters.begin(), childParameter));
+          if (childParameterMappings[childIndex] != target.typeParameters.size() &&
+              childParameterMappings[childIndex] != targetIndex) {
+            applicable = false;
+            continue;
+          }
+          childParameterMappings[childIndex] = targetIndex;
         }
-        std::unordered_map<std::string, TypeInfo> childTypeArguments;
-        for (std::size_t parameterIndex = 0;
-             forwardsTypeParameters && parameterIndex < target.typeParameters.size();
-             ++parameterIndex) {
-          childTypeArguments[candidate->second.typeParameters[parameterIndex]
-                                 .symbolName] = derivingTypeArguments[parameterIndex];
+        applicable =
+            applicable &&
+            std::none_of(childParameterMappings.begin(), childParameterMappings.end(),
+                         [&](std::size_t targetIndex) {
+                           return targetIndex == target.typeParameters.size();
+                         });
+
+        std::unordered_map<std::string, TypeInfo> childSubstitutions;
+        childTypeArguments.reserve(candidate->second.typeParameters.size());
+        for (std::size_t childIndex = 0;
+             applicable && childIndex < candidate->second.typeParameters.size();
+             ++childIndex) {
+          const std::size_t targetIndex = childParameterMappings[childIndex];
+          childTypeArguments.push_back(derivingTypeArguments[targetIndex]);
+          childSubstitutions[candidate->second.typeParameters[childIndex].symbolName] =
+              derivingTypeArguments[targetIndex];
         }
-        for (std::size_t parameterIndex = 0;
-             forwardsTypeParameters && parameterIndex < target.typeParameters.size();
-             ++parameterIndex) {
+        for (std::size_t childIndex = 0;
+             applicable && childIndex < candidate->second.typeParameters.size();
+             ++childIndex) {
           const TypeParameterInfo& childParameter =
-              candidate->second.typeParameters[parameterIndex];
+              candidate->second.typeParameters[childIndex];
           const TypeParameterInfo& targetParameter =
-              target.typeParameters[parameterIndex];
+              target.typeParameters[childParameterMappings[childIndex]];
           const TypeInfo childLower =
-              substituteTypeParameters(childParameter.lowerBound, childTypeArguments);
+              substituteTypeParameters(childParameter.lowerBound, childSubstitutions);
           const TypeInfo childUpper =
-              substituteTypeParameters(childParameter.upperBound, childTypeArguments);
-          forwardsTypeParameters = childLower.kind == targetParameter.lowerBound.kind &&
-                                   childLower.name == targetParameter.lowerBound.name &&
-                                   childUpper.kind == targetParameter.upperBound.kind &&
-                                   childUpper.name == targetParameter.upperBound.name;
+              substituteTypeParameters(childParameter.upperBound, childSubstitutions);
+          applicable = isAssignable(targetParameter.lowerBound, childLower) &&
+                       isAssignable(childUpper, targetParameter.upperBound);
         }
-        if (!forwardsTypeParameters) {
+        if (!applicable) {
           diagnostics_.error(
               candidateDeclaration.span,
-              "generic sum mirror child must forward the sealed trait type "
-              "parameters and bounds in order: " +
+              "generic sum mirror child parent type must be applicable to every "
+              "sealed trait type argument combination: " +
                   candidateName);
           unsupportedChild = true;
           continue;
@@ -2783,11 +2820,11 @@ void Typechecker::collectSumMirrors(const std::vector<AstDeclaration>& declarati
       }
 
       const std::string elementType =
-          generic ? specializeResolvedTypeApplication(candidate->second,
-                                                      derivingTypeArguments,
-                                                      candidateDeclaration.span, false)
-                        .type.name
-                  : candidate->second.type.name;
+          generic && !childTypeArguments.empty()
+              ? specializeResolvedTypeApplication(candidate->second, childTypeArguments,
+                                                  candidateDeclaration.span, false)
+                    .type.name
+              : candidate->second.type.name;
       children.push_back(
           SumChild{&candidateDeclaration, candidate->second, elementType});
     }
@@ -2825,6 +2862,9 @@ void Typechecker::collectSumMirrors(const std::vector<AstDeclaration>& declarati
     implementation.name = sumMirrorImplementationName(targetName);
     implementation.span = nextSpan();
     implementation.typeParameters = declaration.typeParameters;
+    for (AstTypeParameter& parameter : implementation.typeParameters) {
+      parameter.variance = TypeVariance::Invariant;
+    }
     implementation.parentTypes = {"scala.deriving.Mirror.SumOf[" + derivingType.name +
                                   "]"};
 
@@ -6665,7 +6705,8 @@ SymbolInfo Typechecker::specializeResolvedTypeApplication(
   std::unordered_map<std::string, TypeInfo> substitutions;
   for (std::size_t i = 0; i < typeArguments.size(); ++i) {
     const TypeInfo& argument = typeArguments[i];
-    if (argument.kind != SimpleTypeKind::Unknown && !isReferenceType(argument) &&
+    if (argument.kind != SimpleTypeKind::Unknown &&
+        argument.kind != SimpleTypeKind::Nothing && !isReferenceType(argument) &&
         !isBoxablePrimitiveType(argument.kind)) {
       if (reportDiagnostics) {
         diagnostics_.error(span,

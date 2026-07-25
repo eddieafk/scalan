@@ -4847,7 +4847,6 @@ trait Parent[A]
 
 object InvalidGenerics {
   def identity[A](value: A): A = value
-  val unsupported = new Empty[Nothing]()
   val arity = new Box[Base, Child](new Base)
   val bounded = new Bounded[String]("no")
   val lowerBounded = new LowerBounded[String]()
@@ -4896,9 +4895,6 @@ class MissingGenericChild extends Parent
 
   return expect(
       status == 0 && text == "42\n2\nreference\n" && !invalid.ok &&
-          contains(invalid.diagnosticsText,
-                   "type argument Nothing for Empty must be a supported primitive "
-                   "or reference type") &&
           contains(invalid.diagnosticsText,
                    "type application to Box has 2 arguments but expected 1") &&
           contains(invalid.diagnosticsText,
@@ -6195,6 +6191,22 @@ sealed trait GenericEvent[A] derives Ordinal
 class GenericStarted[A](val value: A) extends GenericEvent[A]
 class GenericStopped[A](val value: A) extends GenericEvent[A]
 
+sealed trait Maybe[+A] derives Ordinal
+object Empty extends Maybe[Nothing]
+class Present[+A](val value: A) extends Maybe[A]
+
+sealed trait Choice[+A, +B] derives Ordinal
+class First[+A](val value: A) extends Choice[A, Nothing]
+class Second[+B](val value: B) extends Choice[Nothing, B]
+
+sealed trait Routed[A, B] derives Ordinal
+class Straight[A, B] extends Routed[A, B]
+class Reversed[X, Y] extends Routed[Y, X]
+
+sealed trait Handler[-A] derives Ordinal
+object Ignore extends Handler[Object]
+class Use[-A](value: A) extends Handler[A]
+
 sealed trait Signal derives Ordinal
 object Idle extends Signal
 class Active(val value: Int) extends Signal
@@ -6238,6 +6250,15 @@ object Main {
     println(ordinal[Signal](Idle))
     println(ordinal[Signal](new Active(1)))
     println(ordinal[Signal](Done))
+    println(ordinal[Maybe[String]](Empty))
+    println(ordinal[Maybe[String]](new Present[String]("value")))
+    println(ordinal[Choice[String, String]](new First[String]("left")))
+    println(ordinal[Choice[String, String]](new Second[String]("right")))
+    println(
+      sumMirror[Routed[Object, String]]().ordinal(
+        new Reversed[String, Object]))
+    println(ordinal[Handler[String]](Ignore))
+    println(ordinal[Handler[String]](new Use[String]("value")))
   }
 }
 )";
@@ -6335,20 +6356,22 @@ class Leaf extends Branch
 
   return expect(
       status == 0 &&
-          text == "0\n1\n2\n2\ntrue\ntrue\ntrue\n0\n1\ntrue\ntrue\n0\n1\n2\n" &&
+          text == "0\n1\n2\n2\ntrue\ntrue\ntrue\n0\n1\ntrue\ntrue\n0\n1\n2\n"
+                  "0\n1\n0\n1\n1\n0\n1\n" &&
           !unsealed.ok &&
           contains(unsealed.diagnosticsText,
                    "sum mirror derivation requires a sealed trait: "
                    "demo.invalidmirrorsum.open.OpenEvent") &&
           !generic.ok &&
           contains(generic.diagnosticsText,
-                   "generic sum mirror child must forward the sealed trait type "
-                   "parameters and bounds in order: "
+                   "generic sum mirror child parent type must be applicable to "
+                   "every sealed trait type argument combination: "
                    "demo.invalidmirrorsum.generic.FixedChild") &&
           !genericObject.ok &&
           contains(genericObject.diagnosticsText,
-                   "generic sum mirror object children require non-uniform type "
-                   "substitution: demo.invalidmirrorsum.genericobject.Fixed") &&
+                   "generic sum mirror child parent type must be applicable to "
+                   "every sealed trait type argument combination: "
+                   "demo.invalidmirrorsum.genericobject.Fixed") &&
           !nonConcreteChild.ok &&
           contains(nonConcreteChild.diagnosticsText,
                    "sum mirror child must be a top-level concrete "
@@ -6436,7 +6459,42 @@ class Leaf extends Branch
           contains(result.nirText,
                    "ret Int if(is-instance-of[demo.mirrorsum.Idle](%value), "
                    "0, if(is-instance-of[demo.mirrorsum.Active](%value), "
-                   "1, 2))"),
+                   "1, 2))") &&
+          contains(result.nirText,
+                   "module @demo.mirrorsum.Empty : @demo.mirrorsum.Maybe") &&
+          contains(result.nirText,
+                   "$mirror$Sum$demo$mirrorsum$Maybe.MirroredElemTypes : "
+                   "scala.Tuple2 [ demo.mirrorsum.Empty, "
+                   "demo.mirrorsum.Present [ A ] ]") &&
+          contains(result.nirText,
+                   "$mirror$Sum$demo$mirrorsum$Maybe.MirroredElemLabels : "
+                   "scala.Tuple2 [ \"Empty\", \"Present\" ]") &&
+          contains(result.nirText,
+                   "ret Int if(is-instance-of[demo.mirrorsum.Empty](%value), "
+                   "0, 1)") &&
+          contains(result.nirText,
+                   "$mirror$Sum$demo$mirrorsum$Choice.MirroredElemTypes : "
+                   "scala.Tuple2 [ demo.mirrorsum.First [ A ], "
+                   "demo.mirrorsum.Second [ B ] ]") &&
+          contains(result.nirText,
+                   "$mirror$Sum$demo$mirrorsum$Choice.MirroredElemLabels : "
+                   "scala.Tuple2 [ \"First\", \"Second\" ]") &&
+          contains(result.nirText,
+                   "ret Int if(is-instance-of[demo.mirrorsum.First](%value), "
+                   "0, 1)") &&
+          contains(result.nirText,
+                   "$mirror$Sum$demo$mirrorsum$Routed.MirroredElemTypes : "
+                   "scala.Tuple2 [ demo.mirrorsum.Straight [ A, B ], "
+                   "demo.mirrorsum.Reversed [ B, A ] ]") &&
+          contains(result.nirText,
+                   "module @demo.mirrorsum.Ignore : @demo.mirrorsum.Handler") &&
+          contains(result.nirText,
+                   "$mirror$Sum$demo$mirrorsum$Handler.MirroredElemTypes : "
+                   "scala.Tuple2 [ demo.mirrorsum.Ignore, "
+                   "demo.mirrorsum.Use [ A ] ]") &&
+          contains(result.nirText,
+                   "ret Int if(is-instance-of[demo.mirrorsum.Ignore](%value), "
+                   "0, 1)"),
       "Scala 3 sum Mirror synthesis, Mirror.Of compatibility, ordered ordinal "
       "lowering, metadata, supported-shape diagnostics, or native execution "
       "diverged (status=" +
