@@ -86,5 +86,8 @@ object ProductMirrorDerivation {
     println(
       mirror[GenericPair[String, String]]() !=
         mirror[GenericPair[String, String]]())
+    println(
+      mirrorOf[GenericPair[String, String]]() !=
+        mirror[GenericPair[String, String]]())
   }
 }

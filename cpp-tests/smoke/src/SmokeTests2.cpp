@@ -5979,6 +5979,9 @@ object Main {
     println(
       mirror[GenericPair[String, String]]() !=
         mirror[GenericPair[String, String]]())
+    println(
+      mirrorOf[GenericPair[String, String]]() !=
+        mirror[GenericPair[String, String]]())
   }
 }
 )";
@@ -6041,7 +6044,7 @@ object Labels {
 
   return expect(
       status == 0 &&
-          text == "0\n42\nanswer\n42\ntrue\ntrue\ngeneric\nlabel\n7\ntrue\n" &&
+          text == "0\n42\nanswer\n42\ntrue\ntrue\ngeneric\nlabel\n7\ntrue\ntrue\n" &&
           !invalid.ok &&
           contains(invalid.diagnosticsText,
                    "no given value found for context parameter mirror of type "
@@ -6149,7 +6152,7 @@ object Labels {
                                    "%demo.mirrorproduct.GenericPair$."
                                    "$mirror$Product$type())") &&
           countOccurrences(result.nirText, "call %demo.mirrorproduct.GenericPair$."
-                                           "$mirror$Product$type()") == 3,
+                                           "$mirror$Product$type()") == 5,
       "Scala 3 product Mirror synthesis, type metadata, singleton labels, "
       "generic factories, fromProduct lowering, diagnostics, or native execution "
       "diverged "
@@ -6172,7 +6175,13 @@ class DerivedOrdinal[A](val mirror: scala.deriving.Mirror.SumOf[A])
   override def ordinal(value: A): Int = mirror.ordinal(value)
 }
 
+class StringOrdinal extends Ordinal[String] {
+  override def ordinal(value: String): Int = 99
+}
+
 object Ordinal {
+  given stringOrdinal: Ordinal[String] = new StringOrdinal
+
   def derived[A](using mirror: scala.deriving.Mirror.SumOf[A]): Ordinal[A] =
     new DerivedOrdinal[A](mirror)
 }
@@ -6181,6 +6190,10 @@ sealed trait Event derives Ordinal
 class Started(val id: Int) extends Event
 class Stopped(val reason: String) extends Event
 class Failed(val code: Int) extends Event
+
+sealed trait GenericEvent[A] derives Ordinal
+class GenericStarted[A](val value: A) extends GenericEvent[A]
+class GenericStopped[A](val value: A) extends GenericEvent[A]
 
 object Main {
   def ordinal[A](value: A)(using instance: Ordinal[A]): Int =
@@ -6207,6 +6220,16 @@ object Main {
     println(sumMirror[Event]() == sumMirror[Event]())
     println(mirror[Event]() == sumMirror[Event]())
     println(mono[Event](sumMirror[Event](), new Started(4)).isInstanceOf[Started])
+    println(
+      ordinal[GenericEvent[String]](new GenericStarted[String]("begin")))
+    println(
+      ordinal[GenericEvent[String]](new GenericStopped[String]("done")))
+    println(
+      sumMirror[GenericEvent[String]]() !=
+        sumMirror[GenericEvent[String]]())
+    println(
+      mirror[GenericEvent[String]]() !=
+        sumMirror[GenericEvent[String]]())
   }
 }
 )";
@@ -6230,7 +6253,7 @@ object Ordinal {
 }
 
 sealed trait GenericEvent[A] derives Ordinal
-class GenericChild extends GenericEvent[Int]
+class FixedChild extends GenericEvent[Int]
 )";
   constexpr const char* nonConcreteChildSource =
       R"(package demo.invalidmirrorsum.child
@@ -6288,17 +6311,19 @@ class Leaf extends Branch
   std::filesystem::remove(output, ignored);
 
   return expect(
-      status == 0 && text == "0\n1\n2\n2\ntrue\ntrue\ntrue\n" && !unsealed.ok &&
+      status == 0 && text == "0\n1\n2\n2\ntrue\ntrue\ntrue\n0\n1\ntrue\ntrue\n" &&
+          !unsealed.ok &&
           contains(unsealed.diagnosticsText,
                    "sum mirror derivation requires a sealed trait: "
                    "demo.invalidmirrorsum.open.OpenEvent") &&
           !generic.ok &&
           contains(generic.diagnosticsText,
-                   "sum mirror derivation does not yet support generic sealed "
-                   "traits: demo.invalidmirrorsum.generic.GenericEvent") &&
+                   "generic sum mirror child must forward the sealed trait type "
+                   "parameters and bounds in order: "
+                   "demo.invalidmirrorsum.generic.FixedChild") &&
           !nonConcreteChild.ok &&
           contains(nonConcreteChild.diagnosticsText,
-                   "sum mirror child must be a top-level, non-generic concrete "
+                   "sum mirror child must be a top-level concrete "
                    "class: demo.invalidmirrorsum.child.Branch") &&
           contains(result.nirText, "trait @scala.deriving.Mirror.Sum : "
                                    "@scala.deriving.Mirror") &&
@@ -6340,7 +6365,30 @@ class Leaf extends Branch
           contains(result.nirText, "define @demo.mirrorsum.Main.mono : "
                                    "(scala.deriving.Mirror.SumOf,Object)Object") &&
           contains(result.nirText, "define @demo.mirrorsum.Main.label : "
-                                   "(scala.deriving.Mirror.SumOf,String)String"),
+                                   "(scala.deriving.Mirror.SumOf,String)String") &&
+          contains(result.nirText, "class @demo.mirrorsum."
+                                   "$mirror$Sum$demo$mirrorsum$GenericEvent : "
+                                   "@scala.deriving.Mirror.SumOf") &&
+          contains(result.nirText,
+                   "$mirror$Sum$demo$mirrorsum$GenericEvent.MirroredElemTypes : "
+                   "scala.Tuple2 [ demo.mirrorsum.GenericStarted [ A ], "
+                   "demo.mirrorsum.GenericStopped [ A ] ]") &&
+          contains(result.nirText,
+                   "$mirror$Sum$demo$mirrorsum$GenericEvent.MirroredLabel : "
+                   "\"GenericEvent\"") &&
+          contains(result.nirText,
+                   "$mirror$Sum$demo$mirrorsum$GenericEvent.MirroredElemLabels : "
+                   "scala.Tuple2 [ \"GenericStarted\", \"GenericStopped\" ]") &&
+          contains(result.nirText,
+                   "ret Int if(is-instance-of[demo.mirrorsum.GenericStarted]"
+                   "(%value), 0, 1)") &&
+          contains(result.nirText,
+                   "define @demo.mirrorsum.GenericEvent$.$mirror$Sum$type : "
+                   "()scala.deriving.Mirror.SumOf") &&
+          contains(result.nirText, "ret scala.deriving.Mirror.SumOf new demo.mirrorsum."
+                                   "$mirror$Sum$demo$mirrorsum$GenericEvent") &&
+          !contains(result.nirText, "field @demo.mirrorsum.GenericEvent$."
+                                    "$mirror$Sum$type$field"),
       "Scala 3 sum Mirror synthesis, Mirror.Of compatibility, ordered ordinal "
       "lowering, metadata, supported-shape diagnostics, or native execution "
       "diverged (status=" +

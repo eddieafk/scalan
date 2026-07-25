@@ -2212,7 +2212,7 @@ nir::Value valueFor(const frontend::AstExpression& expression,
     if (callee.kind != AstExpressionKind::Select || callee.children.size() != 1) {
       return expressionValueFor(callee, context, preserveCallable);
     }
-    const std::string targetType = qualifyTypeName(expression.declaredType, context);
+    const std::string targetType = localDeclaredTypeName(expression, context);
     nir::Value receiver = expressionValueFor(callee.children.front(), context);
     if (callee.text == support::StdNames::IsInstanceOf) {
       return nir::isInstanceOfValue(targetType, std::move(receiver), expression.span);

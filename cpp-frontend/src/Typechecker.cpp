@@ -2654,18 +2654,32 @@ void Typechecker::collectSumMirrors(const std::vector<AstDeclaration>& declarati
                              targetName);
       continue;
     }
-    if (!targetSymbol->second.typeParameters.empty()) {
-      diagnostics_.error(
-          declaration.span,
-          "sum mirror derivation does not yet support generic sealed traits: " +
-              targetName);
-      continue;
-    }
     const SymbolInfo target = targetSymbol->second;
+    std::vector<TypeInfo> derivingTypeArguments;
+    derivingTypeArguments.reserve(target.typeParameters.size());
+    for (const TypeParameterInfo& parameter : target.typeParameters) {
+      TypeInfo parameterType{SimpleTypeKind::Object, parameter.name};
+      parameterType.runtimeName = parameter.upperBound.runtimeName.empty()
+                                      ? parameter.upperBound.name
+                                      : parameter.upperBound.runtimeName;
+      if (parameterType.runtimeName.empty() || parameterType.runtimeName == "Unknown") {
+        parameterType.runtimeName = "Object";
+      }
+      parameterType.typeParameterSymbolName = parameter.symbolName;
+      parameterType.typeParameter = true;
+      derivingTypeArguments.push_back(std::move(parameterType));
+    }
+    const bool generic = !derivingTypeArguments.empty();
+    const TypeInfo derivingType =
+        generic ? specializeResolvedTypeApplication(target, derivingTypeArguments,
+                                                    declaration.span, false)
+                      .type
+                : target.type;
 
     struct SumChild {
       const AstDeclaration* declaration = nullptr;
       SymbolInfo symbol;
+      std::string elementType;
     };
     std::vector<SumChild> children;
     std::unordered_set<std::string> childSymbols;
@@ -2684,16 +2698,86 @@ void Typechecker::collectSumMirrors(const std::vector<AstDeclaration>& declarati
         continue;
       }
       childSymbols.insert(candidateName);
-      if (candidateDeclaration.kind != AstDeclarationKind::Class ||
-          !candidateDeclaration.typeParameters.empty()) {
+      if (candidateDeclaration.kind != AstDeclarationKind::Class) {
+        diagnostics_.error(candidateDeclaration.span,
+                           "sum mirror child must be a top-level concrete class: " +
+                               candidateName);
+        unsupportedChild = true;
+        continue;
+      }
+      if (!generic && !candidate->second.typeParameters.empty()) {
         diagnostics_.error(
             candidateDeclaration.span,
-            "sum mirror child must be a top-level, non-generic concrete class: " +
+            "sum mirror child of a monomorphic sealed trait must be non-generic: " +
                 candidateName);
         unsupportedChild = true;
         continue;
       }
-      children.push_back(SumChild{&candidateDeclaration, candidate->second});
+
+      if (generic) {
+        const auto directParent =
+            std::find(candidate->second.parentSymbolNames.begin(),
+                      candidate->second.parentSymbolNames.end(), targetName);
+        const std::size_t parentIndex = static_cast<std::size_t>(
+            std::distance(candidate->second.parentSymbolNames.begin(), directParent));
+        const TypeInfo* parentType = parentIndex < candidate->second.parentTypes.size()
+                                         ? &candidate->second.parentTypes[parentIndex]
+                                         : nullptr;
+        bool forwardsTypeParameters =
+            candidate->second.typeParameters.size() == target.typeParameters.size() &&
+            parentType != nullptr &&
+            parentType->typeArguments.size() == target.typeParameters.size();
+        for (std::size_t parameterIndex = 0;
+             forwardsTypeParameters && parameterIndex < target.typeParameters.size();
+             ++parameterIndex) {
+          const TypeInfo& argument = parentType->typeArguments[parameterIndex];
+          forwardsTypeParameters =
+              argument.typeParameter &&
+              argument.typeParameterSymbolName ==
+                  candidate->second.typeParameters[parameterIndex].symbolName;
+        }
+        std::unordered_map<std::string, TypeInfo> childTypeArguments;
+        for (std::size_t parameterIndex = 0;
+             forwardsTypeParameters && parameterIndex < target.typeParameters.size();
+             ++parameterIndex) {
+          childTypeArguments[candidate->second.typeParameters[parameterIndex]
+                                 .symbolName] = derivingTypeArguments[parameterIndex];
+        }
+        for (std::size_t parameterIndex = 0;
+             forwardsTypeParameters && parameterIndex < target.typeParameters.size();
+             ++parameterIndex) {
+          const TypeParameterInfo& childParameter =
+              candidate->second.typeParameters[parameterIndex];
+          const TypeParameterInfo& targetParameter =
+              target.typeParameters[parameterIndex];
+          const TypeInfo childLower =
+              substituteTypeParameters(childParameter.lowerBound, childTypeArguments);
+          const TypeInfo childUpper =
+              substituteTypeParameters(childParameter.upperBound, childTypeArguments);
+          forwardsTypeParameters = childLower.kind == targetParameter.lowerBound.kind &&
+                                   childLower.name == targetParameter.lowerBound.name &&
+                                   childUpper.kind == targetParameter.upperBound.kind &&
+                                   childUpper.name == targetParameter.upperBound.name;
+        }
+        if (!forwardsTypeParameters) {
+          diagnostics_.error(
+              candidateDeclaration.span,
+              "generic sum mirror child must forward the sealed trait type "
+              "parameters and bounds in order: " +
+                  candidateName);
+          unsupportedChild = true;
+          continue;
+        }
+      }
+
+      const std::string elementType =
+          generic ? specializeResolvedTypeApplication(candidate->second,
+                                                      derivingTypeArguments,
+                                                      candidateDeclaration.span, false)
+                        .type.name
+                  : candidate->second.type.name;
+      children.push_back(
+          SumChild{&candidateDeclaration, candidate->second, elementType});
     }
     for (const auto& [symbolName, symbol] : globalSymbols_) {
       if (std::find(symbol.parentSymbolNames.begin(), symbol.parentSymbolNames.end(),
@@ -2701,10 +2785,9 @@ void Typechecker::collectSumMirrors(const std::vector<AstDeclaration>& declarati
           childSymbols.contains(symbolName)) {
         continue;
       }
-      diagnostics_.error(
-          declaration.span,
-          "sum mirror child must be a top-level, non-generic concrete class: " +
-              symbolName);
+      diagnostics_.error(declaration.span,
+                         "sum mirror child must be a top-level concrete class: " +
+                             symbolName);
       unsupportedChild = true;
     }
     if (unsupportedChild) {
@@ -2728,7 +2811,8 @@ void Typechecker::collectSumMirrors(const std::vector<AstDeclaration>& declarati
     implementation.kind = AstDeclarationKind::Class;
     implementation.name = sumMirrorImplementationName(targetName);
     implementation.span = nextSpan();
-    implementation.parentTypes = {"scala.deriving.Mirror.SumOf[" + target.type.name +
+    implementation.typeParameters = declaration.typeParameters;
+    implementation.parentTypes = {"scala.deriving.Mirror.SumOf[" + derivingType.name +
                                   "]"};
 
     const auto addTypeAlias = [&](std::string name, std::string aliasTarget) {
@@ -2747,7 +2831,7 @@ void Typechecker::collectSumMirrors(const std::vector<AstDeclaration>& declarati
     elementTypes.reserve(children.size());
     elementLabels.reserve(children.size());
     for (const SumChild& child : children) {
-      elementTypes.push_back(child.symbol.type.name);
+      elementTypes.push_back(child.elementType);
       elementLabels.push_back(stringSingletonType(child.declaration->name));
     }
     addTypeAlias("MirroredElemTypes", tupleTypeName(elementTypes));
@@ -2775,8 +2859,8 @@ void Typechecker::collectSumMirrors(const std::vector<AstDeclaration>& declarati
 
       AstExpression typeTest;
       typeTest.kind = AstExpressionKind::TypeApply;
-      typeTest.declaredType = children[childIndex].symbol.type.name;
-      typeTest.typeArguments = {children[childIndex].symbol.type.name};
+      typeTest.declaredType = children[childIndex].elementType;
+      typeTest.typeArguments = {children[childIndex].elementType};
       typeTest.span = nextSpan();
       typeTest.children.push_back(std::move(typeTestMember));
 
@@ -2798,7 +2882,7 @@ void Typechecker::collectSumMirrors(const std::vector<AstDeclaration>& declarati
     ordinal.kind = AstDeclarationKind::Def;
     ordinal.name = "ordinal";
     ordinal.span = nextSpan();
-    ordinal.parameters = {"value: " + target.type.name};
+    ordinal.parameters = {"value: " + derivingType.name};
     ordinal.contextualParameters = {false};
     ordinal.declaredType = "Int";
     ordinal.isOverride = true;
@@ -2812,35 +2896,51 @@ void Typechecker::collectSumMirrors(const std::vector<AstDeclaration>& declarati
     const std::string implementationName =
         declarationSymbolName(storedImplementation, owner);
 
-    const TypeInfo mirrorType =
-        specializeResolvedTypeApplication(sumOf, {target.type}, declaration.span, false)
-            .type;
+    const TypeInfo mirrorType = specializeResolvedTypeApplication(
+                                    sumOf, {derivingType}, declaration.span, false)
+                                    .type;
     const std::string instanceOwner = targetName + '$';
     const std::string instanceName = "$mirror$Sum$type";
 
     TypedDeclaration member;
-    member.kind = AstDeclarationKind::Val;
+    member.kind = generic ? AstDeclarationKind::Def : AstDeclarationKind::Val;
     member.name = instanceName;
     member.symbolName = qualify(instanceOwner, instanceName);
     member.span = declaration.span;
+    member.typeParameters =
+        generic ? target.typeParameters : std::vector<TypeParameterInfo>{};
     member.declaredType = mirrorType.name;
     member.inferredType = mirrorType;
     member.isGiven = true;
     member.hasInitializer = true;
-    member.initializer.kind = AstExpressionKind::New;
-    member.initializer.text = implementationName;
-    member.initializer.span = nextSpan();
+    AstExpression mirrorConstructor;
+    mirrorConstructor.kind = AstExpressionKind::New;
+    mirrorConstructor.text = implementationName;
+    mirrorConstructor.span = nextSpan();
+    if (generic) {
+      member.initializer.kind = AstExpressionKind::TypeApply;
+      member.initializer.span = nextSpan();
+      for (const TypeParameterInfo& parameter : target.typeParameters) {
+        member.initializer.typeArguments.push_back(parameter.name);
+      }
+      member.initializer.declaredType = member.initializer.typeArguments.front();
+      member.initializer.children.push_back(std::move(mirrorConstructor));
+    } else {
+      member.initializer = std::move(mirrorConstructor);
+    }
     derivedInstances_.push_back(
         DerivedInstanceInfo{instanceOwner, std::move(member), {}});
 
     SymbolInfo candidate;
-    candidate.kind = AstDeclarationKind::Val;
+    candidate.kind = generic ? AstDeclarationKind::Def : AstDeclarationKind::Val;
     candidate.name = "derived$Mirror$Sum";
     candidate.symbolName = qualify(instanceOwner, instanceName);
     candidate.type = mirrorType;
+    candidate.typeParameters =
+        generic ? target.typeParameters : std::vector<TypeParameterInfo>{};
     candidate.hasImplementation = true;
     candidate.isGiven = true;
-    candidate.isModuleMember = true;
+    candidate.isModuleMember = !generic;
     derivedGivens_[targetName].push_back(std::move(candidate));
   }
 }
@@ -6674,6 +6774,21 @@ SymbolInfo Typechecker::inferTypeApplication(const SymbolInfo& symbol,
       for (std::size_t i = 0; i < parameterType.typeArguments.size(); ++i) {
         collectInference(parameterType.typeArguments[i], argumentType.typeArguments[i],
                          onlyIfMissing);
+      }
+      return;
+    }
+    if (!parameterType.typeConstructorName.empty() &&
+        !argumentType.typeConstructorName.empty()) {
+      auto constructor = globalSymbols_.find(parameterType.typeConstructorName);
+      if (constructor == globalSymbols_.end()) {
+        return;
+      }
+      for (const TypeInfo& parentPattern : constructor->second.parentTypes) {
+        const TypeInfo parent =
+            specializeTypeForReceiver(parentPattern, parameterType);
+        if (parent.typeConstructorName == argumentType.typeConstructorName) {
+          collectInference(parent, argumentType, onlyIfMissing);
+        }
       }
     }
   };

@@ -81,7 +81,7 @@ build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
   --output /tmp/product-mirror-derivation \
   cpp-examples/ProductMirrorDerivation.scala
 
-# Compile sealed-sum `Mirror` evidence, ordered metadata, and ordinal dispatch.
+# Compile monomorphic/generic sealed-sum mirrors, metadata, and ordinal dispatch.
 build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
   --output /tmp/sum-mirror-derivation \
   cpp-examples/SumMirrorDerivation.scala
