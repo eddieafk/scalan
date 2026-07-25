@@ -1871,9 +1871,11 @@ private:
           targetsBoxedPrimitive ? nullptr : resolveGlobal(value.text);
       if (!targetsBoxedPrimitive &&
           (target == nullptr || (target->kind != DefinitionKind::Class &&
-                                 target->kind != DefinitionKind::Trait))) {
+                                 target->kind != DefinitionKind::Trait &&
+                                 target->kind != DefinitionKind::Module))) {
         addError("NIR function definition '" + definition_.name +
-                 "' tests against undefined class or trait: " + value.text);
+                 "' tests against undefined class, trait, or module: " +
+                 value.text);
         return ValueInfo{false, "Unknown", {}};
       }
       ValueInfo operand = verifyValue(value.operands.front());
@@ -1893,9 +1895,10 @@ private:
       }
       const Definition* target = resolveGlobal(value.text);
       if (target == nullptr || (target->kind != DefinitionKind::Class &&
-                                target->kind != DefinitionKind::Trait)) {
+                                target->kind != DefinitionKind::Trait &&
+                                target->kind != DefinitionKind::Module)) {
         addError("NIR function definition '" + definition_.name +
-                 "' casts to undefined class or trait: " + value.text);
+                 "' casts to undefined class, trait, or module: " + value.text);
         return ValueInfo{false, "Unknown", {}};
       }
       ValueInfo operand = verifyValue(value.operands.front());

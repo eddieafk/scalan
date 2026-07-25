@@ -6195,6 +6195,11 @@ sealed trait GenericEvent[A] derives Ordinal
 class GenericStarted[A](val value: A) extends GenericEvent[A]
 class GenericStopped[A](val value: A) extends GenericEvent[A]
 
+sealed trait Signal derives Ordinal
+object Idle extends Signal
+class Active(val value: Int) extends Signal
+object Done extends Signal
+
 object Main {
   def ordinal[A](value: A)(using instance: Ordinal[A]): Int =
     instance.ordinal(value)
@@ -6230,6 +6235,9 @@ object Main {
     println(
       mirror[GenericEvent[String]]() !=
         sumMirror[GenericEvent[String]]())
+    println(ordinal[Signal](Idle))
+    println(ordinal[Signal](new Active(1)))
+    println(ordinal[Signal](Done))
   }
 }
 )";
@@ -6254,6 +6262,17 @@ object Ordinal {
 
 sealed trait GenericEvent[A] derives Ordinal
 class FixedChild extends GenericEvent[Int]
+)";
+  constexpr const char* genericObjectSource =
+      R"(package demo.invalidmirrorsum.genericobject
+
+trait Ordinal[A]
+object Ordinal {
+  def derived[A](using mirror: scala.deriving.Mirror.SumOf[A]): Ordinal[A] = null
+}
+
+sealed trait GenericSignal[A] derives Ordinal
+object Fixed extends GenericSignal[String]
 )";
   constexpr const char* nonConcreteChildSource =
       R"(package demo.invalidmirrorsum.child
@@ -6292,6 +6311,10 @@ class Leaf extends Branch
   scalanative::support::DiagnosticEngine genericDiagnostics;
   const scalanative::tools::build::BuildResult generic = driver.buildSource(
       "GenericSumMirror.scala", genericSource, {}, genericDiagnostics);
+  scalanative::support::DiagnosticEngine genericObjectDiagnostics;
+  const scalanative::tools::build::BuildResult genericObject =
+      driver.buildSource("GenericObjectSumMirror.scala", genericObjectSource, {},
+                         genericObjectDiagnostics);
   scalanative::support::DiagnosticEngine nonConcreteChildDiagnostics;
   const scalanative::tools::build::BuildResult nonConcreteChild =
       driver.buildSource("NonConcreteSumMirrorChild.scala", nonConcreteChildSource, {},
@@ -6311,7 +6334,8 @@ class Leaf extends Branch
   std::filesystem::remove(output, ignored);
 
   return expect(
-      status == 0 && text == "0\n1\n2\n2\ntrue\ntrue\ntrue\n0\n1\ntrue\ntrue\n" &&
+      status == 0 &&
+          text == "0\n1\n2\n2\ntrue\ntrue\ntrue\n0\n1\ntrue\ntrue\n0\n1\n2\n" &&
           !unsealed.ok &&
           contains(unsealed.diagnosticsText,
                    "sum mirror derivation requires a sealed trait: "
@@ -6321,10 +6345,14 @@ class Leaf extends Branch
                    "generic sum mirror child must forward the sealed trait type "
                    "parameters and bounds in order: "
                    "demo.invalidmirrorsum.generic.FixedChild") &&
+          !genericObject.ok &&
+          contains(genericObject.diagnosticsText,
+                   "generic sum mirror object children require non-uniform type "
+                   "substitution: demo.invalidmirrorsum.genericobject.Fixed") &&
           !nonConcreteChild.ok &&
           contains(nonConcreteChild.diagnosticsText,
                    "sum mirror child must be a top-level concrete "
-                   "class: demo.invalidmirrorsum.child.Branch") &&
+                   "class or object: demo.invalidmirrorsum.child.Branch") &&
           contains(result.nirText, "trait @scala.deriving.Mirror.Sum : "
                                    "@scala.deriving.Mirror") &&
           contains(result.nirText, "trait @scala.deriving.Mirror.SumOf : "
@@ -6388,14 +6416,35 @@ class Leaf extends Branch
           contains(result.nirText, "ret scala.deriving.Mirror.SumOf new demo.mirrorsum."
                                    "$mirror$Sum$demo$mirrorsum$GenericEvent") &&
           !contains(result.nirText, "field @demo.mirrorsum.GenericEvent$."
-                                    "$mirror$Sum$type$field"),
+                                    "$mirror$Sum$type$field") &&
+          contains(result.nirText,
+                   "module @demo.mirrorsum.Idle : @demo.mirrorsum.Signal") &&
+          contains(result.nirText,
+                   "module @demo.mirrorsum.Done : @demo.mirrorsum.Signal") &&
+          contains(result.nirText, "class @demo.mirrorsum."
+                                   "$mirror$Sum$demo$mirrorsum$Signal : "
+                                   "@scala.deriving.Mirror.SumOf") &&
+          contains(result.nirText,
+                   "$mirror$Sum$demo$mirrorsum$Signal.MirroredElemTypes : "
+                   "scala.Tuple3 [ demo.mirrorsum.Idle, "
+                   "demo.mirrorsum.Active, demo.mirrorsum.Done ]") &&
+          contains(result.nirText, "$mirror$Sum$demo$mirrorsum$Signal.MirroredLabel : "
+                                   "\"Signal\"") &&
+          contains(result.nirText,
+                   "$mirror$Sum$demo$mirrorsum$Signal.MirroredElemLabels : "
+                   "scala.Tuple3 [ \"Idle\", \"Active\", \"Done\" ]") &&
+          contains(result.nirText,
+                   "ret Int if(is-instance-of[demo.mirrorsum.Idle](%value), "
+                   "0, if(is-instance-of[demo.mirrorsum.Active](%value), "
+                   "1, 2))"),
       "Scala 3 sum Mirror synthesis, Mirror.Of compatibility, ordered ordinal "
       "lowering, metadata, supported-shape diagnostics, or native execution "
       "diverged (status=" +
           std::to_string(status) + ", output='" + text + "', diagnostics='" +
           result.diagnosticsText + "', unsealed-diagnostics='" +
           unsealed.diagnosticsText + "', generic-diagnostics='" +
-          generic.diagnosticsText + "', child-diagnostics='" +
+          generic.diagnosticsText + "', generic-object-diagnostics='" +
+          genericObject.diagnosticsText + "', child-diagnostics='" +
           nonConcreteChild.diagnosticsText + "')");
 }
 

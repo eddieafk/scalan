@@ -957,7 +957,8 @@ standardDerivationDeclarations(const AstModule& module) {
                                           : module.packageName + "." + declaration.name;
     std::size_t childCount = 0;
     for (const AstDeclaration& candidate : module.declarations) {
-      if (candidate.kind != AstDeclarationKind::Class) {
+      if (candidate.kind != AstDeclarationKind::Class &&
+          candidate.kind != AstDeclarationKind::Object) {
         continue;
       }
       const bool directChild = std::any_of(
@@ -2698,10 +2699,21 @@ void Typechecker::collectSumMirrors(const std::vector<AstDeclaration>& declarati
         continue;
       }
       childSymbols.insert(candidateName);
-      if (candidateDeclaration.kind != AstDeclarationKind::Class) {
+      if (candidateDeclaration.kind != AstDeclarationKind::Class &&
+          candidateDeclaration.kind != AstDeclarationKind::Object) {
         diagnostics_.error(candidateDeclaration.span,
-                           "sum mirror child must be a top-level concrete class: " +
+                           "sum mirror child must be a top-level concrete class or "
+                           "object: " +
                                candidateName);
+        unsupportedChild = true;
+        continue;
+      }
+      if (candidateDeclaration.kind == AstDeclarationKind::Object && generic) {
+        diagnostics_.error(
+            candidateDeclaration.span,
+            "generic sum mirror object children require non-uniform type "
+            "substitution: " +
+                candidateName);
         unsupportedChild = true;
         continue;
       }
@@ -2786,7 +2798,8 @@ void Typechecker::collectSumMirrors(const std::vector<AstDeclaration>& declarati
         continue;
       }
       diagnostics_.error(declaration.span,
-                         "sum mirror child must be a top-level concrete class: " +
+                         "sum mirror child must be a top-level concrete class or "
+                         "object: " +
                              symbolName);
       unsupportedChild = true;
     }
@@ -3547,11 +3560,13 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
             : typeSymbolForDeclaredName(expression.declaredType, &scope);
     if (!targetsBoxedPrimitive && !targetType.typeParameter &&
         (target == nullptr || (target->kind != AstDeclarationKind::Class &&
-                               target->kind != AstDeclarationKind::Trait))) {
+                               target->kind != AstDeclarationKind::Trait &&
+                               target->kind != AstDeclarationKind::Object))) {
       diagnostics_.error(
           expression.span,
           std::string(isTypeTest ? "isInstanceOf" : "asInstanceOf") +
-              " target must be a known class or trait: " + expression.declaredType);
+              " target must be a known class, trait, or object: " +
+              expression.declaredType);
     }
     if (isTypeTest) {
       return TypeInfo{SimpleTypeKind::Boolean, "Boolean"};

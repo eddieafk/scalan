@@ -1019,28 +1019,30 @@ Current scaffold status:
   mirror also satisfies a direct `Mirror.Of[T]` contextual request. The first
   sum layer adds `Mirror.Sum`, `Mirror.SumOf[T]`, and the `sealed` class/trait
   modifier. A top-level sealed trait whose direct children are top-level
-  concrete classes receives ordered child-type and child-label tuples. The
-  monomorphic form uses a stable companion mirror. A generic sum is supported
-  when every child forwards all sealed-trait type parameters and bounds once
-  and in the same order; its mirror is an erased factory with exact applied
-  metadata such as `Tuple2[Started[A], Stopped[A]]`. Its generated `ordinal` uses
-  definition-order type tests against erased child classes and returns the
-  corresponding zero-based index. A normal `derived` method can request either
-  `SumOf[T]` or the common `Of[T]` evidence, including when generic result-type
-  inference must follow the generated evidence's applied parent. Optimized
-  native coverage checks monomorphic and generic ordinal branches, stable
-  versus fresh evidence identity, `Of` compatibility, metadata, stored-given
-  initialization, and focused diagnostics for unsealed sums, non-uniform
-  generic child mappings, and unsupported direct-child shapes. Non-uniform
-  generic child substitutions, abstract/object/nested direct children,
+  concrete classes or singleton objects receives ordered child-type and
+  child-label tuples. The monomorphic form uses a stable companion mirror. A
+  generic sum is supported when every class child forwards all sealed-trait type
+  parameters and bounds once and in the same order; its mirror is an erased
+  factory with exact applied metadata such as
+  `Tuple2[Started[A], Stopped[A]]`. Its generated `ordinal` uses
+  definition-order type tests against erased child classes or modules and
+  returns the corresponding zero-based index. A normal `derived` method can
+  request either `SumOf[T]` or the common `Of[T]` evidence, including when
+  generic result-type inference must follow the generated evidence's applied
+  parent. Optimized native coverage checks monomorphic class/object and generic
+  class ordinal branches, stable versus fresh evidence identity, `Of`
+  compatibility, metadata, stored-given initialization, and focused diagnostics
+  for unsealed sums, non-uniform generic child mappings, generic singleton
+  children, and unsupported direct-child shapes. Non-uniform generic child
+  substitutions, generic singleton children, abstract/nested direct children,
   tuple-value operations, compile-time tuple recursion, and higher-kinded
   derivation remain later derivation milestones.
   Anonymous or local parameterized givens,
   contextual-only inference for ordinary methods, nested companion declarations,
   and Scala 2 `implicit` syntax also remain later milestones.
 - Postfix type application now supports typed `value.isInstanceOf[Target]` and
-  checked `value.asInstanceOf[Target]` for known classes and traits. NIR uses
-  dedicated `is-instance-of[T]` and `as-instance-of[T]` values; verification
+  checked `value.asInstanceOf[Target]` for known classes, traits, and objects.
+  NIR uses dedicated `is-instance-of[T]` and `as-instance-of[T]` values; verification
   rejects malformed targets and non-reference receivers, linking retains
   metadata-only target types, and LLVM lowers both through ABI 4 descriptor
   compatibility helpers. Casts preserve null, return the original pointer when

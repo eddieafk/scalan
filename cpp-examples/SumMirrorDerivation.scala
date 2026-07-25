@@ -29,6 +29,11 @@ sealed trait GenericEvent[A] derives Ordinal
 class GenericStarted[A](val value: A) extends GenericEvent[A]
 class GenericStopped[A](val value: A) extends GenericEvent[A]
 
+sealed trait Signal derives Ordinal
+object Idle extends Signal
+class Active(val value: Int) extends Signal
+object Done extends Signal
+
 object SumMirrorDerivation {
   def ordinal[A](value: A)(using instance: Ordinal[A]): Int =
     instance.ordinal(value)
@@ -64,5 +69,8 @@ object SumMirrorDerivation {
     println(
       mirror[GenericEvent[String]]() !=
         sumMirror[GenericEvent[String]]())
+    println(ordinal[Signal](Idle))
+    println(ordinal[Signal](new Active(1)))
+    println(ordinal[Signal](Done))
   }
 }
