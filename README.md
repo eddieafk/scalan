@@ -76,7 +76,7 @@ build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
   --output /tmp/contextual-abstractions \
   cpp-examples/ContextualAbstractions.scala
 
-# Compile monomorphic product `Mirror` evidence used by a `derived` factory.
+# Compile monomorphic and generic product `Mirror` evidence used by a `derived` factory.
 build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
   --output /tmp/product-mirror-derivation \
   cpp-examples/ProductMirrorDerivation.scala

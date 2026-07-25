@@ -2229,6 +2229,13 @@ nir::Value valueFor(const frontend::AstExpression& expression,
             !primitive.empty()) {
           return nir::unboxValue(primitive, std::move(receiver), expression.span);
         }
+        if (target->typeParameter) {
+          const std::string runtimeTarget = runtimeTypeName(*target);
+          return runtimeTarget == "Object"
+                     ? std::move(receiver)
+                     : nir::asInstanceOfValue(runtimeTarget, std::move(receiver),
+                                              expression.span);
+        }
       }
       return nir::asInstanceOfValue(targetType, std::move(receiver), expression.span);
     }

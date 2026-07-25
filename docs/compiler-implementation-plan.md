@@ -982,19 +982,23 @@ Current scaffold status:
   distinguish stable monomorphic evidence from fresh generic factory results,
   and NIR coverage checks generated modules, fields, accessors, and initializer
   calls. The first structural-derivation layer also provides compiler-owned
-  `scala.Product` and `scala.deriving.Mirror.ProductOf[T]` traits. A monomorphic
-  class with a `derives` clause receives stable product-mirror evidence in its
-  companion and a generated mirror implementation whose `fromProduct` reads
-  constructor elements in declaration order, casts or unboxes them to the
-  declared parameter types, and invokes the primary constructor. Consequently a
-  normal `derived` method can request `Mirror.ProductOf[T]` through a `using`
-  parameter and use it at native runtime. Optimized coverage checks primitive
-  and reference reconstruction, one-time mirror initialization before the
-  derived value, evidence identity, and a focused missing-evidence diagnostic
-  for generic products. This intentionally value-level milestone does not yet
-  model `Mirror.Of`, `Mirror.SumOf`, singleton labels, element-type tuples, or
-  generic product mirrors; those and higher-kinded derivation remain later
-  derivation milestones. Anonymous or local parameterized givens,
+  `scala.Product` and `scala.deriving.Mirror.ProductOf[T]` traits. When a
+  resolved `derived` method directly requests `Mirror.ProductOf[T]`, its
+  deriving class receives a generated mirror implementation whose `fromProduct`
+  reads constructor elements in declaration order, casts or unboxes them to the
+  declared parameter types, and invokes the primary constructor. Monomorphic
+  mirror evidence is a stable value in the companion;
+  generic evidence is an erased factory specialized from the requested applied
+  product type, with type-parameter fields retaining their bound as the runtime
+  cast target. Consequently a normal `derived` method can request
+  `Mirror.ProductOf[T]` through a `using` parameter and use it at native runtime.
+  Optimized coverage checks primitive and reference reconstruction, mixed
+  generic/primitive reconstruction, one-time monomorphic initialization, stable
+  versus fresh evidence identity, generic factory NIR, and a focused diagnostic
+  for a non-product trait. This intentionally value-level milestone does not yet
+  model `Mirror.Of`, `Mirror.SumOf`, singleton labels, or element-type tuples;
+  those and higher-kinded derivation remain later derivation milestones.
+  Anonymous or local parameterized givens,
   contextual-only inference for ordinary methods, nested companion declarations,
   and Scala 2 `implicit` syntax also remain later milestones.
 - Postfix type application now supports typed `value.isInstanceOf[Target]` and

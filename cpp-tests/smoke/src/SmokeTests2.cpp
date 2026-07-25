@@ -5902,17 +5902,32 @@ class DerivedRebuild[A](val mirror: scala.deriving.Mirror.ProductOf[A])
   override def rebuild(product: scala.Product): A = mirror.fromProduct(product)
 }
 
+class StringRebuild extends Rebuild[String] {
+  override def rebuild(product: scala.Product): String =
+    product.productElement(0).asInstanceOf[String]
+}
+
 object Rebuild {
+  given stringRebuild: Rebuild[String] = new StringRebuild
+
   def derived[A](using mirror: scala.deriving.Mirror.ProductOf[A]): Rebuild[A] =
     new DerivedRebuild[A](mirror)
 }
 
 class Pair(val number: Int, val text: String) derives Rebuild
+class GenericPair[A, B](val value: A, val label: B, val count: Int) derives Rebuild
 
 class Product2(val first: Object, val second: Object) extends scala.Product {
   override def productArity(): Int = 2
   override def productElement(index: Int): Object =
     if (index == 0) first else second
+}
+
+class Product3(val first: Object, val second: Object, val third: Object)
+    extends scala.Product {
+  override def productArity(): Int = 3
+  override def productElement(index: Int): Object =
+    if (index == 0) first else if (index == 1) second else third
 }
 
 object Main {
@@ -5927,6 +5942,14 @@ object Main {
     println(pair.number)
     println(pair.text)
     println(mirror[Pair]() == mirror[Pair]())
+    val generic: GenericPair[String, String] =
+      rebuild[GenericPair[String, String]](new Product3("generic", "label", 7))
+    println(generic.value)
+    println(generic.label)
+    println(generic.count)
+    println(
+      mirror[GenericPair[String, String]]() !=
+        mirror[GenericPair[String, String]]())
   }
 }
 )";
@@ -5935,16 +5958,10 @@ object Main {
 
 trait Rebuild[A]
 object Rebuild {
-  def derived[A]: Rebuild[A] = null
+  def derived[A](using mirror: scala.deriving.Mirror.ProductOf[A]): Rebuild[A] = null
 }
 
-class Generic[A](val value: A) derives Rebuild
-
-object MissingGenericMirror {
-  def choose[A]()(using mirror: scala.deriving.Mirror.ProductOf[A]):
-      scala.deriving.Mirror.ProductOf[A] = mirror
-  val missing = choose[Generic[String]]()
-}
+trait UnsupportedSum derives Rebuild
 )";
 
   const std::filesystem::path temporary = std::filesystem::temp_directory_path();
@@ -5984,12 +6001,13 @@ object MissingGenericMirror {
   std::filesystem::remove(output, ignored);
 
   return expect(
-      status == 0 && text == "42\nanswer\ntrue\n" && !invalid.ok &&
+      status == 0 && text == "42\nanswer\ntrue\ngeneric\nlabel\n7\ntrue\n" &&
+          !invalid.ok &&
           contains(invalid.diagnosticsText,
                    "no given value found for context parameter mirror of type "
                    "scala.deriving.Mirror.ProductOf [ "
-                   "demo.invalidmirrorproduct.Generic [ String ] ] required by "
-                   "choose") &&
+                   "demo.invalidmirrorproduct.UnsupportedSum ] required by "
+                   "derived$Rebuild") &&
           contains(result.nirText, "trait @scala.Product : @java.lang.Object") &&
           contains(result.nirText, "declare @scala.Product.productElement : "
                                    "(scala.Product,Int)Object") &&
@@ -6015,9 +6033,30 @@ object MissingGenericMirror {
                    "%demo.mirrorproduct.Rebuild$.derived(call "
                    "%demo.mirrorproduct.Pair$.$mirror$Product$type())") &&
           countOccurrences(result.nirText, "call %demo.mirrorproduct.Pair$."
+                                           "$mirror$Product$type()") == 3 &&
+          contains(result.nirText, "class @demo.mirrorproduct."
+                                   "$mirror$Product$demo$mirrorproduct$GenericPair : "
+                                   "@scala.deriving.Mirror.ProductOf") &&
+          contains(result.nirText,
+                   "ret Object new demo.mirrorproduct.GenericPair(call "
+                   "%product.productElement(0), call %product.productElement(1), "
+                   "unbox[Int](call %product.productElement(2)))") &&
+          contains(result.nirText,
+                   "define @demo.mirrorproduct.GenericPair$."
+                   "$mirror$Product$type : ()scala.deriving.Mirror.ProductOf") &&
+          contains(result.nirText, "ret scala.deriving.Mirror.ProductOf new "
+                                   "demo.mirrorproduct."
+                                   "$mirror$Product$demo$mirrorproduct$GenericPair") &&
+          !contains(result.nirText, "field @demo.mirrorproduct.GenericPair$."
+                                    "$mirror$Product$type$field") &&
+          contains(result.nirText, "call %demo.mirrorproduct.Rebuild$.derived(call "
+                                   "%demo.mirrorproduct.GenericPair$."
+                                   "$mirror$Product$type())") &&
+          countOccurrences(result.nirText, "call %demo.mirrorproduct.GenericPair$."
                                            "$mirror$Product$type()") == 3,
       "Scala 3 product Mirror synthesis, stable contextual evidence, generated "
-      "fromProduct lowering, generic diagnostics, or native execution diverged "
+      "generic factories, fromProduct lowering, diagnostics, or native execution "
+      "diverged "
       "(status=" +
           std::to_string(status) + ", output='" + text + "', diagnostics='" +
           result.diagnosticsText + "', invalid-diagnostics='" +

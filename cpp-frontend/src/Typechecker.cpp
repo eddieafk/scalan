@@ -2087,10 +2087,12 @@ void Typechecker::collectDeclaration(const AstDeclaration& declaration,
 
 void Typechecker::collectProductMirrors(const std::vector<AstDeclaration>& declarations,
                                         const std::string& owner, Scope& scope) {
-  const auto productOf = globalSymbols_.find("scala.deriving.Mirror.ProductOf");
-  if (productOf == globalSymbols_.end()) {
+  const auto productOfSymbol =
+      globalSymbols_.find("scala.deriving.Mirror.ProductOf");
+  if (productOfSymbol == globalSymbols_.end()) {
     return;
   }
+  const SymbolInfo productOf = productOfSymbol->second;
 
   for (const AstDeclaration& declaration : declarations) {
     if (declaration.kind != AstDeclarationKind::Class ||
@@ -2098,14 +2100,74 @@ void Typechecker::collectProductMirrors(const std::vector<AstDeclaration>& decla
       continue;
     }
 
+    Scope declarationScope = scope;
     const std::string targetName = declarationSymbolName(declaration, owner);
-    auto target = globalSymbols_.find(targetName);
-    if (target == globalSymbols_.end() || !target->second.typeParameters.empty() ||
-        std::any_of(target->second.contextualParameters.begin(),
-                    target->second.contextualParameters.end(),
+    if (auto members = memberScopes_.find(targetName); members != memberScopes_.end()) {
+      mergeScope(declarationScope, members->second);
+    }
+    const bool requiresProductMirror = std::any_of(
+        declaration.derivedTypes.begin(), declaration.derivedTypes.end(),
+        [&](const std::string& derivedTypeName) {
+          const SymbolInfo* typeclass =
+              typeSymbolForDeclaredName(derivedTypeName, &declarationScope);
+          if (typeclass == nullptr) {
+            return false;
+          }
+          auto companionMembers = memberScopes_.find(typeclass->symbolName + '$');
+          if (companionMembers == memberScopes_.end()) {
+            return false;
+          }
+          auto derived = companionMembers->second.find("derived");
+          if (derived == companionMembers->second.end()) {
+            return false;
+          }
+          for (std::size_t parameterIndex = 0;
+               parameterIndex < derived->second.parameterTypes.size();
+               ++parameterIndex) {
+            const bool contextual =
+                parameterIndex < derived->second.contextualParameters.size() &&
+                derived->second.contextualParameters[parameterIndex];
+            if (contextual &&
+                derived->second.parameterTypes[parameterIndex].typeConstructorName ==
+                    productOf.symbolName) {
+              return true;
+            }
+          }
+          return false;
+        });
+    if (!requiresProductMirror) {
+      continue;
+    }
+
+    auto targetSymbol = globalSymbols_.find(targetName);
+    if (targetSymbol == globalSymbols_.end() ||
+        std::any_of(targetSymbol->second.contextualParameters.begin(),
+                    targetSymbol->second.contextualParameters.end(),
                     [](bool contextual) { return contextual; })) {
       continue;
     }
+    const SymbolInfo target = targetSymbol->second;
+
+    std::vector<TypeInfo> derivingTypeArguments;
+    derivingTypeArguments.reserve(target.typeParameters.size());
+    for (const TypeParameterInfo& parameter : target.typeParameters) {
+      TypeInfo parameterType{SimpleTypeKind::Object, parameter.name};
+      parameterType.runtimeName = parameter.upperBound.runtimeName.empty()
+                                      ? parameter.upperBound.name
+                                      : parameter.upperBound.runtimeName;
+      if (parameterType.runtimeName.empty() || parameterType.runtimeName == "Unknown") {
+        parameterType.runtimeName = "Object";
+      }
+      parameterType.typeParameterSymbolName = parameter.symbolName;
+      parameterType.typeParameter = true;
+      derivingTypeArguments.push_back(std::move(parameterType));
+    }
+    const bool generic = !derivingTypeArguments.empty();
+    const TypeInfo derivingType =
+        generic ? specializeResolvedTypeApplication(target, derivingTypeArguments,
+                                                    declaration.span, false)
+                      .type
+                : target.type;
 
     std::size_t syntheticSpanOffset =
         1000000 + productMirrorDeclarations_.size() * 1000;
@@ -2119,8 +2181,9 @@ void Typechecker::collectProductMirrors(const std::vector<AstDeclaration>& decla
     implementation.kind = AstDeclarationKind::Class;
     implementation.name = productMirrorImplementationName(targetName);
     implementation.span = nextSpan();
-    implementation.parentTypes = {"scala.deriving.Mirror.ProductOf[" + targetName +
-                                  "]"};
+    implementation.typeParameters = declaration.typeParameters;
+    implementation.parentTypes = {"scala.deriving.Mirror.ProductOf[" +
+                                  derivingType.name + "]"};
 
     AstDeclaration fromProduct;
     fromProduct.kind = AstDeclarationKind::Def;
@@ -2128,7 +2191,7 @@ void Typechecker::collectProductMirrors(const std::vector<AstDeclaration>& decla
     fromProduct.span = nextSpan();
     fromProduct.parameters = {"product: scala.Product"};
     fromProduct.contextualParameters = {false};
-    fromProduct.declaredType = targetName;
+    fromProduct.declaredType = derivingType.name;
     fromProduct.isOverride = true;
     fromProduct.hasInitializer = true;
 
@@ -2136,13 +2199,25 @@ void Typechecker::collectProductMirrors(const std::vector<AstDeclaration>& decla
     constructor.kind = AstExpressionKind::New;
     constructor.text = targetName;
     constructor.span = nextSpan();
+    AstExpression constructorTarget;
+    if (generic) {
+      constructorTarget.kind = AstExpressionKind::TypeApply;
+      constructorTarget.span = nextSpan();
+      for (const TypeParameterInfo& parameter : target.typeParameters) {
+        constructorTarget.typeArguments.push_back(parameter.name);
+      }
+      constructorTarget.declaredType = constructorTarget.typeArguments.front();
+      constructorTarget.children.push_back(std::move(constructor));
+    } else {
+      constructorTarget = std::move(constructor);
+    }
     AstExpression construction;
     construction.kind = AstExpressionKind::Call;
     construction.span = nextSpan();
-    construction.children.push_back(std::move(constructor));
+    construction.children.push_back(std::move(constructorTarget));
 
     for (std::size_t parameterIndex = 0;
-         parameterIndex < target->second.parameterTypes.size(); ++parameterIndex) {
+         parameterIndex < target.parameterTypes.size(); ++parameterIndex) {
       AstExpression productReference;
       productReference.kind = AstExpressionKind::Identifier;
       productReference.text = "product";
@@ -2171,8 +2246,7 @@ void Typechecker::collectProductMirrors(const std::vector<AstDeclaration>& decla
       castSelection.span = nextSpan();
       castSelection.children.push_back(std::move(elementCall));
 
-      const std::string parameterTypeName =
-          target->second.parameterTypes[parameterIndex].name;
+      const std::string parameterTypeName = target.parameterTypes[parameterIndex].name;
       AstExpression cast;
       cast.kind = AstExpressionKind::TypeApply;
       cast.declaredType = parameterTypeName;
@@ -2191,35 +2265,51 @@ void Typechecker::collectProductMirrors(const std::vector<AstDeclaration>& decla
         declarationSymbolName(storedImplementation, owner);
 
     const TypeInfo mirrorType =
-        specializeResolvedTypeApplication(productOf->second, {target->second.type},
+        specializeResolvedTypeApplication(productOf, {derivingType},
                                           declaration.span, false)
             .type;
     const std::string instanceOwner = targetName + '$';
     const std::string instanceName = "$mirror$Product$type";
 
     TypedDeclaration member;
-    member.kind = AstDeclarationKind::Val;
+    member.kind = generic ? AstDeclarationKind::Def : AstDeclarationKind::Val;
     member.name = instanceName;
     member.symbolName = qualify(instanceOwner, instanceName);
     member.span = declaration.span;
+    member.typeParameters =
+        generic ? target.typeParameters : std::vector<TypeParameterInfo>{};
     member.declaredType = mirrorType.name;
     member.inferredType = mirrorType;
     member.isGiven = true;
     member.hasInitializer = true;
-    member.initializer.kind = AstExpressionKind::New;
-    member.initializer.text = implementationName;
-    member.initializer.span = nextSpan();
+    AstExpression mirrorConstructor;
+    mirrorConstructor.kind = AstExpressionKind::New;
+    mirrorConstructor.text = implementationName;
+    mirrorConstructor.span = nextSpan();
+    if (generic) {
+      member.initializer.kind = AstExpressionKind::TypeApply;
+      member.initializer.span = nextSpan();
+      for (const TypeParameterInfo& parameter : target.typeParameters) {
+        member.initializer.typeArguments.push_back(parameter.name);
+      }
+      member.initializer.declaredType = member.initializer.typeArguments.front();
+      member.initializer.children.push_back(std::move(mirrorConstructor));
+    } else {
+      member.initializer = std::move(mirrorConstructor);
+    }
     derivedInstances_.push_back(
         DerivedInstanceInfo{instanceOwner, std::move(member), {}});
 
     SymbolInfo candidate;
-    candidate.kind = AstDeclarationKind::Val;
+    candidate.kind = generic ? AstDeclarationKind::Def : AstDeclarationKind::Val;
     candidate.name = "derived$Mirror$Product";
     candidate.symbolName = qualify(instanceOwner, instanceName);
     candidate.type = mirrorType;
+    candidate.typeParameters =
+        generic ? target.typeParameters : std::vector<TypeParameterInfo>{};
     candidate.hasImplementation = true;
     candidate.isGiven = true;
-    candidate.isModuleMember = true;
+    candidate.isModuleMember = !generic;
     derivedGivens_[targetName].push_back(std::move(candidate));
   }
 }
@@ -2824,7 +2914,7 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
         targetsBoxedPrimitive
             ? nullptr
             : typeSymbolForDeclaredName(expression.declaredType, &scope);
-    if (!targetsBoxedPrimitive &&
+    if (!targetsBoxedPrimitive && !targetType.typeParameter &&
         (target == nullptr || (target->kind != AstDeclarationKind::Class &&
                                target->kind != AstDeclarationKind::Trait))) {
       diagnostics_.error(
