@@ -4285,13 +4285,9 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
 
       const SymbolInfo* classSymbol = nullptr;
       SymbolInfo specializedClass;
-      auto found = scope.find(constructor->text);
-      if (found != scope.end() && found->second.kind == AstDeclarationKind::Class) {
-        classSymbol = &found->second;
-      } else if (auto global = globalSymbols_.find(constructor->text);
-                 global != globalSymbols_.end() &&
-                 global->second.kind == AstDeclarationKind::Class) {
-        classSymbol = &global->second;
+      if (const SymbolInfo* resolved = qualifiedPathSymbol(constructor->text, &scope);
+          resolved != nullptr && resolved->kind == AstDeclarationKind::Class) {
+        classSymbol = resolved;
       }
       TypeInfo constructed{SimpleTypeKind::Unknown, "Unknown"};
       if (classSymbol != nullptr) {
@@ -5485,22 +5481,23 @@ TypeInfo Typechecker::inferNewType(const AstExpression& expression, Scope& scope
     return TypeInfo{SimpleTypeKind::Unknown, "Unknown"};
   }
 
-  auto found = scope.find(expression.text);
-  if (found != scope.end() && found->second.kind == AstDeclarationKind::Class) {
-    if (!found->second.typeParameters.empty()) {
+  const SymbolInfo* constructor = qualifiedPathSymbol(expression.text, &scope);
+  if (constructor != nullptr && constructor->kind == AstDeclarationKind::Class) {
+    if (!constructor->typeParameters.empty()) {
       diagnostics_.error(expression.span,
-                         "generic class " + found->second.name + " requires " +
-                             std::to_string(found->second.typeParameters.size()) +
+                         "generic class " + constructor->name + " requires " +
+                             std::to_string(constructor->typeParameters.size()) +
                              " explicit type arguments");
     }
-    return found->second.type;
+    return constructor->type;
   }
 
-  if (expression.text.find('.') != std::string::npos) {
-    return TypeInfo{SimpleTypeKind::Object, expression.text};
+  if (constructor != nullptr) {
+    diagnostics_.error(expression.span,
+                       "constructor target is not a class: " + expression.text);
+  } else {
+    diagnostics_.error(expression.span, "unresolved class: " + expression.text);
   }
-
-  diagnostics_.error(expression.span, "unresolved class: " + expression.text);
   return TypeInfo{SimpleTypeKind::Unknown, "Unknown"};
 }
 
@@ -5836,26 +5833,105 @@ Typechecker::knownMemberForReceiverType(const TypeInfo& receiver,
   return &member->second;
 }
 
+const SymbolInfo* Typechecker::qualifiedPathSymbol(const std::string& name,
+                                                   const Scope* scope) const {
+  const std::string normalized = trim(name);
+  if (normalized.empty()) {
+    return nullptr;
+  }
+
+  if (normalized.find('.') == std::string::npos) {
+    if (scope != nullptr) {
+      auto visible = scope->find(normalized);
+      if (visible != scope->end()) {
+        return &visible->second;
+      }
+    }
+    auto global = globalSymbols_.find(normalized);
+    return global == globalSymbols_.end() ? nullptr : &global->second;
+  }
+
+  if (auto global = globalSymbols_.find(normalized); global != globalSymbols_.end()) {
+    return &global->second;
+  }
+
+  const SymbolInfo* resolved = nullptr;
+  std::size_t segmentStart = 0;
+  const std::size_t firstDot = normalized.find('.');
+  if (scope != nullptr) {
+    auto visible = scope->find(normalized.substr(0, firstDot));
+    if (visible != scope->end()) {
+      resolved = &visible->second;
+      segmentStart = firstDot + 1;
+    }
+  }
+
+  if (resolved == nullptr) {
+    std::size_t separator = normalized.rfind('.');
+    while (separator != std::string::npos) {
+      auto global = globalSymbols_.find(normalized.substr(0, separator));
+      if (global != globalSymbols_.end()) {
+        resolved = &global->second;
+        segmentStart = separator + 1;
+        break;
+      }
+      if (separator == 0) {
+        break;
+      }
+      separator = normalized.rfind('.', separator - 1);
+    }
+  }
+  if (resolved == nullptr) {
+    return nullptr;
+  }
+
+  if ((resolved->kind == AstDeclarationKind::Class ||
+       resolved->kind == AstDeclarationKind::Trait) &&
+      companionTypeNames_.contains(resolved->symbolName)) {
+    auto companion = globalSymbols_.find(resolved->symbolName + '$');
+    if (companion == globalSymbols_.end()) {
+      return nullptr;
+    }
+    resolved = &companion->second;
+  } else if (resolved->kind != AstDeclarationKind::Object) {
+    return nullptr;
+  }
+
+  while (segmentStart < normalized.size()) {
+    const std::size_t nextDot = normalized.find('.', segmentStart);
+    const std::string segment = normalized.substr(
+        segmentStart,
+        nextDot == std::string::npos ? std::string::npos : nextDot - segmentStart);
+    const std::string memberOwner = resolved->type.typeConstructorName.empty()
+                                        ? resolved->type.name
+                                        : resolved->type.typeConstructorName;
+    auto members = memberScopes_.find(memberOwner);
+    if (members == memberScopes_.end()) {
+      return nullptr;
+    }
+    auto member = members->second.find(segment);
+    if (member == members->second.end()) {
+      return nullptr;
+    }
+    resolved = &member->second;
+    if (nextDot == std::string::npos) {
+      return resolved;
+    }
+    if (resolved->kind != AstDeclarationKind::Object) {
+      return nullptr;
+    }
+    segmentStart = nextDot + 1;
+  }
+  return resolved;
+}
+
 const SymbolInfo* Typechecker::typeSymbolForDeclaredName(const std::string& name,
                                                          const Scope* scope) const {
   const AppliedTypeSyntax applied = parseAppliedTypeSyntax(name);
   const std::string normalized = applied.applied && !applied.constructor.empty()
                                      ? applied.constructor
                                      : trim(name);
-  if (normalized.empty()) {
-    return nullptr;
-  }
-  if (scope != nullptr && normalized.find('.') == std::string::npos) {
-    auto found = scope->find(normalized);
-    if (found != scope->end()) {
-      return &found->second;
-    }
-  }
-  auto global = globalSymbols_.find(normalized);
-  if (global != globalSymbols_.end()) {
-    return &global->second;
-  }
-  return nullptr;
+  return qualifiedPathSymbol(normalized, scope);
 }
 
 void Typechecker::validateInheritance(const AstDeclaration& declaration,
@@ -7173,6 +7249,18 @@ TypeInfo Typechecker::typeFromDeclaredName(const std::string& name, const Scope*
                              " explicit type arguments");
     }
     return resolvedTypeSymbol(global->second);
+  }
+
+  if (const SymbolInfo* qualified = qualifiedPathSymbol(normalized, scope);
+      qualified != nullptr && (qualified->kind == AstDeclarationKind::Object ||
+                               qualified->kind == AstDeclarationKind::Class ||
+                               qualified->kind == AstDeclarationKind::Trait)) {
+    if (span != nullptr && !qualified->typeParameters.empty()) {
+      diagnostics_.error(*span, "generic type " + normalized + " requires " +
+                                    std::to_string(qualified->typeParameters.size()) +
+                                    " explicit type arguments");
+    }
+    return resolvedTypeSymbol(*qualified);
   }
 
   const std::size_t firstDot = normalized.find('.');

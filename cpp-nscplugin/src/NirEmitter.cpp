@@ -501,6 +501,10 @@ bool isBuiltinTypeName(const std::string& name) {
          isArrayTypeName(name);
 }
 
+const frontend::TypedDeclaration*
+findDeclarationBySymbol(const std::vector<frontend::TypedDeclaration>& declarations,
+                        const std::string& symbolName);
+
 std::string qualifyTypeName(const std::string& name, const ValueContext& context) {
   auto imported = context.importAliases.find(name);
   if (imported != context.importAliases.end()) {
@@ -567,8 +571,41 @@ std::string qualifyTypeName(const std::string& name, const ValueContext& context
       name == support::StdNames::JavaNioByteBuffer) {
     return std::string(support::StdNames::JavaNioByteBuffer);
   }
-  if (name.empty() || name.find('.') != std::string::npos ||
-      context.packageName.empty()) {
+  if (name.empty()) {
+    return name;
+  }
+
+  if (context.declarations != nullptr) {
+    const auto resolveDeclaredName = [&](const std::string& candidate) {
+      if (findDeclarationBySymbol(*context.declarations, candidate) != nullptr) {
+        return candidate;
+      }
+      std::size_t separator = candidate.find('.');
+      while (separator != std::string::npos) {
+        std::string companionCandidate = candidate;
+        companionCandidate.insert(separator, "$");
+        if (findDeclarationBySymbol(*context.declarations, companionCandidate) !=
+            nullptr) {
+          return companionCandidate;
+        }
+        separator = candidate.find('.', separator + 1);
+      }
+      return std::string{};
+    };
+
+    if (const std::string resolved = resolveDeclaredName(name); !resolved.empty()) {
+      return resolved;
+    }
+    if (!context.packageName.empty() && !name.starts_with(context.packageName + ".")) {
+      if (const std::string resolved =
+              resolveDeclaredName(context.packageName + "." + name);
+          !resolved.empty()) {
+        return resolved;
+      }
+    }
+  }
+
+  if (name.find('.') != std::string::npos || context.packageName.empty()) {
     return name;
   }
   return context.packageName + "." + name;
@@ -1101,6 +1138,26 @@ const frontend::TypedDeclaration* findMemberDeclaration(const ValueContext& cont
   return nullptr;
 }
 
+const frontend::TypedDeclaration*
+findNestedObjectDeclaration(const ValueContext& context, const std::string& ownerName,
+                            const std::string& memberName) {
+  if (context.declarations == nullptr || ownerName.empty()) {
+    return nullptr;
+  }
+  const frontend::TypedDeclaration* owner =
+      findDeclarationBySymbol(*context.declarations, ownerName);
+  if (owner == nullptr) {
+    return nullptr;
+  }
+  for (const frontend::TypedDeclaration& member : owner->members) {
+    if (member.kind == frontend::AstDeclarationKind::Object &&
+        member.name == memberName) {
+      return &member;
+    }
+  }
+  return nullptr;
+}
+
 const frontend::TypeInfo* findConstructorParameterType(const ValueContext& context,
                                                        const std::string& ownerName,
                                                        const std::string& memberName) {
@@ -1194,9 +1251,12 @@ declarationForExpression(const frontend::AstExpression& expression,
     if (expression.children.empty()) {
       return nullptr;
     }
-    return findMemberDeclaration(context,
-                                 receiverTypeFor(expression.children.front(), context),
-                                 expression.text);
+    const std::string receiver = receiverTypeFor(expression.children.front(), context);
+    if (const frontend::TypedDeclaration* member =
+            findMemberDeclaration(context, receiver, expression.text)) {
+      return member;
+    }
+    return findNestedObjectDeclaration(context, receiver, expression.text);
   }
   if (expression.kind == AstExpressionKind::Identifier &&
       !context.localNames.contains(expression.text)) {
@@ -2023,6 +2083,10 @@ nir::Value valueFor(const frontend::AstExpression& expression,
       }
       const frontend::TypedDeclaration* selectedDeclaration =
           declarationForExpression(expression, context);
+      if (selectedDeclaration != nullptr &&
+          selectedDeclaration->kind == frontend::AstDeclarationKind::Object) {
+        return nir::localValue(selectedDeclaration->symbolName, expression.span);
+      }
       if (expression.text == support::StdNames::HashCode) {
         const frontend::TypeInfo* receiverType =
             annotatedTypeFor(expression.children.front(), context);

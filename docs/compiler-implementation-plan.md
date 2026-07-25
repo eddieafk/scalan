@@ -1039,7 +1039,11 @@ Current scaffold status:
   returns the corresponding zero-based index. A normal `derived` method can
   request either `SumOf[T]` or the common `Of[T]` evidence, including when
   generic result-type inference must follow the generated evidence's applied
-  parent. Optimized native coverage checks monomorphic class/object children,
+  parent. Direct companion paths resolve their source spelling to the companion
+  module's runtime owner, so singleton values such as `Event.Started`, ordinary
+  constructors and type annotations such as `Event.Stopped`, and applied
+  constructors such as `Maybe.Present[String]` work without wildcard imports.
+  Optimized native coverage checks monomorphic class/object children,
   generic singleton and parameter-subset children, reordered mappings,
   companion-only and mixed top-level/companion placement, stable versus fresh
   evidence identity, `Of` compatibility, metadata, stored-given initialization,

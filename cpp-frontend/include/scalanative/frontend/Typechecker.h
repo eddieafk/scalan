@@ -208,6 +208,8 @@ private:
   [[nodiscard]] const SymbolInfo*
   knownMemberForReceiverType(const TypeInfo& receiver,
                              const std::string& memberName) const;
+  [[nodiscard]] const SymbolInfo* qualifiedPathSymbol(const std::string& name,
+                                                      const Scope* scope) const;
   [[nodiscard]] const SymbolInfo* typeSymbolForDeclaredName(const std::string& name,
                                                             const Scope* scope) const;
   void validateInheritance(const AstDeclaration& declaration, TypedDeclaration& typed,

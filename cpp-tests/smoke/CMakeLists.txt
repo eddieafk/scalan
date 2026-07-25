@@ -1,6 +1,7 @@
-# SmokeTests.cpp is retained as a broad reference suite. The default smoke target
-# uses the lightweight active subset to keep edit-build-test cycles fast.
-add_executable(cpp-smoke-tests src/SmokeTests2.cpp)
+# SmokeTests.cpp is retained as a broad reference suite. New coverage goes into
+# numbered translation units so incremental builds do not recompile the entire
+# active suite.
+add_executable(cpp-smoke-tests src/SmokeTests2.cpp src/SmokeTests3.cpp)
 
 target_link_libraries(
   cpp-smoke-tests
@@ -9,6 +10,13 @@ target_link_libraries(
           cpp-scalanative::nir cpp-scalanative::support)
 
 cpp_scalanative_target_defaults(cpp-smoke-tests)
+
+if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
+  # The harness drives separately configured compiler libraries; production
+  # optimization and debug symbols only increase its edit-build latency without
+  # changing the compiler code under test.
+  target_compile_options(cpp-smoke-tests PRIVATE -O0 -g0)
+endif()
 
 add_test(NAME cpp-smoke-tests COMMAND cpp-smoke-tests)
 

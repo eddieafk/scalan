@@ -69,10 +69,6 @@ object Idle extends Signal
 class Active(val value: Int) extends Signal
 object Done extends Signal
 
-import NestedEvent._
-import NestedMaybe._
-import Placed._
-
 object SumMirrorDerivation {
   def ordinal[A](value: A)(using instance: Ordinal[A]): Int =
     instance.ordinal(value)
@@ -120,12 +116,14 @@ object SumMirrorDerivation {
         new Reversed[String, Object]))
     println(ordinal[Handler[String]](Ignore))
     println(ordinal[Handler[String]](new Use[String]("value")))
-    println(ordinal[NestedEvent](Pending))
-    println(ordinal[NestedEvent](new Recorded(3)))
-    println(ordinal[NestedMaybe[String]](Missing))
-    println(ordinal[NestedMaybe[String]](new Found[String]("value")))
+    println(ordinal[NestedEvent](NestedEvent.Pending))
+    println(ordinal[NestedEvent](new NestedEvent.Recorded(3)))
+    println(ordinal[NestedMaybe[String]](NestedMaybe.Missing))
+    println(
+      ordinal[NestedMaybe[String]](
+        new NestedMaybe.Found[String]("value")))
     println(ordinal[Placed](new Before))
-    println(ordinal[Placed](Middle))
+    println(ordinal[Placed](Placed.Middle))
     println(ordinal[Placed](new After))
   }
 }

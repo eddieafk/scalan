@@ -36,6 +36,16 @@ make quick
 make check
 ```
 
+The active smoke suite keeps new regressions in numbered translation units and
+compiles only the harness at `-O0` without debug symbols; the compiler libraries
+still use the selected preset normally. During work on the newest coverage, use:
+
+```sh
+cmake --build build/debug --target cpp-smoke-tests -j2
+CPP_SCALANATIVE_SMOKE_TESTS3_ONLY=1 \
+  build/debug/cpp-tests/smoke/cpp-smoke-tests
+```
+
 Try the scaffold compiler:
 
 ```sh
@@ -81,7 +91,7 @@ build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
   --output /tmp/product-mirror-derivation \
   cpp-examples/ProductMirrorDerivation.scala
 
-# Compile top-level and companion-nested sum mirrors, metadata, and ordinal dispatch.
+# Compile top-level and qualified companion-nested sum cases and mirrors.
 build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
   --output /tmp/sum-mirror-derivation \
   cpp-examples/SumMirrorDerivation.scala
