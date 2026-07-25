@@ -956,10 +956,10 @@ standardDerivationDeclarations(const AstModule& module) {
                                           ? declaration.name
                                           : module.packageName + "." + declaration.name;
     std::size_t childCount = 0;
-    for (const AstDeclaration& candidate : module.declarations) {
+    const auto countDirectChild = [&](const AstDeclaration& candidate) {
       if (candidate.kind != AstDeclarationKind::Class &&
           candidate.kind != AstDeclarationKind::Object) {
-        continue;
+        return;
       }
       const bool directChild = std::any_of(
           candidate.parentTypes.begin(), candidate.parentTypes.end(),
@@ -969,6 +969,15 @@ standardDerivationDeclarations(const AstModule& module) {
             return constructor == declaration.name || constructor == qualifiedName;
           });
       childCount += directChild ? 1 : 0;
+    };
+    for (const AstDeclaration& candidate : module.declarations) {
+      countDirectChild(candidate);
+      if (candidate.kind == AstDeclarationKind::Object &&
+          candidate.name == declaration.name) {
+        for (const AstDeclaration& member : candidate.members) {
+          countDirectChild(member);
+        }
+      }
     }
     addTupleArity(childCount);
   }
@@ -2703,12 +2712,35 @@ void Typechecker::collectSumMirrors(const std::vector<AstDeclaration>& declarati
     std::vector<SumChild> children;
     std::unordered_set<std::string> childSymbols;
     bool unsupportedChild = false;
+    struct SumCandidate {
+      const AstDeclaration* declaration = nullptr;
+      std::string owner;
+    };
+    std::vector<SumCandidate> candidates;
+    candidates.reserve(declarations.size());
     for (const AstDeclaration& candidateDeclaration : declarations) {
+      candidates.push_back(SumCandidate{&candidateDeclaration, owner});
+      if (candidateDeclaration.kind == AstDeclarationKind::Object &&
+          candidateDeclaration.name == declaration.name) {
+        const std::string companionOwner =
+            declarationSymbolName(candidateDeclaration, owner);
+        for (const AstDeclaration& member : candidateDeclaration.members) {
+          candidates.push_back(SumCandidate{&member, companionOwner});
+        }
+      }
+    }
+    std::stable_sort(candidates.begin(), candidates.end(),
+                     [](const SumCandidate& lhs, const SumCandidate& rhs) {
+                       return lhs.declaration->span.start < rhs.declaration->span.start;
+                     });
+
+    for (const SumCandidate& sumCandidate : candidates) {
+      const AstDeclaration& candidateDeclaration = *sumCandidate.declaration;
       if (!isClassLikeDeclaration(candidateDeclaration.kind)) {
         continue;
       }
       const std::string candidateName =
-          declarationSymbolName(candidateDeclaration, owner);
+          declarationSymbolName(candidateDeclaration, sumCandidate.owner);
       auto candidate = globalSymbols_.find(candidateName);
       if (candidate == globalSymbols_.end() ||
           std::find(candidate->second.parentSymbolNames.begin(),
@@ -2720,8 +2752,7 @@ void Typechecker::collectSumMirrors(const std::vector<AstDeclaration>& declarati
       if (candidateDeclaration.kind != AstDeclarationKind::Class &&
           candidateDeclaration.kind != AstDeclarationKind::Object) {
         diagnostics_.error(candidateDeclaration.span,
-                           "sum mirror child must be a top-level concrete class or "
-                           "object: " +
+                           "sum mirror child must be a concrete class or object: " +
                                candidateName);
         unsupportedChild = true;
         continue;
@@ -2835,8 +2866,8 @@ void Typechecker::collectSumMirrors(const std::vector<AstDeclaration>& declarati
         continue;
       }
       diagnostics_.error(declaration.span,
-                         "sum mirror child must be a top-level concrete class or "
-                         "object: " +
+                         "sum mirror child must be top-level or a direct member of "
+                         "the sealed trait companion: " +
                              symbolName);
       unsupportedChild = true;
     }

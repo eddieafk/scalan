@@ -6207,10 +6207,33 @@ sealed trait Handler[-A] derives Ordinal
 object Ignore extends Handler[Object]
 class Use[-A](value: A) extends Handler[A]
 
+sealed trait NestedEvent derives Ordinal
+object NestedEvent {
+  object Pending extends NestedEvent
+  class Recorded(val code: Int) extends NestedEvent
+}
+
+sealed trait NestedMaybe[+A] derives Ordinal
+object NestedMaybe {
+  object Missing extends NestedMaybe[Nothing]
+  class Found[+A](val value: A) extends NestedMaybe[A]
+}
+
+sealed trait Placed derives Ordinal
+class Before extends Placed
+object Placed {
+  object Middle extends Placed
+}
+class After extends Placed
+
 sealed trait Signal derives Ordinal
 object Idle extends Signal
 class Active(val value: Int) extends Signal
 object Done extends Signal
+
+import NestedEvent._
+import NestedMaybe._
+import Placed._
 
 object Main {
   def ordinal[A](value: A)(using instance: Ordinal[A]): Int =
@@ -6259,6 +6282,13 @@ object Main {
         new Reversed[String, Object]))
     println(ordinal[Handler[String]](Ignore))
     println(ordinal[Handler[String]](new Use[String]("value")))
+    println(ordinal[NestedEvent](Pending))
+    println(ordinal[NestedEvent](new Recorded(3)))
+    println(ordinal[NestedMaybe[String]](Missing))
+    println(ordinal[NestedMaybe[String]](new Found[String]("value")))
+    println(ordinal[Placed](new Before))
+    println(ordinal[Placed](Middle))
+    println(ordinal[Placed](new After))
   }
 }
 )";
@@ -6307,6 +6337,19 @@ sealed trait Event derives Ordinal
 trait Branch extends Event
 class Leaf extends Branch
 )";
+  constexpr const char* wrongOwnerNestedChildSource =
+      R"(package demo.invalidmirrorsum.nested
+
+trait Ordinal[A]
+object Ordinal {
+  def derived[A](using mirror: scala.deriving.Mirror.SumOf[A]): Ordinal[A] = null
+}
+
+sealed trait Event derives Ordinal
+object Cases {
+  object Nested extends Event
+}
+)";
 
   const std::filesystem::path temporary = std::filesystem::temp_directory_path();
   const std::filesystem::path binary =
@@ -6340,6 +6383,11 @@ class Leaf extends Branch
   const scalanative::tools::build::BuildResult nonConcreteChild =
       driver.buildSource("NonConcreteSumMirrorChild.scala", nonConcreteChildSource, {},
                          nonConcreteChildDiagnostics);
+  scalanative::support::DiagnosticEngine wrongOwnerNestedChildDiagnostics;
+  const scalanative::tools::build::BuildResult wrongOwnerNestedChild =
+      driver.buildSource("WrongOwnerNestedSumMirrorChild.scala",
+                         wrongOwnerNestedChildSource, {},
+                         wrongOwnerNestedChildDiagnostics);
 
   if (!result.ok) {
     if (contains(result.diagnosticsText, "clang toolchain not found")) {
@@ -6357,7 +6405,7 @@ class Leaf extends Branch
   return expect(
       status == 0 &&
           text == "0\n1\n2\n2\ntrue\ntrue\ntrue\n0\n1\ntrue\ntrue\n0\n1\n2\n"
-                  "0\n1\n0\n1\n1\n0\n1\n" &&
+                  "0\n1\n0\n1\n1\n0\n1\n0\n1\n0\n1\n0\n1\n2\n" &&
           !unsealed.ok &&
           contains(unsealed.diagnosticsText,
                    "sum mirror derivation requires a sealed trait: "
@@ -6374,8 +6422,13 @@ class Leaf extends Branch
                    "demo.invalidmirrorsum.genericobject.Fixed") &&
           !nonConcreteChild.ok &&
           contains(nonConcreteChild.diagnosticsText,
-                   "sum mirror child must be a top-level concrete "
-                   "class or object: demo.invalidmirrorsum.child.Branch") &&
+                   "sum mirror child must be a concrete class or object: "
+                   "demo.invalidmirrorsum.child.Branch") &&
+          !wrongOwnerNestedChild.ok &&
+          contains(wrongOwnerNestedChild.diagnosticsText,
+                   "sum mirror child must be top-level or a direct member of "
+                   "the sealed trait companion: "
+                   "demo.invalidmirrorsum.nested.Cases.Nested") &&
           contains(result.nirText, "trait @scala.deriving.Mirror.Sum : "
                                    "@scala.deriving.Mirror") &&
           contains(result.nirText, "trait @scala.deriving.Mirror.SumOf : "
@@ -6494,7 +6547,41 @@ class Leaf extends Branch
                    "demo.mirrorsum.Use [ A ] ]") &&
           contains(result.nirText,
                    "ret Int if(is-instance-of[demo.mirrorsum.Ignore](%value), "
-                   "0, 1)"),
+                   "0, 1)") &&
+          contains(result.nirText, "module @demo.mirrorsum.NestedEvent$.Pending : "
+                                   "@demo.mirrorsum.NestedEvent") &&
+          contains(result.nirText, "class @demo.mirrorsum.NestedEvent$.Recorded : "
+                                   "@demo.mirrorsum.NestedEvent") &&
+          contains(result.nirText,
+                   "$mirror$Sum$demo$mirrorsum$NestedEvent.MirroredElemTypes : "
+                   "scala.Tuple2 [ demo.mirrorsum.NestedEvent$.Pending, "
+                   "demo.mirrorsum.NestedEvent$.Recorded ]") &&
+          contains(result.nirText,
+                   "$mirror$Sum$demo$mirrorsum$NestedEvent.MirroredElemLabels : "
+                   "scala.Tuple2 [ \"Pending\", \"Recorded\" ]") &&
+          contains(result.nirText,
+                   "ret Int "
+                   "if(is-instance-of[demo.mirrorsum.NestedEvent$.Pending]"
+                   "(%value), 0, 1)") &&
+          contains(result.nirText,
+                   "$mirror$Sum$demo$mirrorsum$NestedMaybe.MirroredElemTypes : "
+                   "scala.Tuple2 [ demo.mirrorsum.NestedMaybe$.Missing, "
+                   "demo.mirrorsum.NestedMaybe$.Found [ A ] ]") &&
+          contains(result.nirText,
+                   "$mirror$Sum$demo$mirrorsum$NestedMaybe.MirroredElemLabels : "
+                   "scala.Tuple2 [ \"Missing\", \"Found\" ]") &&
+          contains(result.nirText,
+                   "$mirror$Sum$demo$mirrorsum$Placed.MirroredElemTypes : "
+                   "scala.Tuple3 [ demo.mirrorsum.Before, "
+                   "demo.mirrorsum.Placed$.Middle, demo.mirrorsum.After ]") &&
+          contains(result.nirText,
+                   "$mirror$Sum$demo$mirrorsum$Placed.MirroredElemLabels : "
+                   "scala.Tuple3 [ \"Before\", \"Middle\", \"After\" ]") &&
+          contains(result.nirText,
+                   "ret Int if(is-instance-of[demo.mirrorsum.Before](%value), "
+                   "0, "
+                   "if(is-instance-of[demo.mirrorsum.Placed$.Middle](%value), "
+                   "1, 2))"),
       "Scala 3 sum Mirror synthesis, Mirror.Of compatibility, ordered ordinal "
       "lowering, metadata, supported-shape diagnostics, or native execution "
       "diverged (status=" +
@@ -6503,7 +6590,8 @@ class Leaf extends Branch
           unsealed.diagnosticsText + "', generic-diagnostics='" +
           generic.diagnosticsText + "', generic-object-diagnostics='" +
           genericObject.diagnosticsText + "', child-diagnostics='" +
-          nonConcreteChild.diagnosticsText + "')");
+          nonConcreteChild.diagnosticsText + "', nested-child-diagnostics='" +
+          wrongOwnerNestedChild.diagnosticsText + "')");
 }
 
 int smokePrimitiveGenericsNativeRuntime() {

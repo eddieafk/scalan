@@ -1018,13 +1018,16 @@ Current scaffold status:
   `ProductOf[T]` inherits that common evidence shape, so an existing product
   mirror also satisfies a direct `Mirror.Of[T]` contextual request. The first
   sum layer adds `Mirror.Sum`, `Mirror.SumOf[T]`, and the `sealed` class/trait
-  modifier. A top-level sealed trait whose direct children are top-level
-  concrete classes or singleton objects receives ordered child-type and
-  child-label tuples. The monomorphic form uses a stable companion mirror. A
-  generic sum accepts direct parent mappings that forward, select, or reorder
-  child type parameters. Fixed parent arguments are accepted only when the
-  sealed trait parameter's variance and bounds prove that the child conforms to
-  every generated parent instantiation. This covers shapes such as an
+  modifier. A top-level sealed trait whose direct children are top-level or
+  direct members of its companion object receives ordered child-type and
+  child-label tuples for concrete classes and singleton objects. Source-span
+  ordering is preserved across top-level and companion children. The
+  monomorphic form uses a stable companion mirror. A generic sum accepts direct
+  parent mappings that forward, select, or reorder child type parameters,
+  including for companion-nested children. Fixed parent arguments are accepted
+  only when the sealed trait parameter's variance and bounds prove that the
+  child conforms to every generated parent instantiation. This covers shapes
+  such as an
   `Empty extends Maybe[Nothing]` singleton under covariant `Maybe[+A]` and
   `First[A] extends Choice[A, Nothing]`/`Second[B] extends Choice[Nothing, B]`,
   as well as an `Ignore extends Handler[Object]` singleton under contravariant
@@ -1037,16 +1040,19 @@ Current scaffold status:
   request either `SumOf[T]` or the common `Of[T]` evidence, including when
   generic result-type inference must follow the generated evidence's applied
   parent. Optimized native coverage checks monomorphic class/object children,
-  generic singleton and parameter-subset children, reordered mappings, stable
-  versus fresh evidence identity, `Of` compatibility, metadata, stored-given
-  initialization, and focused diagnostics for unsealed sums, fixed arguments
-  that are invalid under the parent's variance, and unsupported direct-child
-  shapes. Nested or otherwise non-invertible generic parent mappings,
-  abstract/nested direct children, tuple-value operations, compile-time tuple
-  recursion, and higher-kinded derivation remain later derivation milestones.
+  generic singleton and parameter-subset children, reordered mappings,
+  companion-only and mixed top-level/companion placement, stable versus fresh
+  evidence identity, `Of` compatibility, metadata, stored-given initialization,
+  and focused diagnostics for unsealed sums, fixed arguments that are invalid
+  under the parent's variance, abstract children, and children nested outside
+  the sealed trait companion. Nested or otherwise non-invertible generic parent
+  mappings, deeper/arbitrary nested direct children, tuple-value operations,
+  compile-time tuple recursion, and higher-kinded derivation remain later
+  derivation milestones.
   Anonymous or local parameterized givens,
-  contextual-only inference for ordinary methods, nested companion declarations,
-  and Scala 2 `implicit` syntax also remain later milestones.
+  contextual-only inference for ordinary methods, general derivation from
+  nested declarations, and Scala 2 `implicit` syntax also remain later
+  milestones.
 - Postfix type application now supports typed `value.isInstanceOf[Target]` and
   checked `value.asInstanceOf[Target]` for known classes, traits, and objects.
   NIR uses dedicated `is-instance-of[T]` and `as-instance-of[T]` values; verification
