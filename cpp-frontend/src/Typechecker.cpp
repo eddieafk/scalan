@@ -970,14 +970,20 @@ standardDerivationDeclarations(const AstModule& module) {
           });
       childCount += directChild ? 1 : 0;
     };
+    std::function<void(const AstDeclaration&)> countNestedDirectChildren =
+        [&](const AstDeclaration& nestedCandidate) {
+          countDirectChild(nestedCandidate);
+          if (nestedCandidate.kind != AstDeclarationKind::Class &&
+              nestedCandidate.kind != AstDeclarationKind::Trait &&
+              nestedCandidate.kind != AstDeclarationKind::Object) {
+            return;
+          }
+          for (const AstDeclaration& member : nestedCandidate.members) {
+            countNestedDirectChildren(member);
+          }
+        };
     for (const AstDeclaration& candidate : module.declarations) {
-      countDirectChild(candidate);
-      if (candidate.kind == AstDeclarationKind::Object &&
-          candidate.name == declaration.name) {
-        for (const AstDeclaration& member : candidate.members) {
-          countDirectChild(member);
-        }
-      }
+      countNestedDirectChildren(candidate);
     }
     addTupleArity(childCount);
   }
@@ -2710,25 +2716,27 @@ void Typechecker::collectSumMirrors(const std::vector<AstDeclaration>& declarati
           return false;
         };
     std::vector<SumChild> children;
-    std::unordered_set<std::string> childSymbols;
     bool unsupportedChild = false;
     struct SumCandidate {
       const AstDeclaration* declaration = nullptr;
       std::string owner;
     };
     std::vector<SumCandidate> candidates;
-    candidates.reserve(declarations.size());
-    for (const AstDeclaration& candidateDeclaration : declarations) {
-      candidates.push_back(SumCandidate{&candidateDeclaration, owner});
-      if (candidateDeclaration.kind == AstDeclarationKind::Object &&
-          candidateDeclaration.name == declaration.name) {
-        const std::string companionOwner =
-            declarationSymbolName(candidateDeclaration, owner);
-        for (const AstDeclaration& member : candidateDeclaration.members) {
-          candidates.push_back(SumCandidate{&member, companionOwner});
-        }
-      }
-    }
+    const std::function<void(const std::vector<AstDeclaration>&, const std::string&)>
+        collectCandidates = [&](const std::vector<AstDeclaration>& nestedDeclarations,
+                                const std::string& nestedOwner) {
+          for (const AstDeclaration& candidateDeclaration : nestedDeclarations) {
+            candidates.push_back(SumCandidate{&candidateDeclaration, nestedOwner});
+            if (candidateDeclaration.kind == AstDeclarationKind::Class ||
+                candidateDeclaration.kind == AstDeclarationKind::Trait ||
+                candidateDeclaration.kind == AstDeclarationKind::Object) {
+              collectCandidates(
+                  candidateDeclaration.members,
+                  declarationSymbolName(candidateDeclaration, nestedOwner));
+            }
+          }
+        };
+    collectCandidates(declarations, owner);
     std::stable_sort(candidates.begin(), candidates.end(),
                      [](const SumCandidate& lhs, const SumCandidate& rhs) {
                        return lhs.declaration->span.start < rhs.declaration->span.start;
@@ -2748,7 +2756,6 @@ void Typechecker::collectSumMirrors(const std::vector<AstDeclaration>& declarati
                     targetName) == candidate->second.parentSymbolNames.end()) {
         continue;
       }
-      childSymbols.insert(candidateName);
       if (candidateDeclaration.kind != AstDeclarationKind::Class &&
           candidateDeclaration.kind != AstDeclarationKind::Object) {
         diagnostics_.error(candidateDeclaration.span,
@@ -2858,18 +2865,6 @@ void Typechecker::collectSumMirrors(const std::vector<AstDeclaration>& declarati
               : candidate->second.type.name;
       children.push_back(
           SumChild{&candidateDeclaration, candidate->second, elementType});
-    }
-    for (const auto& [symbolName, symbol] : globalSymbols_) {
-      if (std::find(symbol.parentSymbolNames.begin(), symbol.parentSymbolNames.end(),
-                    targetName) == symbol.parentSymbolNames.end() ||
-          childSymbols.contains(symbolName)) {
-        continue;
-      }
-      diagnostics_.error(declaration.span,
-                         "sum mirror child must be top-level or a direct member of "
-                         "the sealed trait companion: " +
-                             symbolName);
-      unsupportedChild = true;
     }
     if (unsupportedChild) {
       continue;

@@ -47,19 +47,23 @@ class Use[-A](value: A) extends Handler[A]
 
 sealed trait NestedEvent derives Ordinal
 object NestedEvent {
-  object Pending extends NestedEvent
-  class Recorded(val code: Int) extends NestedEvent
+  object Cases {
+    object Pending extends NestedEvent
+    class Recorded(val code: Int) extends NestedEvent
+  }
 }
 
 sealed trait NestedMaybe[+A] derives Ordinal
 object NestedMaybe {
-  object Missing extends NestedMaybe[Nothing]
-  class Found[+A](val value: A) extends NestedMaybe[A]
+  object Cases {
+    object Missing extends NestedMaybe[Nothing]
+    class Found[+A](val value: A) extends NestedMaybe[A]
+  }
 }
 
 sealed trait Placed derives Ordinal
 class Before extends Placed
-object Placed {
+object PlacedCases {
   object Middle extends Placed
 }
 class After extends Placed
@@ -116,14 +120,14 @@ object SumMirrorDerivation {
         new Reversed[String, Object]))
     println(ordinal[Handler[String]](Ignore))
     println(ordinal[Handler[String]](new Use[String]("value")))
-    println(ordinal[NestedEvent](NestedEvent.Pending))
-    println(ordinal[NestedEvent](new NestedEvent.Recorded(3)))
-    println(ordinal[NestedMaybe[String]](NestedMaybe.Missing))
+    println(ordinal[NestedEvent](NestedEvent.Cases.Pending))
+    println(ordinal[NestedEvent](new NestedEvent.Cases.Recorded(3)))
+    println(ordinal[NestedMaybe[String]](NestedMaybe.Cases.Missing))
     println(
       ordinal[NestedMaybe[String]](
-        new NestedMaybe.Found[String]("value")))
+        new NestedMaybe.Cases.Found[String]("value")))
     println(ordinal[Placed](new Before))
-    println(ordinal[Placed](Placed.Middle))
+    println(ordinal[Placed](PlacedCases.Middle))
     println(ordinal[Placed](new After))
   }
 }

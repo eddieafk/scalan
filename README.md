@@ -91,7 +91,7 @@ build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
   --output /tmp/product-mirror-derivation \
   cpp-examples/ProductMirrorDerivation.scala
 
-# Compile top-level and qualified companion-nested sum cases and mirrors.
+# Compile source-ordered sum cases nested under arbitrary stable objects.
 build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
   --output /tmp/sum-mirror-derivation \
   cpp-examples/SumMirrorDerivation.scala

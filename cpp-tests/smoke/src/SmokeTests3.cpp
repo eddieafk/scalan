@@ -27,7 +27,7 @@ std::string readTextFile(const std::filesystem::path& path) {
   return contents.str();
 }
 
-int smokeQualifiedCompanionCases() {
+int smokeQualifiedNestedSumCases() {
   constexpr const char* source = R"(package demo.qualifiedcases
 
 trait Ordinal[A] {
@@ -62,6 +62,25 @@ object Maybe {
   class Present[+A](val value: A) extends Maybe[A]
 }
 
+sealed trait Command derives Ordinal
+object Command {
+  object Primary {
+    object Start extends Command
+    class Stop(val code: Int) extends Command
+  }
+}
+object MoreCommands {
+  object Pause extends Command
+}
+
+sealed trait DeepMaybe[+A] derives Ordinal
+object DeepMaybe {
+  object Cases {
+    object Missing extends DeepMaybe[Nothing]
+    class Found[+A](val value: A) extends DeepMaybe[A]
+  }
+}
+
 object Main {
   def ordinal[A](value: A)(using instance: Ordinal[A]): Int =
     instance.ordinal(value)
@@ -74,6 +93,14 @@ object Main {
     println(ordinal[Maybe[String]](Maybe.Empty))
     println(ordinal[Maybe[String]](new Maybe.Present[String]("value")))
     println(stopped(new Event.Stopped(7)).code)
+    println(ordinal[Command](Command.Primary.Start))
+    println(ordinal[Command](new Command.Primary.Stop(9)))
+    println(ordinal[Command](MoreCommands.Pause))
+    println(ordinal[DeepMaybe[String]](DeepMaybe.Cases.Missing))
+    println(
+      ordinal[DeepMaybe[String]](
+        new DeepMaybe.Cases.Found[String]("nested")))
+    println(new Command.Primary.Stop(9).code)
   }
 }
 )";
@@ -91,9 +118,9 @@ object Main {
 
   const std::filesystem::path temporary = std::filesystem::temp_directory_path();
   const std::filesystem::path binary =
-      temporary / "cpp-scalanative-smoke-qualified-companion-cases";
+      temporary / "cpp-scalanative-smoke-qualified-nested-sum-cases";
   const std::filesystem::path output =
-      temporary / "cpp-scalanative-smoke-qualified-companion-cases.out";
+      temporary / "cpp-scalanative-smoke-qualified-nested-sum-cases.out";
   std::error_code ignored;
   std::filesystem::remove(binary, ignored);
   std::filesystem::remove(output, ignored);
@@ -104,7 +131,7 @@ object Main {
   options.outputPath = binary;
   scalanative::support::DiagnosticEngine diagnostics;
   const scalanative::tools::build::BuildResult result =
-      driver.buildSource("QualifiedCompanionCases.scala", source, options, diagnostics);
+      driver.buildSource("QualifiedNestedSumCases.scala", source, options, diagnostics);
 
   scalanative::support::DiagnosticEngine invalidDiagnostics;
   const scalanative::tools::build::BuildResult invalid = driver.buildSource(
@@ -114,7 +141,7 @@ object Main {
     if (contains(result.diagnosticsText, "clang toolchain not found")) {
       return 0;
     }
-    return fail("qualified companion cases native build failed: " +
+    return fail("qualified nested sum cases native build failed: " +
                 result.diagnosticsText);
   }
 
@@ -125,7 +152,7 @@ object Main {
   std::filesystem::remove(output, ignored);
 
   const bool valid =
-      status == 0 && text == "0\n1\n0\n1\n7\n" && !invalid.ok &&
+      status == 0 && text == "0\n1\n0\n1\n7\n0\n1\n2\n0\n1\n9\n" && !invalid.ok &&
       contains(invalid.diagnosticsText,
                "constructor target is not a class: Event.Started") &&
       contains(result.nirText, "module @demo.qualifiedcases.Event$.Started : "
@@ -136,13 +163,30 @@ object Main {
                                "@demo.qualifiedcases.Maybe") &&
       contains(result.nirText, "class @demo.qualifiedcases.Maybe$.Present : "
                                "@demo.qualifiedcases.Maybe") &&
+      contains(result.nirText, "module @demo.qualifiedcases.Command$.Primary.Start : "
+                               "@demo.qualifiedcases.Command") &&
+      contains(result.nirText, "class @demo.qualifiedcases.Command$.Primary.Stop : "
+                               "@demo.qualifiedcases.Command") &&
+      contains(result.nirText, "module @demo.qualifiedcases.MoreCommands.Pause : "
+                               "@demo.qualifiedcases.Command") &&
+      contains(result.nirText,
+               "$mirror$Sum$demo$qualifiedcases$Command.MirroredElemTypes : "
+               "scala.Tuple3 [ demo.qualifiedcases.Command$.Primary.Start, "
+               "demo.qualifiedcases.Command$.Primary.Stop, "
+               "demo.qualifiedcases.MoreCommands.Pause ]") &&
+      contains(result.nirText,
+               "$mirror$Sum$demo$qualifiedcases$DeepMaybe.MirroredElemTypes : "
+               "scala.Tuple2 [ demo.qualifiedcases.DeepMaybe$.Cases.Missing, "
+               "demo.qualifiedcases.DeepMaybe$.Cases.Found [ A ] ]") &&
       contains(result.nirText, "new demo.qualifiedcases.Event$.Stopped") &&
-      contains(result.nirText, "new demo.qualifiedcases.Maybe$.Present");
-  return valid ? 0 : fail("qualified companion object/class access smoke test failed");
+      contains(result.nirText, "new demo.qualifiedcases.Maybe$.Present") &&
+      contains(result.nirText, "new demo.qualifiedcases.Command$.Primary.Stop") &&
+      contains(result.nirText, "new demo.qualifiedcases.DeepMaybe$.Cases.Found");
+  return valid ? 0 : fail("qualified nested sum-case smoke test failed");
 }
 
 } // namespace
 
 int runSmokeTests3() {
-  return smokeQualifiedCompanionCases();
+  return smokeQualifiedNestedSumCases();
 }

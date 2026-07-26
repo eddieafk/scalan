@@ -1018,10 +1018,11 @@ Current scaffold status:
   `ProductOf[T]` inherits that common evidence shape, so an existing product
   mirror also satisfies a direct `Mirror.Of[T]` contextual request. The first
   sum layer adds `Mirror.Sum`, `Mirror.SumOf[T]`, and the `sealed` class/trait
-  modifier. A top-level sealed trait whose direct children are top-level or
-  direct members of its companion object receives ordered child-type and
-  child-label tuples for concrete classes and singleton objects. Source-span
-  ordering is preserved across top-level and companion children. The
+  modifier. A top-level sealed trait whose direct children are concrete classes
+  or singleton objects receives ordered child-type and child-label tuples.
+  Children may be top-level or nested to arbitrary declaration depth under the
+  companion or another stable object. Source-span ordering is preserved across
+  all placements. The
   monomorphic form uses a stable companion mirror. A generic sum accepts direct
   parent mappings that forward, select, or reorder child type parameters,
   including for companion-nested children. Fixed parent arguments are accepted
@@ -1045,14 +1046,13 @@ Current scaffold status:
   constructors such as `Maybe.Present[String]` work without wildcard imports.
   Optimized native coverage checks monomorphic class/object children,
   generic singleton and parameter-subset children, reordered mappings,
-  companion-only and mixed top-level/companion placement, stable versus fresh
+  companion-only and mixed top-level/nested placement, stable versus fresh
   evidence identity, `Of` compatibility, metadata, stored-given initialization,
   and focused diagnostics for unsealed sums, fixed arguments that are invalid
-  under the parent's variance, abstract children, and children nested outside
-  the sealed trait companion. Nested or otherwise non-invertible generic parent
-  mappings, deeper/arbitrary nested direct children, tuple-value operations,
-  compile-time tuple recursion, and higher-kinded derivation remain later
-  derivation milestones.
+  under the parent's variance, and abstract children. Nested or otherwise
+  non-invertible generic parent mappings, tuple-value operations, compile-time
+  tuple recursion, and higher-kinded derivation remain later derivation
+  milestones.
   Anonymous or local parameterized givens,
   contextual-only inference for ordinary methods, general derivation from
   nested declarations, and Scala 2 `implicit` syntax also remain later

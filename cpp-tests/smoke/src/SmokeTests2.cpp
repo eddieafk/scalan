@@ -6337,19 +6337,6 @@ sealed trait Event derives Ordinal
 trait Branch extends Event
 class Leaf extends Branch
 )";
-  constexpr const char* wrongOwnerNestedChildSource =
-      R"(package demo.invalidmirrorsum.nested
-
-trait Ordinal[A]
-object Ordinal {
-  def derived[A](using mirror: scala.deriving.Mirror.SumOf[A]): Ordinal[A] = null
-}
-
-sealed trait Event derives Ordinal
-object Cases {
-  object Nested extends Event
-}
-)";
 
   const std::filesystem::path temporary = std::filesystem::temp_directory_path();
   const std::filesystem::path binary =
@@ -6383,11 +6370,6 @@ object Cases {
   const scalanative::tools::build::BuildResult nonConcreteChild =
       driver.buildSource("NonConcreteSumMirrorChild.scala", nonConcreteChildSource, {},
                          nonConcreteChildDiagnostics);
-  scalanative::support::DiagnosticEngine wrongOwnerNestedChildDiagnostics;
-  const scalanative::tools::build::BuildResult wrongOwnerNestedChild =
-      driver.buildSource("WrongOwnerNestedSumMirrorChild.scala",
-                         wrongOwnerNestedChildSource, {},
-                         wrongOwnerNestedChildDiagnostics);
 
   if (!result.ok) {
     if (contains(result.diagnosticsText, "clang toolchain not found")) {
@@ -6424,11 +6406,6 @@ object Cases {
           contains(nonConcreteChild.diagnosticsText,
                    "sum mirror child must be a concrete class or object: "
                    "demo.invalidmirrorsum.child.Branch") &&
-          !wrongOwnerNestedChild.ok &&
-          contains(wrongOwnerNestedChild.diagnosticsText,
-                   "sum mirror child must be top-level or a direct member of "
-                   "the sealed trait companion: "
-                   "demo.invalidmirrorsum.nested.Cases.Nested") &&
           contains(result.nirText, "trait @scala.deriving.Mirror.Sum : "
                                    "@scala.deriving.Mirror") &&
           contains(result.nirText, "trait @scala.deriving.Mirror.SumOf : "
@@ -6590,8 +6567,7 @@ object Cases {
           unsealed.diagnosticsText + "', generic-diagnostics='" +
           generic.diagnosticsText + "', generic-object-diagnostics='" +
           genericObject.diagnosticsText + "', child-diagnostics='" +
-          nonConcreteChild.diagnosticsText + "', nested-child-diagnostics='" +
-          wrongOwnerNestedChild.diagnosticsText + "')");
+          nonConcreteChild.diagnosticsText + "')");
 }
 
 int smokePrimitiveGenericsNativeRuntime() {
