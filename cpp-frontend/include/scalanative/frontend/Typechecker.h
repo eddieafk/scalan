@@ -263,6 +263,10 @@ private:
       const SymbolInfo& symbol, const std::vector<TypeInfo>& argumentTypes,
       const support::SourceSpan& span, const TypeInfo* expectedResultType = nullptr,
       bool reportDiagnostics = true) const;
+  [[nodiscard]] std::vector<SymbolInfo>
+  inferContextualTypeApplications(const SymbolInfo& symbol,
+                                  std::size_t firstContextParameter, Scope& scope,
+                                  const support::SourceSpan& span) const;
   [[nodiscard]] bool isAbstractTypeMember(const TypeInfo& type) const;
   [[nodiscard]] bool runtimeSignatureUsesAbstractType(const SymbolInfo& member) const;
   [[nodiscard]] TypeInfo

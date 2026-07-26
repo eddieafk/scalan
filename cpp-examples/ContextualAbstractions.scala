@@ -6,6 +6,7 @@ class Bird(val name: String)
 class Fox(val name: String)
 class Box[A](val value: A)
 class DerivationSeed(val prefix: String)
+class TypeName[A](val name: String)
 
 object DerivationSeed {
   given seed: DerivationSeed = new DerivationSeed("derived")
@@ -167,6 +168,7 @@ import Show.{catShow => selectedCatShow}
 
 object ContextualAbstractions {
   given dogShow: Show[Dog] = new DogShow("dog:")
+  given dogTypeName: TypeName[Dog] = new TypeName[Dog]("context-dog")
   given generalFormatter: Formatter = new Formatter("general")
   given detailedFormatter: DetailedFormatter = new DetailedFormatter("detailed")
   given alternateFormatter: AlternateFormatter =
@@ -177,6 +179,16 @@ object ContextualAbstractions {
 
   def evidence[A]()(using show: Show[A]): Show[A] =
     show
+
+  def inferredContextType[A]()(using typeName: TypeName[A]): String =
+    typeName.name
+
+  def forwardedContextType[A]()(using typeName: TypeName[A]): String =
+    inferredContextType()
+
+  def repeatedContextType[A]()(using first: TypeName[A], second: TypeName[A]):
+      String =
+    first.name + ":" + second.name
 
   def forwarded[A](value: A)(using show: Show[A]): String =
     render(value)
@@ -341,5 +353,8 @@ object ContextualAbstractions {
     println(ambiguousFallback)
     println(divergentFallback)
     println(nestedLocal(new Dog("dog")))
+    println(inferredContextType())
+    println(forwardedContextType[Dog]())
+    println(repeatedContextType())
   }
 }

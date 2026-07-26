@@ -27,7 +27,7 @@ std::string readTextFile(const std::filesystem::path& path) {
   return contents.str();
 }
 
-int smokeQualifiedNestedSumCases() {
+int smokeQualifiedNestedAndContextualInference() {
   constexpr const char* source = R"(package demo.qualifiedcases
 
 trait Ordinal[A] {
@@ -81,11 +81,26 @@ object DeepMaybe {
   }
 }
 
+trait Named[A] {
+  val name: String
+}
+class NamedValue[A](val name: String) extends Named[A]
+
 object Main {
+  given intNamed: Named[Int] = new NamedValue[Int]("context-int")
+
   def ordinal[A](value: A)(using instance: Ordinal[A]): Int =
     instance.ordinal(value)
 
   def stopped(value: Event.Stopped): Event.Stopped = value
+
+  def contextName[A]()(using named: Named[A]): String = named.name
+
+  def forwardedContextName[A]()(using named: Named[A]): String =
+    contextName()
+
+  def repeatedContextName[A]()(using first: Named[A], second: Named[A]): String =
+    first.name + ":" + second.name
 
   def main = {
     println(ordinal[Event](Event.Started))
@@ -101,6 +116,9 @@ object Main {
       ordinal[DeepMaybe[String]](
         new DeepMaybe.Cases.Found[String]("nested")))
     println(new Command.Primary.Stop(9).code)
+    println(contextName())
+    println(forwardedContextName[Int]())
+    println(repeatedContextName())
   }
 }
 )";
@@ -111,16 +129,25 @@ object Event {
   object Started extends Event
 }
 
+trait Named[A]
+class NamedValue[A] extends Named[A]
+
 object Main {
+  given intNamed: Named[Int] = new NamedValue[Int]
+  given stringNamed: Named[String] = new NamedValue[String]
+
+  def choose[A]()(using named: Named[A]): Named[A] = named
+
   def value = new Event.Started()
+  val ambiguous = choose()
 }
 )";
 
   const std::filesystem::path temporary = std::filesystem::temp_directory_path();
   const std::filesystem::path binary =
-      temporary / "cpp-scalanative-smoke-qualified-nested-sum-cases";
+      temporary / "cpp-scalanative-smoke-scala3-incremental";
   const std::filesystem::path output =
-      temporary / "cpp-scalanative-smoke-qualified-nested-sum-cases.out";
+      temporary / "cpp-scalanative-smoke-scala3-incremental.out";
   std::error_code ignored;
   std::filesystem::remove(binary, ignored);
   std::filesystem::remove(output, ignored);
@@ -131,18 +158,17 @@ object Main {
   options.outputPath = binary;
   scalanative::support::DiagnosticEngine diagnostics;
   const scalanative::tools::build::BuildResult result =
-      driver.buildSource("QualifiedNestedSumCases.scala", source, options, diagnostics);
+      driver.buildSource("Scala3Incremental.scala", source, options, diagnostics);
 
   scalanative::support::DiagnosticEngine invalidDiagnostics;
   const scalanative::tools::build::BuildResult invalid = driver.buildSource(
-      "InvalidQualifiedCompanionCase.scala", invalidSource, {}, invalidDiagnostics);
+      "InvalidScala3Incremental.scala", invalidSource, {}, invalidDiagnostics);
 
   if (!result.ok) {
     if (contains(result.diagnosticsText, "clang toolchain not found")) {
       return 0;
     }
-    return fail("qualified nested sum cases native build failed: " +
-                result.diagnosticsText);
+    return fail("Scala 3 incremental native build failed: " + result.diagnosticsText);
   }
 
   const std::string command = binary.string() + " > " + output.string();
@@ -152,9 +178,15 @@ object Main {
   std::filesystem::remove(output, ignored);
 
   const bool valid =
-      status == 0 && text == "0\n1\n0\n1\n7\n0\n1\n2\n0\n1\n9\n" && !invalid.ok &&
+      status == 0 &&
+      text == "0\n1\n0\n1\n7\n0\n1\n2\n0\n1\n9\ncontext-int\n"
+              "context-int\ncontext-int:context-int\n" &&
+      !invalid.ok &&
       contains(invalid.diagnosticsText,
                "constructor target is not a class: Event.Started") &&
+      contains(invalid.diagnosticsText,
+               "ambiguous contextual type inference for choose; "
+               "use explicit type arguments") &&
       contains(result.nirText, "module @demo.qualifiedcases.Event$.Started : "
                                "@demo.qualifiedcases.Event") &&
       contains(result.nirText, "class @demo.qualifiedcases.Event$.Stopped : "
@@ -181,12 +213,19 @@ object Main {
       contains(result.nirText, "new demo.qualifiedcases.Event$.Stopped") &&
       contains(result.nirText, "new demo.qualifiedcases.Maybe$.Present") &&
       contains(result.nirText, "new demo.qualifiedcases.Command$.Primary.Stop") &&
-      contains(result.nirText, "new demo.qualifiedcases.DeepMaybe$.Cases.Found");
-  return valid ? 0 : fail("qualified nested sum-case smoke test failed");
+      contains(result.nirText, "new demo.qualifiedcases.DeepMaybe$.Cases.Found") &&
+      contains(result.nirText, "define @demo.qualifiedcases.Main.contextName : "
+                               "(demo.qualifiedcases.Named)String") &&
+      contains(result.nirText, "ret String call %contextName(%named)") &&
+      contains(result.nirText, "call %contextName(call "
+                               "%demo.qualifiedcases.Main.intNamed())");
+  return valid ? 0
+               : fail("Scala 3 incremental smoke test failed (output='" + text +
+                      "', invalid-diagnostics='" + invalid.diagnosticsText + "')");
 }
 
 } // namespace
 
 int runSmokeTests3() {
-  return smokeQualifiedNestedSumCases();
+  return smokeQualifiedNestedAndContextualInference();
 }

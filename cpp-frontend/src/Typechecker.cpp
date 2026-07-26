@@ -4382,7 +4382,38 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
         !calleeSymbol->typeParameters.empty()) {
       const SymbolInfo inferenceTarget = *calleeSymbol;
       specializedCallee = inferTypeApplication(inferenceTarget, argumentTypes,
-                                               expression.span, expectedType);
+                                               expression.span, expectedType, false);
+      if (!specializedCallee.typeParameters.empty()) {
+        std::size_t firstContextParameter = inferenceTarget.parameterTypes.size();
+        for (std::size_t parameterIndex = 0;
+             parameterIndex < inferenceTarget.contextualParameters.size();
+             ++parameterIndex) {
+          if (inferenceTarget.contextualParameters[parameterIndex]) {
+            firstContextParameter = parameterIndex;
+            break;
+          }
+        }
+        std::vector<SymbolInfo> contextualApplications;
+        if (firstContextParameter < inferenceTarget.parameterTypes.size() &&
+            argumentTypes.size() == firstContextParameter) {
+          contextualApplications = inferContextualTypeApplications(
+              inferenceTarget, firstContextParameter, scope, expression.span);
+        }
+        if (contextualApplications.size() == 1) {
+          specializedCallee = std::move(contextualApplications.front());
+        } else if (contextualApplications.size() > 1) {
+          diagnostics_.error(expression.span,
+                             "ambiguous contextual type inference for " +
+                                 inferenceTarget.name +
+                                 "; use explicit type arguments");
+        } else {
+          specializedCallee = inferTypeApplication(inferenceTarget, argumentTypes,
+                                                   expression.span, expectedType);
+        }
+      } else {
+        specializedCallee = inferTypeApplication(inferenceTarget, argumentTypes,
+                                                 expression.span, expectedType);
+      }
       calleeSymbol = &specializedCallee;
       calleeType = specializedCallee.type;
     } else {
@@ -6999,6 +7030,219 @@ SymbolInfo Typechecker::inferTypeApplication(const SymbolInfo& symbol,
   }
   return specializeResolvedTypeApplication(symbol, inferredArguments, span,
                                            reportDiagnostics);
+}
+
+std::vector<SymbolInfo> Typechecker::inferContextualTypeApplications(
+    const SymbolInfo& symbol, std::size_t firstContextParameter, Scope& scope,
+    const support::SourceSpan& span) const {
+  using InferenceState = std::unordered_map<std::string, TypeInfo>;
+
+  const auto isApplicationTypeParameter = [&](const TypeInfo& type) {
+    return type.typeParameter &&
+           std::any_of(symbol.typeParameters.begin(), symbol.typeParameters.end(),
+                       [&](const TypeParameterInfo& parameter) {
+                         return parameter.symbolName == type.typeParameterSymbolName;
+                       });
+  };
+  std::function<bool(const TypeInfo&)> mentionsApplicationTypeParameter;
+  mentionsApplicationTypeParameter = [&](const TypeInfo& type) {
+    return isApplicationTypeParameter(type) ||
+           std::any_of(type.typeArguments.begin(), type.typeArguments.end(),
+                       mentionsApplicationTypeParameter);
+  };
+
+  std::unordered_set<std::string> visiting;
+  std::function<bool(const TypeInfo&, const TypeInfo&, InferenceState&)>
+      collectInference;
+  collectInference = [&](const TypeInfo& pattern, const TypeInfo& evidence,
+                         InferenceState& state) {
+    if (evidence.kind == SimpleTypeKind::Unknown) {
+      return false;
+    }
+    if (isApplicationTypeParameter(pattern)) {
+      auto inferred = state.find(pattern.typeParameterSymbolName);
+      if (inferred == state.end()) {
+        state.emplace(pattern.typeParameterSymbolName, evidence);
+        return true;
+      }
+      return inferred->second.kind == evidence.kind &&
+             inferred->second.name == evidence.name;
+    }
+    if (!pattern.typeConstructorName.empty() &&
+        pattern.typeConstructorName == evidence.typeConstructorName &&
+        pattern.typeArguments.size() == evidence.typeArguments.size()) {
+      for (std::size_t index = 0; index < pattern.typeArguments.size(); ++index) {
+        if (!collectInference(pattern.typeArguments[index],
+                              evidence.typeArguments[index], state)) {
+          return false;
+        }
+      }
+      return true;
+    }
+    if (!mentionsApplicationTypeParameter(pattern)) {
+      return isAssignable(pattern, evidence);
+    }
+
+    const std::string evidenceName =
+        evidence.typeConstructorName.empty()
+            ? (evidence.runtimeName.empty() ? evidence.name : evidence.runtimeName)
+            : evidence.typeConstructorName;
+    const std::string visitKey = pattern.name + " <- " + evidenceName;
+    if (!visiting.insert(visitKey).second) {
+      return false;
+    }
+    auto evidenceSymbol = globalSymbols_.find(evidenceName);
+    if (evidenceSymbol != globalSymbols_.end()) {
+      for (const TypeInfo& parentPattern : evidenceSymbol->second.parentTypes) {
+        const TypeInfo parent = specializeTypeForReceiver(parentPattern, evidence);
+        InferenceState parentState = state;
+        if (collectInference(pattern, parent, parentState)) {
+          visiting.erase(visitKey);
+          state = std::move(parentState);
+          return true;
+        }
+      }
+    }
+    visiting.erase(visitKey);
+    return false;
+  };
+
+  std::vector<const SymbolInfo*> contextParameterEvidence;
+  std::vector<const SymbolInfo*> givenEvidence;
+  std::unordered_set<std::string> seenEvidence;
+  for (const auto& [name, candidate] : scope) {
+    (void)name;
+    if ((!candidate.isGiven && !candidate.isContextParameter) ||
+        !candidate.typeParameters.empty() ||
+        candidate.type.kind == SimpleTypeKind::Unknown) {
+      continue;
+    }
+    const std::string key = candidate.symbolName + " as " + candidate.type.name;
+    if (seenEvidence.insert(key).second) {
+      (candidate.isContextParameter ? contextParameterEvidence : givenEvidence)
+          .push_back(&candidate);
+    }
+  }
+
+  const auto stateKey = [&](const InferenceState& state) {
+    std::string key;
+    for (const TypeParameterInfo& parameter : symbol.typeParameters) {
+      key += parameter.symbolName + "=";
+      if (auto inferred = state.find(parameter.symbolName); inferred != state.end()) {
+        key += inferred->second.name;
+      }
+      key += ";";
+    }
+    return key;
+  };
+  const auto deduplicateStates = [&](std::vector<InferenceState>& states) {
+    std::unordered_set<std::string> seen;
+    std::erase_if(states, [&](const InferenceState& state) {
+      return !seen.insert(stateKey(state)).second;
+    });
+  };
+
+  std::vector<InferenceState> states(1);
+  for (std::size_t parameterIndex = firstContextParameter;
+       parameterIndex < symbol.parameterTypes.size(); ++parameterIndex) {
+    if (parameterIndex >= symbol.contextualParameters.size() ||
+        !symbol.contextualParameters[parameterIndex]) {
+      return {};
+    }
+    const TypeInfo& pattern = symbol.parameterTypes[parameterIndex];
+    if (!mentionsApplicationTypeParameter(pattern)) {
+      continue;
+    }
+
+    const auto inferFromEvidence =
+        [&](const std::vector<const SymbolInfo*>& evidenceCandidates) {
+          std::vector<InferenceState> inferredStates;
+          for (const SymbolInfo* evidence : evidenceCandidates) {
+            InferenceState inferred;
+            if (collectInference(pattern, evidence->type, inferred)) {
+              inferredStates.push_back(std::move(inferred));
+            }
+          }
+          return inferredStates;
+        };
+    std::vector<InferenceState> parameterStates =
+        inferFromEvidence(contextParameterEvidence);
+    if (parameterStates.empty()) {
+      parameterStates = inferFromEvidence(givenEvidence);
+    }
+    deduplicateStates(parameterStates);
+    if (parameterStates.empty()) {
+      return {};
+    }
+
+    std::vector<InferenceState> combined;
+    for (const InferenceState& existing : states) {
+      for (const InferenceState& parameterState : parameterStates) {
+        InferenceState merged = existing;
+        bool compatible = true;
+        for (const auto& [parameter, inferred] : parameterState) {
+          auto current = merged.find(parameter);
+          if (current != merged.end() && (current->second.kind != inferred.kind ||
+                                          current->second.name != inferred.name)) {
+            compatible = false;
+            break;
+          }
+          merged[parameter] = inferred;
+        }
+        if (compatible) {
+          combined.push_back(std::move(merged));
+        }
+      }
+    }
+    deduplicateStates(combined);
+    states = std::move(combined);
+    if (states.empty()) {
+      return {};
+    }
+  }
+
+  std::vector<SymbolInfo> viable;
+  std::vector<std::vector<TypeInfo>> viableArguments;
+  std::unordered_set<std::string> seenApplications;
+  std::function<bool(const TypedContextArgument&)> isMaterialized;
+  isMaterialized = [&](const TypedContextArgument& argument) {
+    return argument.type.kind != SimpleTypeKind::Unknown &&
+           std::all_of(argument.arguments.begin(), argument.arguments.end(),
+                       isMaterialized);
+  };
+  for (const InferenceState& state : states) {
+    std::vector<TypeInfo> arguments;
+    std::string applicationKey;
+    bool complete = true;
+    for (const TypeParameterInfo& parameter : symbol.typeParameters) {
+      auto inferred = state.find(parameter.symbolName);
+      if (inferred == state.end() || inferred->second.kind == SimpleTypeKind::Unknown) {
+        complete = false;
+        break;
+      }
+      arguments.push_back(inferred->second);
+      applicationKey += inferred->second.name + ";";
+    }
+    if (!complete || !seenApplications.insert(applicationKey).second) {
+      continue;
+    }
+
+    SymbolInfo specialized =
+        specializeResolvedTypeApplication(symbol, arguments, span, false);
+    const std::vector<TypedContextArgument> resolved = resolveContextArguments(
+        specialized, firstContextParameter, scope, span, nullptr, false);
+    if (resolved.size() != specialized.parameterTypes.size() - firstContextParameter ||
+        !std::all_of(resolved.begin(), resolved.end(), isMaterialized)) {
+      continue;
+    }
+    viable.push_back(std::move(specialized));
+    viableArguments.push_back(arguments);
+  }
+  if (viable.size() == 1) {
+    viable.front() =
+        specializeResolvedTypeApplication(symbol, viableArguments.front(), span, true);
+  }
+  return viable;
 }
 
 bool Typechecker::isAbstractTypeMember(const TypeInfo& type) const {

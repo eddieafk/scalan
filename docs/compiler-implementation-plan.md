@@ -899,14 +899,19 @@ Current scaffold status:
   trailing method `using` clauses, explicit `(using ...)` applications, and
   omission of contextual arguments at call sites. Generic method inference runs
   from ordinary arguments before contextual search, so an inferred `A` can
-  specialize evidence such as `Show[A]`. Search considers visible contextual
-  parameters and named givens, prefers a matching contextual parameter, and
-  diagnoses missing or ambiguous evidence. Selected arguments are recorded on
-  the typed module and lowered as ordinary erased call arguments; concrete
-  reference overrides reconstruct their semantic parameter type inside the
-  erased body. `cpp-examples/ContextualAbstractions.scala` and optimized native
-  smoke coverage exercise inferred, forwarded, explicit, and locally overridden
-  evidence.
+  specialize evidence such as `Show[A]`. When value arguments and the expected
+  result leave an ordinary generic method unspecialized, a complete type-argument
+  combination can also be inferred from concrete visible context parameters or
+  givens. Candidate combinations are replayed through normal evidence ranking
+  and recursive materialization; a unique viable combination wins, while
+  distinct viable combinations produce a focused ambiguity diagnostic. Search
+  considers visible contextual parameters and named givens, prefers a matching
+  contextual parameter, and diagnoses missing or ambiguous evidence. Selected
+  arguments are recorded on the typed module and lowered as ordinary erased call
+  arguments; concrete reference overrides reconstruct their semantic parameter
+  type inside the erased body. `cpp-examples/ContextualAbstractions.scala` and
+  optimized native smoke coverage exercise value-inferred, contextual-only,
+  forwarded, repeated-`using`, explicit, and locally overridden evidence.
 - Anonymous givens and block-local named or anonymous givens now use the same
   typed evidence model. Lexical depth is retained during search, so the
   innermost matching local given wins while equally nested matches remain
@@ -1053,10 +1058,10 @@ Current scaffold status:
   non-invertible generic parent mappings, tuple-value operations, compile-time
   tuple recursion, and higher-kinded derivation remain later derivation
   milestones.
-  Anonymous or local parameterized givens,
-  contextual-only inference for ordinary methods, general derivation from
-  nested declarations, and Scala 2 `implicit` syntax also remain later
-  milestones.
+  Anonymous or local parameterized givens, inference that must combine partial
+  value-argument and contextual substitutions, generic-evidence-driven
+  contextual inference, general derivation from nested declarations, and Scala
+  2 `implicit` syntax also remain later milestones.
 - Postfix type application now supports typed `value.isInstanceOf[Target]` and
   checked `value.asInstanceOf[Target]` for known classes, traits, and objects.
   NIR uses dedicated `is-instance-of[T]` and `as-instance-of[T]` values; verification
