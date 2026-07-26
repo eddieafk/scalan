@@ -60,6 +60,37 @@ std::string runtimeFormatSpecifier(std::string format) {
   return format;
 }
 
+void appendContextBoundParameters(AstDeclaration& declaration) {
+  std::vector<std::string> contextParameters;
+  for (std::size_t parameterIndex = 0;
+       parameterIndex < declaration.typeParameters.size(); ++parameterIndex) {
+    const AstTypeParameter& parameter = declaration.typeParameters[parameterIndex];
+    for (std::size_t boundIndex = 0; boundIndex < parameter.contextBounds.size();
+         ++boundIndex) {
+      contextParameters.push_back("$contextBound$" + std::to_string(parameterIndex) +
+                                  "$" + std::to_string(boundIndex) + ": " +
+                                  parameter.contextBounds[boundIndex] + "[" +
+                                  parameter.name + "]");
+    }
+  }
+  if (contextParameters.empty()) {
+    return;
+  }
+
+  std::size_t insertionIndex = declaration.parameters.size();
+  for (std::size_t i = 0; i < declaration.contextualParameters.size(); ++i) {
+    if (declaration.contextualParameters[i]) {
+      insertionIndex = i;
+      break;
+    }
+  }
+  declaration.parameters.insert(declaration.parameters.begin() + insertionIndex,
+                                contextParameters.begin(), contextParameters.end());
+  declaration.contextualParameters.insert(declaration.contextualParameters.begin() +
+                                              insertionIndex,
+                                          contextParameters.size(), true);
+}
+
 AstExpression makeFormatExpression(AstExpression value, std::string target,
                                    std::string format, support::SourceSpan span) {
   AstExpression call;
@@ -485,6 +516,7 @@ AstDeclaration Parser::parseDef(const Token& keyword) {
     sawParameterClause = true;
     sawContextualClause = sawContextualClause || contextualClause;
   }
+  appendContextBoundParameters(declaration);
 
   if (match(TokenKind::Colon)) {
     declaration.declaredType = parseTypeName();
@@ -560,6 +592,7 @@ AstDeclaration Parser::parseGiven(const Token& keyword) {
                            "parameterized given parameters must use a using clause");
       }
     }
+    appendContextBoundParameters(declaration);
     if (!consume(TokenKind::Colon,
                  "expected ':' before parameterized given result type")) {
       synchronize();
@@ -642,7 +675,7 @@ std::vector<AstTypeParameter> Parser::parseTypeParameterList() {
     if (check(TokenKind::Operator) && peek().text == ">") {
       advance();
       if (consume(TokenKind::Colon, "expected ':' after '>' in type bound")) {
-        parameter.lowerBound = parseTypeName(true, true);
+        parameter.lowerBound = parseTypeName(true, true, false, true);
         if (parameter.lowerBound.empty()) {
           diagnostics_.error(peek().span, "expected lower-bound type");
         }
@@ -651,10 +684,51 @@ std::vector<AstTypeParameter> Parser::parseTypeParameterList() {
     if (check(TokenKind::Operator) && peek().text == "<") {
       advance();
       if (consume(TokenKind::Colon, "expected ':' after '<' in type bound")) {
-        parameter.upperBound = parseTypeName(false, true);
+        parameter.upperBound = parseTypeName(false, true, false, true);
         if (parameter.upperBound.empty()) {
           diagnostics_.error(peek().span, "expected upper-bound type");
         }
+      }
+    }
+    while (match(TokenKind::Colon)) {
+      const support::SourceSpan boundSpan = previous().span;
+      const auto appendContextBound = [&](std::string contextBound) {
+        if (contextBound.find(" as ") != std::string::npos) {
+          diagnostics_.error(boundSpan, "named context bounds are not supported yet");
+        }
+        parameter.contextBounds.push_back(std::move(contextBound));
+      };
+      if (match(TokenKind::LeftBrace)) {
+        consumeSeparators();
+        if (check(TokenKind::RightBrace)) {
+          diagnostics_.error(boundSpan, "expected context-bound type");
+        }
+        while (!isAtEnd() && !check(TokenKind::RightBrace)) {
+          std::string contextBound = parseTypeName();
+          if (contextBound.empty()) {
+            diagnostics_.error(boundSpan, "expected context-bound type");
+            break;
+          }
+          appendContextBound(std::move(contextBound));
+          consumeSeparators();
+          if (!match(TokenKind::Comma)) {
+            break;
+          }
+          consumeSeparators();
+          if (check(TokenKind::RightBrace)) {
+            diagnostics_.error(previous().span,
+                               "expected context-bound type after ','");
+            break;
+          }
+        }
+        consume(TokenKind::RightBrace, "expected '}' after context bounds");
+      } else {
+        std::string contextBound = parseTypeName(false, true, false, true);
+        if (contextBound.empty()) {
+          diagnostics_.error(boundSpan, "expected context-bound type");
+          break;
+        }
+        appendContextBound(std::move(contextBound));
       }
     }
     parameters.push_back(std::move(parameter));
@@ -737,7 +811,8 @@ std::vector<AstExpression> Parser::parseArgumentList() {
 }
 
 std::string Parser::parseTypeName(bool stopAtUpperBound, bool stopAtRightBracket,
-                                  bool stopAtMatchAlternative) {
+                                  bool stopAtMatchAlternative,
+                                  bool stopAtContextBound) {
   std::string type;
   bool previousWasTypeJoiner = false;
   std::size_t bracketDepth = 0;
@@ -751,6 +826,9 @@ std::string Parser::parseTypeName(bool stopAtUpperBound, bool stopAtRightBracket
       return type;
     }
     if (stopAtMatchAlternative && check(TokenKind::Operator) && peek().text == "|") {
+      return type;
+    }
+    if (stopAtContextBound && check(TokenKind::Colon)) {
       return type;
     }
     if (check(TokenKind::Comma) && bracketDepth > 0) {

@@ -29,6 +29,7 @@ struct AstTypeParameter {
   std::string name;
   std::string lowerBound;
   std::string upperBound;
+  std::vector<std::string> contextBounds;
   support::SourceSpan span;
   TypeVariance variance = TypeVariance::Invariant;
 };

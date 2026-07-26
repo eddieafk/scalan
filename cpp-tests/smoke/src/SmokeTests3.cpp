@@ -114,6 +114,12 @@ trait AnonymousGenerated[A] {
 class AnonymousGeneratedValue[A](val label: String)
     extends AnonymousGenerated[A]
 
+trait ContextBoundGenerated[A] {
+  val label: String
+}
+class ContextBoundGeneratedValue[A](val label: String)
+    extends ContextBoundGenerated[A]
+
 object Main {
   given intNamed: Named[Int] = new NamedValue[Int]("context-int")
   given intStringPairNamed: PairNamed[Int, String] =
@@ -126,6 +132,8 @@ object Main {
     new GeneratedValue[A]("generated:" + intermediate.label)
   given [A](using seed: Seed[A]): AnonymousGenerated[A] =
     new AnonymousGeneratedValue[A]("anonymous-member:" + seed.label)
+  given contextBoundGenerated[A: Seed]: ContextBoundGenerated[A] =
+    new ContextBoundGeneratedValue[A]("context-bound-factory:" + seedLabel[A]())
 
   def ordinal[A](value: A)(using instance: Ordinal[A]): Int =
     instance.ordinal(value)
@@ -133,6 +141,8 @@ object Main {
   def stopped(value: Event.Stopped): Event.Stopped = value
 
   def contextName[A]()(using named: Named[A]): String = named.name
+
+  def seedLabel[A]()(using seed: Seed[A]): String = seed.label
 
   def forwardedContextName[A]()(using named: Named[A]): String =
     contextName()
@@ -163,6 +173,20 @@ object Main {
   def anonymousGeneratedName[A]()(using generated: AnonymousGenerated[A]): String =
     generated.label
 
+  def inferredContextBoundName[A: Named](value: A): String =
+    contextName()
+
+  def combinedContextBounds[A: {Named, Seed}](value: A): String =
+    contextName() + ":" + seedLabel()
+
+  def contextBoundAndUsing[A: Named](
+      value: A)(using seed: Seed[A]): String =
+    contextName() + ":" + seed.label
+
+  def contextBoundGeneratedName[A]()(
+      using generated: ContextBoundGenerated[A]): String =
+    generated.label
+
   def localNamedGeneratedName: String = {
     given localIntermediate[A](using seed: Seed[A]): Intermediate[A] =
       new IntermediateValue[A]("local-intermediate:" + seed.label)
@@ -186,6 +210,12 @@ object Main {
         new GeneratedValue[A]("inner-local:" + seed.label)
       generatedName()
     }
+  }
+
+  def localContextBoundGeneratedName: String = {
+    given localContextBound[A: Seed]: ContextBoundGenerated[A] =
+      new ContextBoundGeneratedValue[A]("local-context-bound")
+    contextBoundGeneratedName[Int]()
   }
 
   def main = {
@@ -218,6 +248,12 @@ object Main {
     println(localNamedGeneratedName)
     println(localAnonymousGeneratedName)
     println(nestedLocalGeneratedName)
+    println(inferredContextBoundName(1))
+    println(combinedContextBounds(2))
+    println(contextBoundAndUsing(3))
+    println(contextBoundAndUsing(4)(using intNamed, intSeed))
+    println(contextBoundGeneratedName[Int]())
+    println(localContextBoundGeneratedName)
   }
 }
 )";
@@ -263,6 +299,8 @@ object Main {
     generated
   def chooseLoop[A]()(using loop: LoopEvidence[A]): LoopEvidence[A] =
     loop
+  def missingContextBound[A: Named](value: A): Named[A] =
+    choose[A]()
   def capturedLocalFactory: Generated[Int] = {
     val prefix: String = "captured"
     given captured[A](using seed: Seed[A]): Generated[A] =
@@ -276,7 +314,25 @@ object Main {
   val valueConflict = conflicting(1, "no")
   val generatedAmbiguous = chooseGenerated()
   val unresolvedLoop = chooseLoop()
+  val missingBound = missingContextBound(true)
   val captured = capturedLocalFactory
+}
+)";
+  constexpr const char* invalidContextBoundSource =
+      R"(package demo.invalidcontextbounds
+
+trait Named[A]
+class UnsupportedContextBound[A: Named]
+)";
+  constexpr const char* invalidContextBoundSyntaxSource =
+      R"(package demo.invalidcontextboundsyntax
+
+trait Named[A]
+
+object Main {
+  def named[A: Named as named](value: A): A = value
+  def empty[A: {}](value: A): A = value
+  def trailing[A: {Named,}](value: A): A = value
 }
 )";
 
@@ -300,6 +356,15 @@ object Main {
   scalanative::support::DiagnosticEngine invalidDiagnostics;
   const scalanative::tools::build::BuildResult invalid = driver.buildSource(
       "InvalidScala3Incremental.scala", invalidSource, {}, invalidDiagnostics);
+  scalanative::support::DiagnosticEngine invalidContextBoundDiagnostics;
+  const scalanative::tools::build::BuildResult invalidContextBound =
+      driver.buildSource("InvalidContextBounds.scala", invalidContextBoundSource, {},
+                         invalidContextBoundDiagnostics);
+  scalanative::support::DiagnosticEngine invalidContextBoundSyntaxDiagnostics;
+  const scalanative::tools::build::BuildResult invalidContextBoundSyntax =
+      driver.buildSource("InvalidContextBoundSyntax.scala",
+                         invalidContextBoundSyntaxSource, {},
+                         invalidContextBoundSyntaxDiagnostics);
 
   if (!result.ok) {
     if (contains(result.diagnosticsText, "clang toolchain not found")) {
@@ -322,7 +387,11 @@ object Main {
               "generated:intermediate:seed-int\n"
               "generated:intermediate:seed-int\nanonymous-member:seed-int\n"
               "local-generated:local-intermediate:seed-int\n"
-              "local-anonymous:seed-int\ninner-local:seed-int\n" &&
+              "local-anonymous:seed-int\ninner-local:seed-int\n"
+              "context-int\ncontext-int:seed-int\ncontext-int:seed-int\n"
+              "context-int:seed-int\n"
+              "context-bound-factory:seed-int\n"
+              "local-context-bound\n" &&
       !invalid.ok &&
       contains(invalid.diagnosticsText,
                "constructor target is not a class: Event.Started") &&
@@ -346,6 +415,19 @@ object Main {
       contains(invalid.diagnosticsText,
                "capturing local parameterized given references local value "
                "prefix") &&
+      !invalidContextBound.ok &&
+      contains(invalidContextBound.diagnosticsText,
+               "context bounds are currently supported only on methods") &&
+      !invalidContextBoundSyntax.ok &&
+      contains(invalidContextBoundSyntax.diagnosticsText,
+               "named context bounds are not supported yet") &&
+      contains(invalidContextBoundSyntax.diagnosticsText,
+               "expected context-bound type") &&
+      contains(invalidContextBoundSyntax.diagnosticsText,
+               "expected context-bound type after ','") &&
+      contains(invalid.diagnosticsText,
+               "demo.invalidqualifiedcase.Named [ Boolean ] required by "
+               "missingContextBound") &&
       contains(result.nirText, "module @demo.qualifiedcases.Event$.Started : "
                                "@demo.qualifiedcases.Event") &&
       contains(result.nirText, "class @demo.qualifiedcases.Event$.Stopped : "
@@ -400,7 +482,26 @@ object Main {
                                "demo.qualifiedcases.Intermediate") &&
       contains(result.nirText, ".localGenerated : (demo.qualifiedcases.Intermediate)"
                                "demo.qualifiedcases.Generated") &&
-      contains(result.nirText, "call %generatedName(call %demo.qualifiedcases.$local$");
+      contains(result.nirText,
+               "call %generatedName(call %demo.qualifiedcases.$local$") &&
+      contains(result.nirText,
+               "define @demo.qualifiedcases.Main.inferredContextBoundName : "
+               "(Object,demo.qualifiedcases.Named)String") &&
+      contains(result.nirText,
+               "define @demo.qualifiedcases.Main.combinedContextBounds : "
+               "(Object,demo.qualifiedcases.Named,demo.qualifiedcases.Seed)String") &&
+      contains(result.nirText,
+               "define @demo.qualifiedcases.Main.contextBoundAndUsing : "
+               "(Object,demo.qualifiedcases.Named,demo.qualifiedcases.Seed)String") &&
+      contains(result.nirText,
+               "define @demo.qualifiedcases.Main.contextBoundGenerated : "
+               "(demo.qualifiedcases.Seed)"
+               "demo.qualifiedcases.ContextBoundGenerated") &&
+      contains(result.nirText, "call %contextBoundGeneratedName(call "
+                               "%demo.qualifiedcases.Main.contextBoundGenerated(call "
+                               "%demo.qualifiedcases.Main.intSeed()))") &&
+      contains(result.nirText, ".localContextBound : (demo.qualifiedcases.Seed)"
+                               "demo.qualifiedcases.ContextBoundGenerated");
   return valid ? 0
                : fail("Scala 3 incremental smoke test failed (output='" + text +
                       "', invalid-diagnostics='" + invalid.diagnosticsText + "')");

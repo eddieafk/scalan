@@ -135,6 +135,12 @@ bool AstValidator::validateDeclaration(const AstDeclaration& declaration,
                         "method type parameters cannot declare variance");
       ok = false;
     }
+    if (!parameter.contextBounds.empty() &&
+        declaration.kind != AstDeclarationKind::Def) {
+      diagnostics.error(parameter.span,
+                        "context bounds are currently supported only on methods");
+      ok = false;
+    }
   }
   if (!declaration.contextualParameters.empty() &&
       declaration.contextualParameters.size() != declaration.parameters.size()) {
