@@ -25,11 +25,17 @@ enum class AstClassBodyItemKind { Declaration, Expression };
 
 enum class TypeVariance { Invariant, Covariant, Contravariant };
 
+struct AstContextBound {
+  std::string type;
+  std::string witnessName;
+  support::SourceSpan span;
+};
+
 struct AstTypeParameter {
   std::string name;
   std::string lowerBound;
   std::string upperBound;
-  std::vector<std::string> contextBounds;
+  std::vector<AstContextBound> contextBounds;
   support::SourceSpan span;
   TypeVariance variance = TypeVariance::Invariant;
 };

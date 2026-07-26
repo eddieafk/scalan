@@ -178,8 +178,8 @@ object ContextualAbstractions {
     new ContextPair[Dog, String]("mixed-dog-string", "expected-dog-string")
   given dogContextSeed: ContextSeed[Dog] =
     new ContextSeed[Dog]("seed-dog")
-  given contextIntermediate[A: ContextSeed]: ContextIntermediate[A] =
-    new ContextIntermediate[A]("intermediate:" + contextSeedLabel[A]())
+  given contextIntermediate[A: ContextSeed as seed]: ContextIntermediate[A] =
+    new ContextIntermediate[A]("intermediate:" + seed.label)
   given contextGenerated[A](
       using intermediate: ContextIntermediate[A]): ContextGenerated[A] =
     new ContextGenerated[A]("generated:" + intermediate.label)
@@ -192,9 +192,6 @@ object ContextualAbstractions {
 
   def render[A](value: A)(using show: Show[A]): String =
     show.show(value)
-
-  def contextSeedLabel[A]()(using seed: ContextSeed[A]): String =
-    seed.label
 
   def evidence[A]()(using show: Show[A]): Show[A] =
     show
@@ -231,11 +228,12 @@ object ContextualAbstractions {
       using generated: AnonymousContextGenerated[A]): String =
     generated.label
 
-  def contextBoundRender[A: Show](value: A): String =
-    render(value)
+  def contextBoundRender[A: Show as show](value: A): String =
+    show.show(value)
 
-  def combinedContextBounds[A: {Show, TypeName}](value: A): String =
-    render(value) + ":" + inferredContextType()
+  def combinedContextBounds[
+      A: {Show as show, TypeName as typeName}](value: A): String =
+    show.show(value) + ":" + typeName.name
 
   def localParameterizedContextType: String = {
     given localIntermediate[A](

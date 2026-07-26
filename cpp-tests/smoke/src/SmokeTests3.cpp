@@ -132,8 +132,8 @@ object Main {
     new GeneratedValue[A]("generated:" + intermediate.label)
   given [A](using seed: Seed[A]): AnonymousGenerated[A] =
     new AnonymousGeneratedValue[A]("anonymous-member:" + seed.label)
-  given contextBoundGenerated[A: Seed]: ContextBoundGenerated[A] =
-    new ContextBoundGeneratedValue[A]("context-bound-factory:" + seedLabel[A]())
+  given contextBoundGenerated[A: Seed as seed]: ContextBoundGenerated[A] =
+    new ContextBoundGeneratedValue[A]("named-context-bound-factory:" + seed.label)
 
   def ordinal[A](value: A)(using instance: Ordinal[A]): Int =
     instance.ordinal(value)
@@ -187,6 +187,17 @@ object Main {
       using generated: ContextBoundGenerated[A]): String =
     generated.label
 
+  def namedContextBoundName[A: Named as named](value: A): String =
+    named.name
+
+  def namedAggregateContextBounds[
+      A: {Named as named, Seed as seed}](value: A): String =
+    named.name + ":" + seed.label
+
+  def namedContextBoundAndUsing[A: Named as named](
+      value: A)(using seed: Seed[A]): String =
+    named.name + ":" + seed.label
+
   def localNamedGeneratedName: String = {
     given localIntermediate[A](using seed: Seed[A]): Intermediate[A] =
       new IntermediateValue[A]("local-intermediate:" + seed.label)
@@ -213,8 +224,9 @@ object Main {
   }
 
   def localContextBoundGeneratedName: String = {
-    given localContextBound[A: Seed]: ContextBoundGenerated[A] =
-      new ContextBoundGeneratedValue[A]("local-context-bound")
+    given localContextBound[A: Seed as seed]: ContextBoundGenerated[A] =
+      new ContextBoundGeneratedValue[A](
+        "local-named-context-bound:" + seed.label)
     contextBoundGeneratedName[Int]()
   }
 
@@ -254,6 +266,9 @@ object Main {
     println(contextBoundAndUsing(4)(using intNamed, intSeed))
     println(contextBoundGeneratedName[Int]())
     println(localContextBoundGeneratedName)
+    println(namedContextBoundName(5))
+    println(namedAggregateContextBounds(6))
+    println(namedContextBoundAndUsing(7))
   }
 }
 )";
@@ -322,7 +337,20 @@ object Main {
       R"(package demo.invalidcontextbounds
 
 trait Named[A]
+trait Seed[A]
 class UnsupportedContextBound[A: Named]
+
+object InvalidContextBounds {
+  def duplicate[A: {Named as evidence, Seed as evidence}](value: A): A = value
+  def sourceCollision[A: Named as evidence](evidence: A): A = evidence
+  def dependent[A: Named as named](value: named.Member): A
+  def localDuplicate: Int = {
+    given local[
+        A: {Named as localEvidence, Seed as localEvidence}]: Named[A] =
+      localEvidence
+    1
+  }
+}
 )";
   constexpr const char* invalidContextBoundSyntaxSource =
       R"(package demo.invalidcontextboundsyntax
@@ -330,7 +358,7 @@ class UnsupportedContextBound[A: Named]
 trait Named[A]
 
 object Main {
-  def named[A: Named as named](value: A): A = value
+  def missingName[A: Named as](value: A): A = value
   def empty[A: {}](value: A): A = value
   def trailing[A: {Named,}](value: A): A = value
 }
@@ -390,8 +418,9 @@ object Main {
               "local-anonymous:seed-int\ninner-local:seed-int\n"
               "context-int\ncontext-int:seed-int\ncontext-int:seed-int\n"
               "context-int:seed-int\n"
-              "context-bound-factory:seed-int\n"
-              "local-context-bound\n" &&
+              "named-context-bound-factory:seed-int\n"
+              "local-named-context-bound:seed-int\n"
+              "context-int\ncontext-int:seed-int\ncontext-int:seed-int\n" &&
       !invalid.ok &&
       contains(invalid.diagnosticsText,
                "constructor target is not a class: Event.Started") &&
@@ -418,9 +447,15 @@ object Main {
       !invalidContextBound.ok &&
       contains(invalidContextBound.diagnosticsText,
                "context bounds are currently supported only on methods") &&
+      contains(invalidContextBound.diagnosticsText, "duplicate parameter: evidence") &&
+      contains(invalidContextBound.diagnosticsText,
+               "duplicate parameter: localEvidence") &&
+      contains(invalidContextBound.diagnosticsText,
+               "named context bounds referenced by preceding parameter types are "
+               "not supported yet") &&
       !invalidContextBoundSyntax.ok &&
       contains(invalidContextBoundSyntax.diagnosticsText,
-               "named context bounds are not supported yet") &&
+               "expected context-bound witness name after 'as'") &&
       contains(invalidContextBoundSyntax.diagnosticsText,
                "expected context-bound type") &&
       contains(invalidContextBoundSyntax.diagnosticsText,
@@ -501,10 +536,24 @@ object Main {
                                "%demo.qualifiedcases.Main.contextBoundGenerated(call "
                                "%demo.qualifiedcases.Main.intSeed()))") &&
       contains(result.nirText, ".localContextBound : (demo.qualifiedcases.Seed)"
-                               "demo.qualifiedcases.ContextBoundGenerated");
+                               "demo.qualifiedcases.ContextBoundGenerated") &&
+      contains(result.nirText,
+               "define @demo.qualifiedcases.Main.namedContextBoundName : "
+               "(Object,demo.qualifiedcases.Named)String") &&
+      contains(result.nirText, "ret String %named.name") &&
+      contains(result.nirText,
+               "define @demo.qualifiedcases.Main.namedAggregateContextBounds : "
+               "(Object,demo.qualifiedcases.Named,demo.qualifiedcases.Seed)String") &&
+      contains(result.nirText,
+               "define @demo.qualifiedcases.Main.namedContextBoundAndUsing : "
+               "(Object,demo.qualifiedcases.Named,demo.qualifiedcases.Seed)String");
   return valid ? 0
                : fail("Scala 3 incremental smoke test failed (output='" + text +
-                      "', invalid-diagnostics='" + invalid.diagnosticsText + "')");
+                      "', invalid-diagnostics='" + invalid.diagnosticsText +
+                      "', invalid-context-bound-diagnostics='" +
+                      invalidContextBound.diagnosticsText +
+                      "', invalid-context-bound-syntax-diagnostics='" +
+                      invalidContextBoundSyntax.diagnosticsText + "')");
 }
 
 } // namespace

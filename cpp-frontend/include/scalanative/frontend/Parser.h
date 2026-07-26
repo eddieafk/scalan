@@ -44,7 +44,8 @@ private:
   [[nodiscard]] std::string parseTypeName(bool stopAtUpperBound = false,
                                           bool stopAtRightBracket = false,
                                           bool stopAtMatchAlternative = false,
-                                          bool stopAtContextBound = false);
+                                          bool stopAtContextBound = false,
+                                          bool stopAtNamedContextBound = false);
   [[nodiscard]] std::vector<AstDeclaration>
   parseMemberBlock(std::vector<AstExpression>* constructorBody = nullptr,
                    std::vector<AstClassBodyItem>* classBodyItems = nullptr);

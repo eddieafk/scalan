@@ -1,10 +1,91 @@
 #include "scalanative/frontend/AstValidator.h"
 
 #include <algorithm>
+#include <cctype>
 #include <unordered_map>
 #include <unordered_set>
 
 namespace scalanative::frontend {
+
+namespace {
+
+std::string parameterName(const std::string& parameter) {
+  const std::size_t colon = parameter.find(':');
+  std::string name =
+      colon == std::string::npos ? parameter : parameter.substr(0, colon);
+  while (!name.empty() && name.back() == ' ') {
+    name.pop_back();
+  }
+  if (name.rfind("val ", 0) == 0 || name.rfind("var ", 0) == 0) {
+    name.erase(0, 4);
+  }
+  while (!name.empty() && name.front() == ' ') {
+    name.erase(name.begin());
+  }
+  return name;
+}
+
+bool containsWitnessSelection(const std::string& type, const std::string& witnessName) {
+  const std::string selection = witnessName + ".";
+  std::size_t position = type.find(selection);
+  while (position != std::string::npos) {
+    if (position == 0) {
+      return true;
+    }
+    const unsigned char previous = static_cast<unsigned char>(type[position - 1]);
+    if (std::isalnum(previous) == 0 && previous != '_' && previous != '$' &&
+        previous != '.') {
+      return true;
+    }
+    position = type.find(selection, position + 1);
+  }
+  return false;
+}
+
+bool validateParameterNamesAndContextBoundPlacement(
+    const std::vector<std::string>& parameters,
+    const std::vector<AstTypeParameter>& typeParameters,
+    const support::SourceSpan& span, support::DiagnosticEngine& diagnostics) {
+  bool ok = true;
+  std::unordered_set<std::string> parameterNames;
+  for (const std::string& parameter : parameters) {
+    const std::string name = parameterName(parameter);
+    if (!name.empty() && !parameterNames.insert(name).second) {
+      diagnostics.error(span, "duplicate parameter: " + name);
+      ok = false;
+    }
+  }
+  for (const AstTypeParameter& typeParameter : typeParameters) {
+    for (const AstContextBound& contextBound : typeParameter.contextBounds) {
+      if (contextBound.witnessName.empty()) {
+        continue;
+      }
+      std::size_t witnessIndex = parameters.size();
+      for (std::size_t i = 0; i < parameters.size(); ++i) {
+        if (parameterName(parameters[i]) == contextBound.witnessName) {
+          witnessIndex = i;
+          break;
+        }
+      }
+      for (std::size_t i = 0; i < witnessIndex; ++i) {
+        const std::string& parameter = parameters[i];
+        const std::size_t colon = parameter.find(':');
+        if (colon != std::string::npos &&
+            containsWitnessSelection(parameter.substr(colon + 1),
+                                     contextBound.witnessName)) {
+          diagnostics.error(
+              contextBound.span,
+              "named context bounds referenced by preceding parameter types "
+              "are not supported yet");
+          ok = false;
+        }
+      }
+    }
+  }
+  return ok;
+}
+
+} // namespace
 
 bool AstValidator::validate(const AstModule& module,
                             support::DiagnosticEngine& diagnostics) const {
@@ -148,6 +229,10 @@ bool AstValidator::validateDeclaration(const AstDeclaration& declaration,
                       "contextual parameter metadata is inconsistent");
     ok = false;
   }
+  ok = validateParameterNamesAndContextBoundPlacement(declaration.parameters,
+                                                      declaration.typeParameters,
+                                                      declaration.span, diagnostics) &&
+       ok;
   bool sawContextualParameter = false;
   for (std::size_t i = 0; i < declaration.contextualParameters.size(); ++i) {
     if (!declaration.contextualParameters[i]) {
@@ -398,6 +483,10 @@ bool AstValidator::validateExpression(const AstExpression& expression,
       ok = false;
     }
     if (expression.localMethod != nullptr) {
+      ok = validateParameterNamesAndContextBoundPlacement(
+               expression.localMethod->parameters,
+               expression.localMethod->typeParameters, expression.span, diagnostics) &&
+           ok;
       if (!expression.isGiven) {
         diagnostics.error(expression.span,
                           "local methods are only supported for given declarations");

@@ -66,8 +66,11 @@ void writeDeclaration(std::ostringstream& out, const AstDeclaration& declaration
       if (!parameter.upperBound.empty()) {
         out << " <: " << parameter.upperBound;
       }
-      for (const std::string& contextBound : parameter.contextBounds) {
-        out << ": " << contextBound;
+      for (const AstContextBound& contextBound : parameter.contextBounds) {
+        out << ": " << contextBound.type;
+        if (!contextBound.witnessName.empty()) {
+          out << " as " << contextBound.witnessName;
+        }
       }
     }
     out << ']';

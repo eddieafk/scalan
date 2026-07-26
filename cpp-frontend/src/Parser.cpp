@@ -67,9 +67,13 @@ void appendContextBoundParameters(AstDeclaration& declaration) {
     const AstTypeParameter& parameter = declaration.typeParameters[parameterIndex];
     for (std::size_t boundIndex = 0; boundIndex < parameter.contextBounds.size();
          ++boundIndex) {
-      contextParameters.push_back("$contextBound$" + std::to_string(parameterIndex) +
-                                  "$" + std::to_string(boundIndex) + ": " +
-                                  parameter.contextBounds[boundIndex] + "[" +
+      const AstContextBound& bound = parameter.contextBounds[boundIndex];
+      const std::string witnessName = bound.witnessName.empty()
+                                          ? "$contextBound$" +
+                                                std::to_string(parameterIndex) + "$" +
+                                                std::to_string(boundIndex)
+                                          : bound.witnessName;
+      contextParameters.push_back(witnessName + ": " + bound.type + "[" +
                                   parameter.name + "]");
     }
   }
@@ -692,11 +696,21 @@ std::vector<AstTypeParameter> Parser::parseTypeParameterList() {
     }
     while (match(TokenKind::Colon)) {
       const support::SourceSpan boundSpan = previous().span;
-      const auto appendContextBound = [&](std::string contextBound) {
-        if (contextBound.find(" as ") != std::string::npos) {
-          diagnostics_.error(boundSpan, "named context bounds are not supported yet");
+      const auto parseContextBound = [&](bool stopAtRightBracket) {
+        AstContextBound contextBound;
+        contextBound.span = boundSpan;
+        contextBound.type =
+            parseTypeName(false, stopAtRightBracket, false, stopAtRightBracket, true);
+        if (check(TokenKind::Identifier) && peek().text == "as") {
+          advance();
+          if (match(TokenKind::Identifier)) {
+            contextBound.witnessName = previous().text;
+          } else {
+            diagnostics_.error(peek().span,
+                               "expected context-bound witness name after 'as'");
+          }
         }
-        parameter.contextBounds.push_back(std::move(contextBound));
+        return contextBound;
       };
       if (match(TokenKind::LeftBrace)) {
         consumeSeparators();
@@ -704,12 +718,12 @@ std::vector<AstTypeParameter> Parser::parseTypeParameterList() {
           diagnostics_.error(boundSpan, "expected context-bound type");
         }
         while (!isAtEnd() && !check(TokenKind::RightBrace)) {
-          std::string contextBound = parseTypeName();
-          if (contextBound.empty()) {
+          AstContextBound contextBound = parseContextBound(false);
+          if (contextBound.type.empty()) {
             diagnostics_.error(boundSpan, "expected context-bound type");
             break;
           }
-          appendContextBound(std::move(contextBound));
+          parameter.contextBounds.push_back(std::move(contextBound));
           consumeSeparators();
           if (!match(TokenKind::Comma)) {
             break;
@@ -723,12 +737,12 @@ std::vector<AstTypeParameter> Parser::parseTypeParameterList() {
         }
         consume(TokenKind::RightBrace, "expected '}' after context bounds");
       } else {
-        std::string contextBound = parseTypeName(false, true, false, true);
-        if (contextBound.empty()) {
+        AstContextBound contextBound = parseContextBound(true);
+        if (contextBound.type.empty()) {
           diagnostics_.error(boundSpan, "expected context-bound type");
           break;
         }
-        appendContextBound(std::move(contextBound));
+        parameter.contextBounds.push_back(std::move(contextBound));
       }
     }
     parameters.push_back(std::move(parameter));
@@ -811,8 +825,8 @@ std::vector<AstExpression> Parser::parseArgumentList() {
 }
 
 std::string Parser::parseTypeName(bool stopAtUpperBound, bool stopAtRightBracket,
-                                  bool stopAtMatchAlternative,
-                                  bool stopAtContextBound) {
+                                  bool stopAtMatchAlternative, bool stopAtContextBound,
+                                  bool stopAtNamedContextBound) {
   std::string type;
   bool previousWasTypeJoiner = false;
   std::size_t bracketDepth = 0;
@@ -829,6 +843,10 @@ std::string Parser::parseTypeName(bool stopAtUpperBound, bool stopAtRightBracket
       return type;
     }
     if (stopAtContextBound && check(TokenKind::Colon)) {
+      return type;
+    }
+    if (stopAtNamedContextBound && bracketDepth == 0 && check(TokenKind::Identifier) &&
+        peek().text == "as" && !previousWasTypeJoiner) {
       return type;
     }
     if (check(TokenKind::Comma) && bracketDepth > 0) {

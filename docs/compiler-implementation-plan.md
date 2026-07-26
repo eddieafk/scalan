@@ -938,19 +938,22 @@ Current scaffold status:
   is available. Native coverage exercises anonymous member factories, a
   two-level named local chain, anonymous locals, nested shadowing, capture
   diagnostics, and hoisted erased calls.
-- Unnamed Scala 3 method context bounds such as `[A: Show]` are preserved on
-  type-parameter AST nodes and desugared into stable hidden `using` parameters.
-  Current aggregate bounds such as `[A: {Show, Ord}]` and the legacy chained
-  form are accepted. Bound witnesses precede an existing trailing `using`
-  clause in accordance with Scala 3 placement rules, then reuse ordinary
-  contextual inference, recursive given-factory materialization, forwarding,
-  and erased call lowering. The same representation supports member and
-  capture-free local parameterized givens declared with context bounds. Focused
-  native coverage exercises value-inferred method bounds, multiple bounds,
-  explicit contextual clauses, member and local given factories, missing
-  evidence, NIR signatures, and runtime forwarding. Class and trait context
-  bounds receive a focused diagnostic until constructor-context lowering is
-  implemented.
+- Scala 3 method context bounds preserve each bound type and optional `as`
+  witness name on the type-parameter AST. Unnamed bounds such as `[A: Show]`
+  desugar to stable hidden `using` parameters, while
+  `[A: Show as show]` exposes `show` directly in the method body. Current
+  aggregate bounds and the legacy chained form are accepted. Bound witnesses
+  precede an existing trailing `using` clause in accordance with Scala 3
+  placement rules, then reuse ordinary contextual inference, recursive
+  given-factory materialization, forwarding, and erased call lowering. The same
+  representation supports named witnesses in member and capture-free local
+  parameterized givens. Focused native coverage exercises value-inferred
+  method bounds, named aggregate bounds, explicit contextual clauses, member
+  and local given factories, missing evidence, duplicate and malformed names,
+  NIR signatures, and runtime witness access. Class and trait context bounds,
+  and named witnesses needed by preceding ordinary parameter types, receive
+  focused diagnostics until constructor-context and pre-parameter witness
+  placement are implemented.
 - Anonymous givens and block-local named or anonymous givens now use the same
   typed evidence model. Lexical depth is retained during search, so the
   innermost matching local given wins while equally nested matches remain
@@ -1097,9 +1100,10 @@ Current scaffold status:
   non-invertible generic parent mappings, tuple-value operations, compile-time
   tuple recursion, and higher-kinded derivation remain later derivation
   milestones.
-  Capturing local parameterized givens, class/trait and named `as` context
-  bounds, general derivation from nested declarations, and Scala 2 `implicit`
-  syntax also remain later milestones.
+  Capturing local parameterized givens, class/trait context bounds,
+  pre-parameter placement for dependent named witnesses, general derivation
+  from nested declarations, and Scala 2 `implicit` syntax also remain later
+  milestones.
 - Postfix type application now supports typed `value.isInstanceOf[Target]` and
   checked `value.asInstanceOf[Target]` for known classes, traits, and objects.
   NIR uses dedicated `is-instance-of[T]` and `as-instance-of[T]` values; verification
