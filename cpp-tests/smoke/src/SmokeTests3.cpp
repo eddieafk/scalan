@@ -86,8 +86,17 @@ trait Named[A] {
 }
 class NamedValue[A](val name: String) extends Named[A]
 
+trait PairNamed[A, B] {
+  val name: String
+  val value: B
+}
+class PairNamedValue[A, B](val name: String, val value: B)
+    extends PairNamed[A, B]
+
 object Main {
   given intNamed: Named[Int] = new NamedValue[Int]("context-int")
+  given intStringPairNamed: PairNamed[Int, String] =
+    new PairNamedValue[Int, String]("context-int-string", "expected-context")
 
   def ordinal[A](value: A)(using instance: Ordinal[A]): Int =
     instance.ordinal(value)
@@ -101,6 +110,20 @@ object Main {
 
   def repeatedContextName[A]()(using first: Named[A], second: Named[A]): String =
     first.name + ":" + second.name
+
+  def mixedContextName[A, B](value: A)(using named: PairNamed[A, B]): String =
+    named.name
+
+  def forwardedMixedContextName[A, B](
+      value: A)(using named: PairNamed[A, B]): String =
+    mixedContextName(value)
+
+  def expectedMixedContextValue[A, B]()(using named: PairNamed[A, B]): B =
+    named.value
+
+  def compatibleGivenAfterUnrelatedContext(
+      value: Int)(using unrelated: PairNamed[String, Long]): String =
+    mixedContextName(value)
 
   def main = {
     println(ordinal[Event](Event.Started))
@@ -119,6 +142,13 @@ object Main {
     println(contextName())
     println(forwardedContextName[Int]())
     println(repeatedContextName())
+    println(mixedContextName(1))
+    println(forwardedMixedContextName[Int, String](2))
+    val expectedMixed: String = expectedMixedContextValue()
+    println(expectedMixed)
+    println(
+      compatibleGivenAfterUnrelatedContext(3)(
+        using new PairNamedValue[String, Long]("unrelated-context", 4L)))
   }
 }
 )";
@@ -131,15 +161,28 @@ object Event {
 
 trait Named[A]
 class NamedValue[A] extends Named[A]
+trait PairNamed[A, B]
+class PairNamedValue[A, B] extends PairNamed[A, B]
 
 object Main {
   given intNamed: Named[Int] = new NamedValue[Int]
   given stringNamed: Named[String] = new NamedValue[String]
+  given intStringPairNamed: PairNamed[Int, String] =
+    new PairNamedValue[Int, String]
+  given intLongPairNamed: PairNamed[Int, Long] =
+    new PairNamedValue[Int, Long]
 
   def choose[A]()(using named: Named[A]): Named[A] = named
+  def mixed[A, B](value: A)(using named: PairNamed[A, B]): PairNamed[A, B] =
+    named
+  def conflicting[A, B](
+      left: A, right: A)(using named: PairNamed[A, B]): PairNamed[A, B] =
+    named
 
   def value = new Event.Started()
   val ambiguous = choose()
+  val mixedAmbiguous = mixed(1)
+  val valueConflict = conflicting(1, "no")
 }
 )";
 
@@ -180,13 +223,22 @@ object Main {
   const bool valid =
       status == 0 &&
       text == "0\n1\n0\n1\n7\n0\n1\n2\n0\n1\n9\ncontext-int\n"
-              "context-int\ncontext-int:context-int\n" &&
+              "context-int\ncontext-int:context-int\ncontext-int-string\n"
+              "context-int-string\nexpected-context\ncontext-int-string\n" &&
       !invalid.ok &&
       contains(invalid.diagnosticsText,
                "constructor target is not a class: Event.Started") &&
       contains(invalid.diagnosticsText,
                "ambiguous contextual type inference for choose; "
                "use explicit type arguments") &&
+      contains(invalid.diagnosticsText,
+               "ambiguous contextual type inference for mixed; "
+               "use explicit type arguments") &&
+      contains(invalid.diagnosticsText,
+               "conflicting inferred types Int and String for type parameter A "
+               "of conflicting") &&
+      !contains(invalid.diagnosticsText,
+                "ambiguous contextual type inference for conflicting") &&
       contains(result.nirText, "module @demo.qualifiedcases.Event$.Started : "
                                "@demo.qualifiedcases.Event") &&
       contains(result.nirText, "class @demo.qualifiedcases.Event$.Stopped : "
@@ -218,7 +270,12 @@ object Main {
                                "(demo.qualifiedcases.Named)String") &&
       contains(result.nirText, "ret String call %contextName(%named)") &&
       contains(result.nirText, "call %contextName(call "
-                               "%demo.qualifiedcases.Main.intNamed())");
+                               "%demo.qualifiedcases.Main.intNamed())") &&
+      contains(result.nirText, "define @demo.qualifiedcases.Main.mixedContextName : "
+                               "(Object,demo.qualifiedcases.PairNamed)String") &&
+      contains(result.nirText, "ret String call %mixedContextName(%value, %named)") &&
+      contains(result.nirText, "call %mixedContextName(box[Int](1), call "
+                               "%demo.qualifiedcases.Main.intStringPairNamed())");
   return valid ? 0
                : fail("Scala 3 incremental smoke test failed (output='" + text +
                       "', invalid-diagnostics='" + invalid.diagnosticsText + "')");

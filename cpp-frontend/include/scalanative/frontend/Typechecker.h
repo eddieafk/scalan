@@ -262,9 +262,12 @@ private:
   [[nodiscard]] SymbolInfo inferTypeApplication(
       const SymbolInfo& symbol, const std::vector<TypeInfo>& argumentTypes,
       const support::SourceSpan& span, const TypeInfo* expectedResultType = nullptr,
-      bool reportDiagnostics = true) const;
+      bool reportDiagnostics = true,
+      std::vector<TypeInfo>* inferredTypeArguments = nullptr,
+      bool* inferenceConflict = nullptr) const;
   [[nodiscard]] std::vector<SymbolInfo>
   inferContextualTypeApplications(const SymbolInfo& symbol,
+                                  const std::vector<TypeInfo>& inferredTypeArguments,
                                   std::size_t firstContextParameter, Scope& scope,
                                   const support::SourceSpan& span) const;
   [[nodiscard]] bool isAbstractTypeMember(const TypeInfo& type) const;

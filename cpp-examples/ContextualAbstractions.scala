@@ -7,6 +7,7 @@ class Fox(val name: String)
 class Box[A](val value: A)
 class DerivationSeed(val prefix: String)
 class TypeName[A](val name: String)
+class ContextPair[A, B](val name: String, val value: B)
 
 object DerivationSeed {
   given seed: DerivationSeed = new DerivationSeed("derived")
@@ -169,6 +170,8 @@ import Show.{catShow => selectedCatShow}
 object ContextualAbstractions {
   given dogShow: Show[Dog] = new DogShow("dog:")
   given dogTypeName: TypeName[Dog] = new TypeName[Dog]("context-dog")
+  given dogStringContext: ContextPair[Dog, String] =
+    new ContextPair[Dog, String]("mixed-dog-string", "expected-dog-string")
   given generalFormatter: Formatter = new Formatter("general")
   given detailedFormatter: DetailedFormatter = new DetailedFormatter("detailed")
   given alternateFormatter: AlternateFormatter =
@@ -189,6 +192,16 @@ object ContextualAbstractions {
   def repeatedContextType[A]()(using first: TypeName[A], second: TypeName[A]):
       String =
     first.name + ":" + second.name
+
+  def mixedContextType[A, B](value: A)(using context: ContextPair[A, B]): String =
+    context.name
+
+  def forwardedMixedContextType[A, B](
+      value: A)(using context: ContextPair[A, B]): String =
+    mixedContextType(value)
+
+  def expectedMixedContextValue[A, B]()(using context: ContextPair[A, B]): B =
+    context.value
 
   def forwarded[A](value: A)(using show: Show[A]): String =
     render(value)
@@ -356,5 +369,9 @@ object ContextualAbstractions {
     println(inferredContextType())
     println(forwardedContextType[Dog]())
     println(repeatedContextType())
+    println(mixedContextType(new Dog("mixed")))
+    println(forwardedMixedContextType[Dog, String](new Dog("forwarded-mixed")))
+    val expectedMixed: String = expectedMixedContextValue()
+    println(expectedMixed)
   }
 }

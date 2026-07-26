@@ -4381,8 +4381,11 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
     if (calleeSymbol != nullptr && callee.kind != AstExpressionKind::TypeApply &&
         !calleeSymbol->typeParameters.empty()) {
       const SymbolInfo inferenceTarget = *calleeSymbol;
-      specializedCallee = inferTypeApplication(inferenceTarget, argumentTypes,
-                                               expression.span, expectedType, false);
+      std::vector<TypeInfo> inferredTypeArguments;
+      bool inferenceConflict = false;
+      specializedCallee = inferTypeApplication(
+          inferenceTarget, argumentTypes, expression.span, expectedType, false,
+          &inferredTypeArguments, &inferenceConflict);
       if (!specializedCallee.typeParameters.empty()) {
         std::size_t firstContextParameter = inferenceTarget.parameterTypes.size();
         for (std::size_t parameterIndex = 0;
@@ -4394,10 +4397,12 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
           }
         }
         std::vector<SymbolInfo> contextualApplications;
-        if (firstContextParameter < inferenceTarget.parameterTypes.size() &&
+        if (!inferenceConflict &&
+            firstContextParameter < inferenceTarget.parameterTypes.size() &&
             argumentTypes.size() == firstContextParameter) {
           contextualApplications = inferContextualTypeApplications(
-              inferenceTarget, firstContextParameter, scope, expression.span);
+              inferenceTarget, inferredTypeArguments, firstContextParameter, scope,
+              expression.span);
         }
         if (contextualApplications.size() == 1) {
           specializedCallee = std::move(contextualApplications.front());
@@ -6891,11 +6896,11 @@ SymbolInfo Typechecker::specializeResolvedTypeApplication(
   return specialized;
 }
 
-SymbolInfo Typechecker::inferTypeApplication(const SymbolInfo& symbol,
-                                             const std::vector<TypeInfo>& argumentTypes,
-                                             const support::SourceSpan& span,
-                                             const TypeInfo* expectedResultType,
-                                             bool reportDiagnostics) const {
+SymbolInfo Typechecker::inferTypeApplication(
+    const SymbolInfo& symbol, const std::vector<TypeInfo>& argumentTypes,
+    const support::SourceSpan& span, const TypeInfo* expectedResultType,
+    bool reportDiagnostics, std::vector<TypeInfo>* inferredTypeArguments,
+    bool* inferenceConflict) const {
   std::unordered_map<std::string, TypeInfo> substitutions;
   std::unordered_set<std::string> conflictingParameters;
   bool hasConflict = false;
@@ -7012,6 +7017,7 @@ SymbolInfo Typechecker::inferTypeApplication(const SymbolInfo& symbol,
     if (inferred == substitutions.end() ||
         inferred->second.kind == SimpleTypeKind::Unknown) {
       complete = false;
+      inferredArguments.push_back(TypeInfo{SimpleTypeKind::Unknown, "Unknown"});
       if (reportDiagnostics) {
         diagnostics_.error(span, "cannot infer type argument " + parameter.name +
                                      " for " + symbol.name +
@@ -7025,6 +7031,12 @@ SymbolInfo Typechecker::inferTypeApplication(const SymbolInfo& symbol,
     }
     inferredArguments.push_back(inferred->second);
   }
+  if (inferredTypeArguments != nullptr) {
+    *inferredTypeArguments = inferredArguments;
+  }
+  if (inferenceConflict != nullptr) {
+    *inferenceConflict = hasConflict;
+  }
   if (!complete || hasConflict) {
     return symbol;
   }
@@ -7033,7 +7045,8 @@ SymbolInfo Typechecker::inferTypeApplication(const SymbolInfo& symbol,
 }
 
 std::vector<SymbolInfo> Typechecker::inferContextualTypeApplications(
-    const SymbolInfo& symbol, std::size_t firstContextParameter, Scope& scope,
+    const SymbolInfo& symbol, const std::vector<TypeInfo>& inferredTypeArguments,
+    std::size_t firstContextParameter, Scope& scope,
     const support::SourceSpan& span) const {
   using InferenceState = std::unordered_map<std::string, TypeInfo>;
 
@@ -7142,7 +7155,18 @@ std::vector<SymbolInfo> Typechecker::inferContextualTypeApplications(
     });
   };
 
-  std::vector<InferenceState> states(1);
+  InferenceState initialState;
+  const std::size_t seededArguments =
+      std::min(symbol.typeParameters.size(), inferredTypeArguments.size());
+  for (std::size_t argumentIndex = 0; argumentIndex < seededArguments;
+       ++argumentIndex) {
+    if (inferredTypeArguments[argumentIndex].kind != SimpleTypeKind::Unknown) {
+      initialState.emplace(symbol.typeParameters[argumentIndex].symbolName,
+                           inferredTypeArguments[argumentIndex]);
+    }
+  }
+  std::vector<InferenceState> states;
+  states.push_back(std::move(initialState));
   for (std::size_t parameterIndex = firstContextParameter;
        parameterIndex < symbol.parameterTypes.size(); ++parameterIndex) {
     if (parameterIndex >= symbol.contextualParameters.size() ||
@@ -7154,44 +7178,26 @@ std::vector<SymbolInfo> Typechecker::inferContextualTypeApplications(
       continue;
     }
 
-    const auto inferFromEvidence =
-        [&](const std::vector<const SymbolInfo*>& evidenceCandidates) {
-          std::vector<InferenceState> inferredStates;
-          for (const SymbolInfo* evidence : evidenceCandidates) {
-            InferenceState inferred;
-            if (collectInference(pattern, evidence->type, inferred)) {
-              inferredStates.push_back(std::move(inferred));
-            }
-          }
-          return inferredStates;
-        };
-    std::vector<InferenceState> parameterStates =
-        inferFromEvidence(contextParameterEvidence);
-    if (parameterStates.empty()) {
-      parameterStates = inferFromEvidence(givenEvidence);
-    }
-    deduplicateStates(parameterStates);
-    if (parameterStates.empty()) {
-      return {};
-    }
-
     std::vector<InferenceState> combined;
     for (const InferenceState& existing : states) {
-      for (const InferenceState& parameterState : parameterStates) {
-        InferenceState merged = existing;
-        bool compatible = true;
-        for (const auto& [parameter, inferred] : parameterState) {
-          auto current = merged.find(parameter);
-          if (current != merged.end() && (current->second.kind != inferred.kind ||
-                                          current->second.name != inferred.name)) {
-            compatible = false;
-            break;
-          }
-          merged[parameter] = inferred;
-        }
-        if (compatible) {
-          combined.push_back(std::move(merged));
-        }
+      const auto inferFromEvidence =
+          [&](const std::vector<const SymbolInfo*>& evidenceCandidates) {
+            std::vector<InferenceState> inferredStates;
+            for (const SymbolInfo* evidence : evidenceCandidates) {
+              InferenceState inferred = existing;
+              if (collectInference(pattern, evidence->type, inferred)) {
+                inferredStates.push_back(std::move(inferred));
+              }
+            }
+            return inferredStates;
+          };
+      std::vector<InferenceState> parameterStates =
+          inferFromEvidence(contextParameterEvidence);
+      if (parameterStates.empty()) {
+        parameterStates = inferFromEvidence(givenEvidence);
+      }
+      for (InferenceState& parameterState : parameterStates) {
+        combined.push_back(std::move(parameterState));
       }
     }
     deduplicateStates(combined);
