@@ -926,6 +926,18 @@ Current scaffold status:
   before selection. Focused native coverage exercises a two-level factory chain,
   forwarding, multiple concrete prerequisite specializations, termination of an
   ungrounded recursive factory, and nested erased calls in NIR.
+- Anonymous parameterized givens use stable synthetic source names and otherwise
+  participate in the same specialization, ranking, and recursive materialization
+  path as named factories. Capture-free parameterized givens are also accepted
+  inside blocks: their full generic signatures are preserved in the local AST,
+  typechecked in lexical order, and hoisted to uniquely named internal functions.
+  Their lexical nesting depth still controls contextual preference, so named and
+  anonymous local factories can shadow member or outer-block factories. Local
+  factory initializers may use their own `using` parameters; references that
+  require closure capture receive a focused diagnostic until closure conversion
+  is available. Native coverage exercises anonymous member factories, a
+  two-level named local chain, anonymous locals, nested shadowing, capture
+  diagnostics, and hoisted erased calls.
 - Anonymous givens and block-local named or anonymous givens now use the same
   typed evidence model. Lexical depth is retained during search, so the
   innermost matching local given wins while equally nested matches remain
@@ -1072,7 +1084,7 @@ Current scaffold status:
   non-invertible generic parent mappings, tuple-value operations, compile-time
   tuple recursion, and higher-kinded derivation remain later derivation
   milestones.
-  Anonymous or local parameterized givens, general derivation from nested
+  Capturing local parameterized givens, general derivation from nested
   declarations, and Scala 2 `implicit` syntax also remain later milestones.
 - Postfix type application now supports typed `value.isInstanceOf[Target]` and
   checked `value.asInstanceOf[Target]` for known classes, traits, and objects.

@@ -1202,12 +1202,14 @@ TypedModule Typechecker::typecheck(const AstModule& module) {
   derivedGivens_.clear();
   derivedInstances_.clear();
   mirrorDeclarations_.clear();
+  localFactoryDeclarations_.clear();
   expressionTypes_.clear();
   contextApplications_.clear();
   directZoneReceiverEscapes_.clear();
   receiverMethodCallSites_.clear();
   implicitReceiverMethodNames_.clear();
   zoneBodiesToAnalyze_.clear();
+  currentPackageName_ = module.packageName;
   zoneInferenceDepth_ = 0;
   TypedModule typed;
   typed.packageName = module.packageName;
@@ -1265,6 +1267,9 @@ TypedModule Typechecker::typecheck(const AstModule& module) {
   for (const AstDeclaration& declaration : mirrorDeclarations_) {
     typed.declarations.push_back(
         typecheckDeclaration(declaration, module.packageName, scope));
+  }
+  for (TypedDeclaration& declaration : localFactoryDeclarations_) {
+    typed.declarations.push_back(std::move(declaration));
   }
   attachDerivedInstances(typed.declarations);
   propagateZoneReceiverEffects();
@@ -4509,36 +4514,99 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
         }
         return declared.kind == SimpleTypeKind::Unknown ? initializerType : declared;
       };
+      auto addLocalDeclaration = [&](const AstExpression& local) {
+        if (local.localMethod != nullptr) {
+          const AstLocalMethod& method = *local.localMethod;
+          std::unordered_set<std::string> factoryParameters;
+          for (const std::string& parameter : method.parameters) {
+            const std::string name = parameterName(parameter);
+            if (!name.empty()) {
+              factoryParameters.insert(name);
+            }
+          }
+          std::unordered_set<std::string> reportedCaptures;
+          std::function<void(const AstExpression&)> validateCaptures;
+          validateCaptures = [&](const AstExpression& candidate) {
+            if (candidate.kind == AstExpressionKind::This ||
+                candidate.kind == AstExpressionKind::Super) {
+              if (reportedCaptures.insert(candidate.text).second) {
+                diagnostics_.error(
+                    candidate.span,
+                    "capturing local parameterized givens are not supported yet");
+              }
+            } else if (candidate.kind == AstExpressionKind::Identifier &&
+                       !factoryParameters.contains(candidate.text)) {
+              auto captured = blockScope.find(candidate.text);
+              if (captured != blockScope.end() &&
+                  !globalSymbols_.contains(captured->second.symbolName) &&
+                  reportedCaptures.insert(candidate.text).second) {
+                diagnostics_.error(
+                    candidate.span,
+                    "capturing local parameterized given references local value " +
+                        candidate.text);
+              }
+            }
+            for (const AstExpression& child : candidate.children) {
+              validateCaptures(child);
+            }
+          };
+          if (!local.children.empty()) {
+            validateCaptures(local.children.front());
+          }
+
+          AstDeclaration factory;
+          factory.kind = AstDeclarationKind::Def;
+          factory.name = local.text;
+          factory.span = local.span;
+          factory.typeParameters = method.typeParameters;
+          factory.parameters = method.parameters;
+          factory.contextualParameters = method.contextualParameters;
+          factory.declaredType = local.declaredType;
+          factory.isGiven = local.isGiven;
+          factory.isAnonymousGiven = local.isAnonymousGiven;
+          factory.hasInitializer = !local.children.empty();
+          if (factory.hasInitializer) {
+            factory.initializer = local.children.front();
+          }
+          const std::string owner = qualify(
+              currentPackageName_, "$local$" + std::to_string(local.span.start));
+          TypedDeclaration typedFactory =
+              typecheckDeclaration(factory, owner, blockScope);
+          if (auto inserted = blockScope.find(local.text);
+              inserted != blockScope.end()) {
+            inserted->second.contextualNestingDepth = contextualNestingDepth;
+            if (auto global = globalSymbols_.find(inserted->second.symbolName);
+                global != globalSymbols_.end()) {
+              global->second.contextualNestingDepth = contextualNestingDepth;
+            }
+          }
+          localFactoryDeclarations_.push_back(std::move(typedFactory));
+          return;
+        }
+
+        TypeInfo localType = localDeclarationType(local);
+        SymbolInfo symbol;
+        symbol.kind =
+            local.mutableLocal ? AstDeclarationKind::Var : AstDeclarationKind::Val;
+        symbol.name = local.text;
+        symbol.symbolName = local.text;
+        symbol.type = localType;
+        symbol.isGiven = local.isGiven;
+        symbol.isAnonymousGiven = local.isAnonymousGiven;
+        symbol.contextualNestingDepth = contextualNestingDepth;
+        blockScope[local.text] = std::move(symbol);
+      };
       for (std::size_t i = 0; i + 1 < expression.children.size(); ++i) {
         const AstExpression& child = expression.children[i];
         if (child.kind == AstExpressionKind::LocalDeclaration) {
-          TypeInfo localType = localDeclarationType(child);
-          SymbolInfo symbol;
-          symbol.kind =
-              child.mutableLocal ? AstDeclarationKind::Var : AstDeclarationKind::Val;
-          symbol.name = child.text;
-          symbol.symbolName = child.text;
-          symbol.type = localType;
-          symbol.isGiven = child.isGiven;
-          symbol.isAnonymousGiven = child.isAnonymousGiven;
-          symbol.contextualNestingDepth = contextualNestingDepth;
-          blockScope[child.text] = std::move(symbol);
+          addLocalDeclaration(child);
         } else {
           (void)inferExpressionType(child, blockScope);
         }
       }
       const AstExpression& last = expression.children.back();
       if (last.kind == AstExpressionKind::LocalDeclaration) {
-        SymbolInfo symbol;
-        symbol.kind =
-            last.mutableLocal ? AstDeclarationKind::Var : AstDeclarationKind::Val;
-        symbol.name = last.text;
-        symbol.symbolName = last.text;
-        symbol.type = localDeclarationType(last);
-        symbol.isGiven = last.isGiven;
-        symbol.isAnonymousGiven = last.isAnonymousGiven;
-        symbol.contextualNestingDepth = contextualNestingDepth;
-        blockScope[last.text] = std::move(symbol);
+        addLocalDeclaration(last);
         return TypeInfo{SimpleTypeKind::Unit, "Unit"};
       }
       return inferExpressionType(last, blockScope, expectedType);

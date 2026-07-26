@@ -316,6 +316,7 @@ private:
   std::unordered_map<std::string, std::vector<SymbolInfo>> derivedGivens_;
   std::vector<DerivedInstanceInfo> derivedInstances_;
   std::vector<AstDeclaration> mirrorDeclarations_;
+  std::vector<TypedDeclaration> localFactoryDeclarations_;
   std::vector<TypedExpressionInfo> expressionTypes_;
   std::vector<TypedContextApplication> contextApplications_;
   std::unordered_set<std::string> directZoneReceiverEscapes_;
@@ -323,6 +324,7 @@ private:
   std::unordered_map<std::string, std::unordered_set<std::string>>
       implicitReceiverMethodNames_;
   std::vector<AstExpression> zoneBodiesToAnalyze_;
+  std::string currentPackageName_;
   std::size_t zoneInferenceDepth_ = 0;
 };
 

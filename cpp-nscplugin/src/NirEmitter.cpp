@@ -1737,6 +1737,10 @@ nir::Value scopedBodyValueFor(const frontend::AstExpression& expression,
       values.push_back(scopedBodyValueFor(child, blockContext));
       continue;
     }
+    if (child.localMethod != nullptr) {
+      values.push_back(nir::unitValue(child.span));
+      continue;
+    }
 
     nir::Value initializer =
         child.children.empty()
@@ -1779,6 +1783,9 @@ void appendExpressionSetup(const frontend::AstExpression& expression,
       const frontend::AstExpression& child = expression.children[i];
       const bool isLast = i + 1 == expression.children.size();
       if (child.kind == AstExpressionKind::LocalDeclaration) {
+        if (child.localMethod != nullptr) {
+          continue;
+        }
         const std::string declaredType = localTypeName(child, blockContext);
         if (!child.children.empty()) {
           appendExpressionSetup(child.children.front(), body, blockContext);
@@ -1814,6 +1821,9 @@ void appendExpressionSetup(const frontend::AstExpression& expression,
   }
 
   if (expression.kind == AstExpressionKind::LocalDeclaration) {
+    if (expression.localMethod != nullptr) {
+      return;
+    }
     const std::string declaredType = localTypeName(expression, context);
     if (!expression.children.empty()) {
       appendExpressionSetup(expression.children.front(), body, context);
@@ -2027,7 +2037,8 @@ nir::Value valueFor(const frontend::AstExpression& expression,
       ValueContext blockContext = context;
       for (std::size_t i = 0; i + 1 < expression.children.size(); ++i) {
         const frontend::AstExpression& child = expression.children[i];
-        if (child.kind == AstExpressionKind::LocalDeclaration) {
+        if (child.kind == AstExpressionKind::LocalDeclaration &&
+            child.localMethod == nullptr) {
           blockContext.localNames.insert(child.text);
         }
       }
@@ -3012,7 +3023,8 @@ nir::FunctionBody bodyFor(const frontend::TypedDeclaration& declaration,
     }
     for (std::size_t i = 0; i + 1 < resultExpression->children.size(); ++i) {
       const frontend::AstExpression& child = resultExpression->children[i];
-      if (child.kind == frontend::AstExpressionKind::LocalDeclaration) {
+      if (child.kind == frontend::AstExpressionKind::LocalDeclaration &&
+          child.localMethod == nullptr) {
         resultContext.localNames.insert(child.text);
       }
     }

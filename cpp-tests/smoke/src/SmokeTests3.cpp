@@ -108,6 +108,12 @@ trait Generated[A] {
 }
 class GeneratedValue[A](val label: String) extends Generated[A]
 
+trait AnonymousGenerated[A] {
+  val label: String
+}
+class AnonymousGeneratedValue[A](val label: String)
+    extends AnonymousGenerated[A]
+
 object Main {
   given intNamed: Named[Int] = new NamedValue[Int]("context-int")
   given intStringPairNamed: PairNamed[Int, String] =
@@ -118,6 +124,8 @@ object Main {
   given generatedFromIntermediate[A](
       using intermediate: Intermediate[A]): Generated[A] =
     new GeneratedValue[A]("generated:" + intermediate.label)
+  given [A](using seed: Seed[A]): AnonymousGenerated[A] =
+    new AnonymousGeneratedValue[A]("anonymous-member:" + seed.label)
 
   def ordinal[A](value: A)(using instance: Ordinal[A]): Int =
     instance.ordinal(value)
@@ -152,6 +160,34 @@ object Main {
   def forwardedGeneratedName[A]()(using generated: Generated[A]): String =
     generatedName()
 
+  def anonymousGeneratedName[A]()(using generated: AnonymousGenerated[A]): String =
+    generated.label
+
+  def localNamedGeneratedName: String = {
+    given localIntermediate[A](using seed: Seed[A]): Intermediate[A] =
+      new IntermediateValue[A]("local-intermediate:" + seed.label)
+    given localGenerated[A](
+        using intermediate: Intermediate[A]): Generated[A] =
+      new GeneratedValue[A]("local-generated:" + intermediate.label)
+    generatedName()
+  }
+
+  def localAnonymousGeneratedName: String = {
+    given [A](using seed: Seed[A]): Generated[A] =
+      new GeneratedValue[A]("local-anonymous:" + seed.label)
+    generatedName()
+  }
+
+  def nestedLocalGeneratedName: String = {
+    given outer[A](using seed: Seed[A]): Generated[A] =
+      new GeneratedValue[A]("outer-local:" + seed.label)
+    {
+      given [A](using seed: Seed[A]): Generated[A] =
+        new GeneratedValue[A]("inner-local:" + seed.label)
+      generatedName()
+    }
+  }
+
   def main = {
     println(ordinal[Event](Event.Started))
     println(ordinal[Event](new Event.Stopped(2)))
@@ -178,6 +214,10 @@ object Main {
         using new PairNamedValue[String, Long]("unrelated-context", 4L)))
     println(generatedName())
     println(forwardedGeneratedName[Int]())
+    println(anonymousGeneratedName())
+    println(localNamedGeneratedName)
+    println(localAnonymousGeneratedName)
+    println(nestedLocalGeneratedName)
   }
 }
 )";
@@ -194,8 +234,10 @@ trait PairNamed[A, B]
 class PairNamedValue[A, B] extends PairNamed[A, B]
 trait Seed[A]
 class SeedValue[A] extends Seed[A]
-trait Generated[A]
-class GeneratedValue[A] extends Generated[A]
+trait Generated[A] {
+  val label: String
+}
+class GeneratedValue[A](val label: String) extends Generated[A]
 trait LoopEvidence[A]
 
 object Main {
@@ -208,7 +250,7 @@ object Main {
   given intSeed: Seed[Int] = new SeedValue[Int]
   given stringSeed: Seed[String] = new SeedValue[String]
   given generated[A](using seed: Seed[A]): Generated[A] =
-    new GeneratedValue[A]
+    new GeneratedValue[A]("generated")
   given loop[A](using next: LoopEvidence[A]): LoopEvidence[A] = next
 
   def choose[A]()(using named: Named[A]): Named[A] = named
@@ -221,6 +263,12 @@ object Main {
     generated
   def chooseLoop[A]()(using loop: LoopEvidence[A]): LoopEvidence[A] =
     loop
+  def capturedLocalFactory: Generated[Int] = {
+    val prefix: String = "captured"
+    given captured[A](using seed: Seed[A]): Generated[A] =
+      new GeneratedValue[A](prefix)
+    chooseGenerated[Int]()
+  }
 
   def value = new Event.Started()
   val ambiguous = choose()
@@ -228,6 +276,7 @@ object Main {
   val valueConflict = conflicting(1, "no")
   val generatedAmbiguous = chooseGenerated()
   val unresolvedLoop = chooseLoop()
+  val captured = capturedLocalFactory
 }
 )";
 
@@ -271,7 +320,9 @@ object Main {
               "context-int\ncontext-int:context-int\ncontext-int-string\n"
               "context-int-string\nexpected-context\ncontext-int-string\n"
               "generated:intermediate:seed-int\n"
-              "generated:intermediate:seed-int\n" &&
+              "generated:intermediate:seed-int\nanonymous-member:seed-int\n"
+              "local-generated:local-intermediate:seed-int\n"
+              "local-anonymous:seed-int\ninner-local:seed-int\n" &&
       !invalid.ok &&
       contains(invalid.diagnosticsText,
                "constructor target is not a class: Event.Started") &&
@@ -292,6 +343,9 @@ object Main {
       contains(invalid.diagnosticsText,
                "cannot infer type argument A for chooseLoop from value arguments; "
                "use explicit type arguments") &&
+      contains(invalid.diagnosticsText,
+               "capturing local parameterized given references local value "
+               "prefix") &&
       contains(result.nirText, "module @demo.qualifiedcases.Event$.Started : "
                                "@demo.qualifiedcases.Event") &&
       contains(result.nirText, "class @demo.qualifiedcases.Event$.Stopped : "
@@ -337,7 +391,16 @@ object Main {
                "call %generatedName(call "
                "%demo.qualifiedcases.Main.generatedFromIntermediate(call "
                "%demo.qualifiedcases.Main.intermediateFromSeed(call "
-               "%demo.qualifiedcases.Main.intSeed())))");
+               "%demo.qualifiedcases.Main.intSeed())))") &&
+      contains(result.nirText, "define @demo.qualifiedcases.Main.given$") &&
+      contains(result.nirText, "call %anonymousGeneratedName(call "
+                               "%demo.qualifiedcases.Main.given$") &&
+      contains(result.nirText, "define @demo.qualifiedcases.$local$") &&
+      contains(result.nirText, ".localIntermediate : (demo.qualifiedcases.Seed)"
+                               "demo.qualifiedcases.Intermediate") &&
+      contains(result.nirText, ".localGenerated : (demo.qualifiedcases.Intermediate)"
+                               "demo.qualifiedcases.Generated") &&
+      contains(result.nirText, "call %generatedName(call %demo.qualifiedcases.$local$");
   return valid ? 0
                : fail("Scala 3 incremental smoke test failed (output='" + text +
                       "', invalid-diagnostics='" + invalid.diagnosticsText + "')");

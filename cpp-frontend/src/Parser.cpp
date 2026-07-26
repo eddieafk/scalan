@@ -531,12 +531,19 @@ AstDeclaration Parser::parseGiven(const Token& keyword) {
                                       tokens_[cursor].kind == TokenKind::Colon);
     }
   }
+  const bool anonymousParameterized =
+      check(TokenKind::LeftBracket) || check(TokenKind::LeftParen);
   const bool named = check(TokenKind::Identifier) && current_ + 1 < tokens_.size() &&
                      tokens_[current_ + 1].kind == TokenKind::Colon;
-  if (namedParameterized) {
+  if (namedParameterized || anonymousParameterized) {
     declaration.kind = AstDeclarationKind::Def;
-    advance();
-    declaration.name = previous().text;
+    if (namedParameterized) {
+      advance();
+      declaration.name = previous().text;
+    } else {
+      declaration.isAnonymousGiven = true;
+      declaration.name = "given$" + std::to_string(keyword.span.start);
+    }
     if (check(TokenKind::LeftBracket)) {
       declaration.typeParameters = parseTypeParameterList();
     }
@@ -1124,14 +1131,18 @@ AstExpression Parser::parseBlockExpression() {
       localExpression.kind = AstExpressionKind::LocalDeclaration;
       localExpression.text = local.name;
       localExpression.declaredType = local.declaredType;
+      if (local.kind == AstDeclarationKind::Def) {
+        localExpression.localMethod = std::make_shared<AstLocalMethod>();
+        localExpression.localMethod->typeParameters =
+            std::move(local.typeParameters);
+        localExpression.localMethod->parameters = std::move(local.parameters);
+        localExpression.localMethod->contextualParameters =
+            std::move(local.contextualParameters);
+      }
       localExpression.span = local.span;
       localExpression.mutableLocal = local.kind == AstDeclarationKind::Var;
       localExpression.isGiven = local.isGiven;
       localExpression.isAnonymousGiven = local.isAnonymousGiven;
-      if (local.isGiven && local.kind == AstDeclarationKind::Def) {
-        diagnostics_.error(local.span,
-                           "local parameterized givens are not supported yet");
-      }
       if (local.hasInitializer) {
         localExpression.children.push_back(std::move(local.initializer));
       }

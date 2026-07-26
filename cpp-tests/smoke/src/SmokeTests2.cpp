@@ -5765,8 +5765,6 @@ object Main {
                    "given declaration requires an initializer") &&
           contains(invalidClause.diagnosticsText,
                    "parameterized given parameters must use a using clause") &&
-          contains(invalidClause.diagnosticsText,
-                   "local parameterized givens are not supported yet") &&
           !invalidDerivesSyntax.ok &&
           contains(invalidDerivesSyntax.diagnosticsText,
                    "expected type class name after 'derives'") &&

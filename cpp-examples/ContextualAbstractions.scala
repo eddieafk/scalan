@@ -11,6 +11,7 @@ class ContextPair[A, B](val name: String, val value: B)
 class ContextSeed[A](val label: String)
 class ContextIntermediate[A](val label: String)
 class ContextGenerated[A](val label: String)
+class AnonymousContextGenerated[A](val label: String)
 
 object DerivationSeed {
   given seed: DerivationSeed = new DerivationSeed("derived")
@@ -183,6 +184,8 @@ object ContextualAbstractions {
   given contextGenerated[A](
       using intermediate: ContextIntermediate[A]): ContextGenerated[A] =
     new ContextGenerated[A]("generated:" + intermediate.label)
+  given [A](using seed: ContextSeed[A]): AnonymousContextGenerated[A] =
+    new AnonymousContextGenerated[A]("anonymous-member:" + seed.label)
   given generalFormatter: Formatter = new Formatter("general")
   given detailedFormatter: DetailedFormatter = new DetailedFormatter("detailed")
   given alternateFormatter: AlternateFormatter =
@@ -221,6 +224,20 @@ object ContextualAbstractions {
   def forwardedGenericEvidenceContextType[A]()(
       using generated: ContextGenerated[A]): String =
     genericEvidenceContextType()
+
+  def anonymousGenericEvidenceContextType[A]()(
+      using generated: AnonymousContextGenerated[A]): String =
+    generated.label
+
+  def localParameterizedContextType: String = {
+    given localIntermediate[A](
+        using seed: ContextSeed[A]): ContextIntermediate[A] =
+      new ContextIntermediate[A]("local-intermediate:" + seed.label)
+    given [A](
+        using intermediate: ContextIntermediate[A]): ContextGenerated[A] =
+      new ContextGenerated[A]("local-generated:" + intermediate.label)
+    genericEvidenceContextType()
+  }
 
   def forwarded[A](value: A)(using show: Show[A]): String =
     render(value)
@@ -394,5 +411,7 @@ object ContextualAbstractions {
     println(expectedMixed)
     println(genericEvidenceContextType())
     println(forwardedGenericEvidenceContextType[Dog]())
+    println(anonymousGenericEvidenceContextType())
+    println(localParameterizedContextType)
   }
 }

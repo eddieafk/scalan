@@ -76,13 +76,11 @@ bool AstValidator::validateDeclaration(const AstDeclaration& declaration,
     ok = false;
   }
   if (declaration.isGiven && declaration.kind == AstDeclarationKind::Def &&
-      (declaration.isAnonymousGiven ||
-       std::any_of(declaration.contextualParameters.begin(),
-                   declaration.contextualParameters.end(),
-                   [](bool contextual) { return !contextual; }))) {
-    diagnostics.error(
-        declaration.span,
-        "parameterized given must be named and accept only using parameters");
+      std::any_of(declaration.contextualParameters.begin(),
+                  declaration.contextualParameters.end(),
+                  [](bool contextual) { return !contextual; })) {
+    diagnostics.error(declaration.span,
+                      "parameterized given must accept only using parameters");
     ok = false;
   }
   if (declaration.isAnonymousGiven && !declaration.isGiven) {
@@ -392,6 +390,20 @@ bool AstValidator::validateExpression(const AstExpression& expression,
       diagnostics.error(expression.span,
                         "anonymous-given metadata requires a local given");
       ok = false;
+    }
+    if (expression.localMethod != nullptr) {
+      if (!expression.isGiven) {
+        diagnostics.error(expression.span,
+                          "local methods are only supported for given declarations");
+        ok = false;
+      }
+      if (std::any_of(expression.localMethod->contextualParameters.begin(),
+                      expression.localMethod->contextualParameters.end(),
+                      [](bool contextual) { return !contextual; })) {
+        diagnostics.error(expression.span,
+                          "parameterized given must accept only using parameters");
+        ok = false;
+      }
     }
     break;
   default:

@@ -3,6 +3,7 @@
 #include "scalanative/support/SourceSpan.h"
 
 #include <cstddef>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -23,6 +24,20 @@ enum class AstDeclarationKind {
 enum class AstClassBodyItemKind { Declaration, Expression };
 
 enum class TypeVariance { Invariant, Covariant, Contravariant };
+
+struct AstTypeParameter {
+  std::string name;
+  std::string lowerBound;
+  std::string upperBound;
+  support::SourceSpan span;
+  TypeVariance variance = TypeVariance::Invariant;
+};
+
+struct AstLocalMethod {
+  std::vector<AstTypeParameter> typeParameters;
+  std::vector<std::string> parameters;
+  std::vector<bool> contextualParameters;
+};
 
 enum class AstExpressionKind {
   Empty,
@@ -60,6 +75,7 @@ struct AstExpression {
   std::string text;
   std::string declaredType;
   std::vector<std::string> typeArguments;
+  std::shared_ptr<AstLocalMethod> localMethod;
   support::SourceSpan span;
   std::vector<AstExpression> children;
   bool mutableLocal = false;
@@ -76,14 +92,6 @@ struct AstImportSelector {
   std::string name;
   std::string alias;
   support::SourceSpan span;
-};
-
-struct AstTypeParameter {
-  std::string name;
-  std::string lowerBound;
-  std::string upperBound;
-  support::SourceSpan span;
-  TypeVariance variance = TypeVariance::Invariant;
 };
 
 struct AstDeclaration {
