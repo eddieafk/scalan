@@ -7046,8 +7046,9 @@ SymbolInfo Typechecker::inferTypeApplication(
 
 std::vector<SymbolInfo> Typechecker::inferContextualTypeApplications(
     const SymbolInfo& symbol, const std::vector<TypeInfo>& inferredTypeArguments,
-    std::size_t firstContextParameter, Scope& scope,
-    const support::SourceSpan& span) const {
+    std::size_t firstContextParameter, Scope& scope, const support::SourceSpan& span,
+    bool reportDiagnostics,
+    std::unordered_set<std::string>* expandingGenericEvidence) const {
   using InferenceState = std::unordered_map<std::string, TypeInfo>;
 
   const auto isApplicationTypeParameter = [&](const TypeInfo& type) {
@@ -7122,19 +7123,57 @@ std::vector<SymbolInfo> Typechecker::inferContextualTypeApplications(
 
   std::vector<const SymbolInfo*> contextParameterEvidence;
   std::vector<const SymbolInfo*> givenEvidence;
+  std::vector<const SymbolInfo*> genericGivenEvidence;
   std::unordered_set<std::string> seenEvidence;
   for (const auto& [name, candidate] : scope) {
     (void)name;
     if ((!candidate.isGiven && !candidate.isContextParameter) ||
-        !candidate.typeParameters.empty() ||
         candidate.type.kind == SimpleTypeKind::Unknown) {
       continue;
     }
     const std::string key = candidate.symbolName + " as " + candidate.type.name;
-    if (seenEvidence.insert(key).second) {
+    if (!seenEvidence.insert(key).second) {
+      continue;
+    }
+    if (!candidate.typeParameters.empty()) {
+      if (candidate.isGiven) {
+        genericGivenEvidence.push_back(&candidate);
+      }
+    } else {
       (candidate.isContextParameter ? contextParameterEvidence : givenEvidence)
           .push_back(&candidate);
     }
+  }
+
+  std::unordered_set<std::string> localExpandingGenericEvidence;
+  if (expandingGenericEvidence == nullptr) {
+    expandingGenericEvidence = &localExpandingGenericEvidence;
+  }
+  std::vector<SymbolInfo> expandedGenericEvidence;
+  for (const SymbolInfo* candidate : genericGivenEvidence) {
+    const bool allContextual =
+        candidate->contextualParameters.size() == candidate->parameterTypes.size() &&
+        std::all_of(candidate->contextualParameters.begin(),
+                    candidate->contextualParameters.end(),
+                    [](bool contextual) { return contextual; });
+    if (!allContextual || candidate->parameterTypes.empty() ||
+        !expandingGenericEvidence->insert(candidate->symbolName).second) {
+      continue;
+    }
+    std::vector<TypeInfo> candidateArguments(
+        candidate->typeParameters.size(), TypeInfo{SimpleTypeKind::Unknown, "Unknown"});
+    std::vector<SymbolInfo> applications =
+        inferContextualTypeApplications(*candidate, candidateArguments, 0, scope, span,
+                                        false, expandingGenericEvidence);
+    expandingGenericEvidence->erase(candidate->symbolName);
+    for (SymbolInfo& application : applications) {
+      if (application.type.kind != SimpleTypeKind::Unknown) {
+        expandedGenericEvidence.push_back(std::move(application));
+      }
+    }
+  }
+  for (const SymbolInfo& application : expandedGenericEvidence) {
+    givenEvidence.push_back(&application);
   }
 
   const auto stateKey = [&](const InferenceState& state) {
@@ -7244,7 +7283,7 @@ std::vector<SymbolInfo> Typechecker::inferContextualTypeApplications(
     viable.push_back(std::move(specialized));
     viableArguments.push_back(arguments);
   }
-  if (viable.size() == 1) {
+  if (reportDiagnostics && viable.size() == 1) {
     viable.front() =
         specializeResolvedTypeApplication(symbol, viableArguments.front(), span, true);
   }

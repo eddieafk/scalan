@@ -916,6 +916,16 @@ Current scaffold status:
   native smoke coverage exercise value-inferred, contextual-only, mixed
   value/context, mixed expected-result/context, forwarded, repeated-`using`,
   explicit, and locally overridden evidence.
+- Contextual type-argument discovery also expands visible generic given methods
+  whose type parameters can be inferred from their `using` prerequisites.
+  Expansion recursively follows other generic factories, retains concrete
+  context-parameter preference at every level, and uses a symbol-cycle guard so
+  self-referential or mutually recursive factories terminate. Speculative
+  specializations remain diagnostic-free; every completed application is still
+  replayed through normal contextual ranking and recursive materialization
+  before selection. Focused native coverage exercises a two-level factory chain,
+  forwarding, multiple concrete prerequisite specializations, termination of an
+  ungrounded recursive factory, and nested erased calls in NIR.
 - Anonymous givens and block-local named or anonymous givens now use the same
   typed evidence model. Lexical depth is retained during search, so the
   innermost matching local given wins while equally nested matches remain
@@ -1062,9 +1072,8 @@ Current scaffold status:
   non-invertible generic parent mappings, tuple-value operations, compile-time
   tuple recursion, and higher-kinded derivation remain later derivation
   milestones.
-  Anonymous or local parameterized givens, generic-evidence-driven contextual
-  inference, general derivation from nested declarations, and Scala 2 `implicit`
-  syntax also remain later milestones.
+  Anonymous or local parameterized givens, general derivation from nested
+  declarations, and Scala 2 `implicit` syntax also remain later milestones.
 - Postfix type application now supports typed `value.isInstanceOf[Target]` and
   checked `value.asInstanceOf[Target]` for known classes, traits, and objects.
   NIR uses dedicated `is-instance-of[T]` and `as-instance-of[T]` values; verification

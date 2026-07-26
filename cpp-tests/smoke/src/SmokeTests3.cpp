@@ -93,10 +93,31 @@ trait PairNamed[A, B] {
 class PairNamedValue[A, B](val name: String, val value: B)
     extends PairNamed[A, B]
 
+trait Seed[A] {
+  val label: String
+}
+class SeedValue[A](val label: String) extends Seed[A]
+
+trait Intermediate[A] {
+  val label: String
+}
+class IntermediateValue[A](val label: String) extends Intermediate[A]
+
+trait Generated[A] {
+  val label: String
+}
+class GeneratedValue[A](val label: String) extends Generated[A]
+
 object Main {
   given intNamed: Named[Int] = new NamedValue[Int]("context-int")
   given intStringPairNamed: PairNamed[Int, String] =
     new PairNamedValue[Int, String]("context-int-string", "expected-context")
+  given intSeed: Seed[Int] = new SeedValue[Int]("seed-int")
+  given intermediateFromSeed[A](using seed: Seed[A]): Intermediate[A] =
+    new IntermediateValue[A]("intermediate:" + seed.label)
+  given generatedFromIntermediate[A](
+      using intermediate: Intermediate[A]): Generated[A] =
+    new GeneratedValue[A]("generated:" + intermediate.label)
 
   def ordinal[A](value: A)(using instance: Ordinal[A]): Int =
     instance.ordinal(value)
@@ -125,6 +146,12 @@ object Main {
       value: Int)(using unrelated: PairNamed[String, Long]): String =
     mixedContextName(value)
 
+  def generatedName[A]()(using generated: Generated[A]): String =
+    generated.label
+
+  def forwardedGeneratedName[A]()(using generated: Generated[A]): String =
+    generatedName()
+
   def main = {
     println(ordinal[Event](Event.Started))
     println(ordinal[Event](new Event.Stopped(2)))
@@ -149,6 +176,8 @@ object Main {
     println(
       compatibleGivenAfterUnrelatedContext(3)(
         using new PairNamedValue[String, Long]("unrelated-context", 4L)))
+    println(generatedName())
+    println(forwardedGeneratedName[Int]())
   }
 }
 )";
@@ -163,6 +192,11 @@ trait Named[A]
 class NamedValue[A] extends Named[A]
 trait PairNamed[A, B]
 class PairNamedValue[A, B] extends PairNamed[A, B]
+trait Seed[A]
+class SeedValue[A] extends Seed[A]
+trait Generated[A]
+class GeneratedValue[A] extends Generated[A]
+trait LoopEvidence[A]
 
 object Main {
   given intNamed: Named[Int] = new NamedValue[Int]
@@ -171,6 +205,11 @@ object Main {
     new PairNamedValue[Int, String]
   given intLongPairNamed: PairNamed[Int, Long] =
     new PairNamedValue[Int, Long]
+  given intSeed: Seed[Int] = new SeedValue[Int]
+  given stringSeed: Seed[String] = new SeedValue[String]
+  given generated[A](using seed: Seed[A]): Generated[A] =
+    new GeneratedValue[A]
+  given loop[A](using next: LoopEvidence[A]): LoopEvidence[A] = next
 
   def choose[A]()(using named: Named[A]): Named[A] = named
   def mixed[A, B](value: A)(using named: PairNamed[A, B]): PairNamed[A, B] =
@@ -178,11 +217,17 @@ object Main {
   def conflicting[A, B](
       left: A, right: A)(using named: PairNamed[A, B]): PairNamed[A, B] =
     named
+  def chooseGenerated[A]()(using generated: Generated[A]): Generated[A] =
+    generated
+  def chooseLoop[A]()(using loop: LoopEvidence[A]): LoopEvidence[A] =
+    loop
 
   def value = new Event.Started()
   val ambiguous = choose()
   val mixedAmbiguous = mixed(1)
   val valueConflict = conflicting(1, "no")
+  val generatedAmbiguous = chooseGenerated()
+  val unresolvedLoop = chooseLoop()
 }
 )";
 
@@ -224,7 +269,9 @@ object Main {
       status == 0 &&
       text == "0\n1\n0\n1\n7\n0\n1\n2\n0\n1\n9\ncontext-int\n"
               "context-int\ncontext-int:context-int\ncontext-int-string\n"
-              "context-int-string\nexpected-context\ncontext-int-string\n" &&
+              "context-int-string\nexpected-context\ncontext-int-string\n"
+              "generated:intermediate:seed-int\n"
+              "generated:intermediate:seed-int\n" &&
       !invalid.ok &&
       contains(invalid.diagnosticsText,
                "constructor target is not a class: Event.Started") &&
@@ -239,6 +286,12 @@ object Main {
                "of conflicting") &&
       !contains(invalid.diagnosticsText,
                 "ambiguous contextual type inference for conflicting") &&
+      contains(invalid.diagnosticsText,
+               "ambiguous contextual type inference for chooseGenerated; "
+               "use explicit type arguments") &&
+      contains(invalid.diagnosticsText,
+               "cannot infer type argument A for chooseLoop from value arguments; "
+               "use explicit type arguments") &&
       contains(result.nirText, "module @demo.qualifiedcases.Event$.Started : "
                                "@demo.qualifiedcases.Event") &&
       contains(result.nirText, "class @demo.qualifiedcases.Event$.Stopped : "
@@ -275,7 +328,16 @@ object Main {
                                "(Object,demo.qualifiedcases.PairNamed)String") &&
       contains(result.nirText, "ret String call %mixedContextName(%value, %named)") &&
       contains(result.nirText, "call %mixedContextName(box[Int](1), call "
-                               "%demo.qualifiedcases.Main.intStringPairNamed())");
+                               "%demo.qualifiedcases.Main.intStringPairNamed())") &&
+      contains(result.nirText,
+               "define @demo.qualifiedcases.Main.generatedFromIntermediate : "
+               "(demo.qualifiedcases.Intermediate)"
+               "demo.qualifiedcases.Generated") &&
+      contains(result.nirText,
+               "call %generatedName(call "
+               "%demo.qualifiedcases.Main.generatedFromIntermediate(call "
+               "%demo.qualifiedcases.Main.intermediateFromSeed(call "
+               "%demo.qualifiedcases.Main.intSeed())))");
   return valid ? 0
                : fail("Scala 3 incremental smoke test failed (output='" + text +
                       "', invalid-diagnostics='" + invalid.diagnosticsText + "')");

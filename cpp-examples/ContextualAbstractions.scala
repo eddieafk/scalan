@@ -8,6 +8,9 @@ class Box[A](val value: A)
 class DerivationSeed(val prefix: String)
 class TypeName[A](val name: String)
 class ContextPair[A, B](val name: String, val value: B)
+class ContextSeed[A](val label: String)
+class ContextIntermediate[A](val label: String)
+class ContextGenerated[A](val label: String)
 
 object DerivationSeed {
   given seed: DerivationSeed = new DerivationSeed("derived")
@@ -172,6 +175,14 @@ object ContextualAbstractions {
   given dogTypeName: TypeName[Dog] = new TypeName[Dog]("context-dog")
   given dogStringContext: ContextPair[Dog, String] =
     new ContextPair[Dog, String]("mixed-dog-string", "expected-dog-string")
+  given dogContextSeed: ContextSeed[Dog] =
+    new ContextSeed[Dog]("seed-dog")
+  given contextIntermediate[A](
+      using seed: ContextSeed[A]): ContextIntermediate[A] =
+    new ContextIntermediate[A]("intermediate:" + seed.label)
+  given contextGenerated[A](
+      using intermediate: ContextIntermediate[A]): ContextGenerated[A] =
+    new ContextGenerated[A]("generated:" + intermediate.label)
   given generalFormatter: Formatter = new Formatter("general")
   given detailedFormatter: DetailedFormatter = new DetailedFormatter("detailed")
   given alternateFormatter: AlternateFormatter =
@@ -202,6 +213,14 @@ object ContextualAbstractions {
 
   def expectedMixedContextValue[A, B]()(using context: ContextPair[A, B]): B =
     context.value
+
+  def genericEvidenceContextType[A]()(using generated: ContextGenerated[A]):
+      String =
+    generated.label
+
+  def forwardedGenericEvidenceContextType[A]()(
+      using generated: ContextGenerated[A]): String =
+    genericEvidenceContextType()
 
   def forwarded[A](value: A)(using show: Show[A]): String =
     render(value)
@@ -373,5 +392,7 @@ object ContextualAbstractions {
     println(forwardedMixedContextType[Dog, String](new Dog("forwarded-mixed")))
     val expectedMixed: String = expectedMixedContextValue()
     println(expectedMixed)
+    println(genericEvidenceContextType())
+    println(forwardedGenericEvidenceContextType[Dog]())
   }
 }
