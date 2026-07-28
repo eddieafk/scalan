@@ -81,6 +81,7 @@ void appendContextBoundParameters(AstDeclaration& declaration) {
     return;
   }
 
+  declaration.contextualParameters.resize(declaration.parameters.size(), false);
   std::size_t insertionIndex = declaration.parameters.size();
   for (std::size_t i = 0; i < declaration.contextualParameters.size(); ++i) {
     if (declaration.contextualParameters[i]) {
@@ -295,6 +296,9 @@ AstDeclaration Parser::parseObjectLike(AstDeclarationKind kind, const Token& key
 
   if (check(TokenKind::LeftParen)) {
     declaration.parameters = parseParameterList(kind == AstDeclarationKind::Class);
+  }
+  if (kind == AstDeclarationKind::Class) {
+    appendContextBoundParameters(declaration);
   }
 
   if (match(TokenKind::KeywordExtends)) {

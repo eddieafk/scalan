@@ -217,9 +217,11 @@ bool AstValidator::validateDeclaration(const AstDeclaration& declaration,
       ok = false;
     }
     if (!parameter.contextBounds.empty() &&
-        declaration.kind != AstDeclarationKind::Def) {
+        declaration.kind != AstDeclarationKind::Def &&
+        declaration.kind != AstDeclarationKind::Class) {
       diagnostics.error(parameter.span,
-                        "context bounds are currently supported only on methods");
+                        "context bounds are currently supported only on methods "
+                        "and classes");
       ok = false;
     }
   }
@@ -244,9 +246,11 @@ bool AstValidator::validateDeclaration(const AstDeclaration& declaration,
       continue;
     }
     sawContextualParameter = true;
-    if (declaration.kind != AstDeclarationKind::Def) {
+    if (declaration.kind != AstDeclarationKind::Def &&
+        declaration.kind != AstDeclarationKind::Class) {
       diagnostics.error(declaration.span,
-                        "using parameters are currently supported only on methods");
+                        "using parameters are currently supported only on methods "
+                        "and classes");
       ok = false;
     }
     if (declaration.parameters[i].find(':') == std::string::npos) {

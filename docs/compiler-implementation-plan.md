@@ -950,10 +950,21 @@ Current scaffold status:
   parameterized givens. Focused native coverage exercises value-inferred
   method bounds, named aggregate bounds, explicit contextual clauses, member
   and local given factories, missing evidence, duplicate and malformed names,
-  NIR signatures, and runtime witness access. Class and trait context bounds,
-  and named witnesses needed by preceding ordinary parameter types, receive
-  focused diagnostics until constructor-context and pre-parameter witness
-  placement are implemented.
+  NIR signatures, and runtime witness access. Trait type-parameter context
+  bounds remain diagnosed because Scala 3 defines this shorthand for methods
+  and non-trait classes. Named witnesses needed by preceding ordinary parameter
+  types retain a focused diagnostic until pre-parameter witness placement is
+  implemented.
+- Scala 3 class context bounds desugar to contextual constructor parameters
+  after ordinary fields. Both explicit and value-inferred class type arguments
+  specialize those evidence types before `new` reuses ordinary contextual
+  search and recursive given-factory materialization. Named and hidden
+  witnesses retain their contextual marker when stored as class fields, so
+  class methods can access a named witness directly or resolve it through
+  `summon`. NIR allocation appends the selected evidence tree after source
+  arguments. Focused native coverage exercises explicit and inferred type
+  arguments, named, anonymous, and aggregate bounds, recursive factories,
+  runtime field access, NIR storage/lowering, and missing or ambiguous evidence.
 - Compiler-owned Scala 3 `summon[T]` resolves one requested evidence type
   through the same contextual-parameter preference, lexical depth, companion
   search, candidate ranking, and recursive given-factory materialization used
@@ -1110,10 +1121,9 @@ Current scaffold status:
   non-invertible generic parent mappings, tuple-value operations, compile-time
   tuple recursion, and higher-kinded derivation remain later derivation
   milestones.
-  Capturing local parameterized givens, class/trait context bounds,
-  pre-parameter placement for dependent named witnesses, general derivation
-  from nested declarations, compile-time `summonFrom`, and Scala 2 `implicit`
-  syntax also remain later milestones.
+  Capturing local parameterized givens, pre-parameter placement for dependent
+  named witnesses, general derivation from nested declarations, compile-time
+  `summonFrom`, and Scala 2 `implicit` syntax also remain later milestones.
 - Postfix type application now supports typed `value.isInstanceOf[Target]` and
   checked `value.asInstanceOf[Target]` for known classes, traits, and objects.
   NIR uses dedicated `is-instance-of[T]` and `as-instance-of[T]` values; verification

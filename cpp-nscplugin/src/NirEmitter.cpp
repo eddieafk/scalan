@@ -2746,6 +2746,27 @@ nir::Value valueFor(const frontend::AstExpression& expression,
         }
         arguments.push_back(std::move(argument));
       }
+      if (const frontend::TypedContextApplication* application =
+              contextApplicationFor(expression, context)) {
+        for (const frontend::TypedContextArgument& contextual :
+             application->arguments) {
+          const std::size_t parameterIndex = arguments.size();
+          nir::Value argument =
+              materializeContextArgument(contextual, expression, context);
+          if (classDeclaration != nullptr &&
+              parameterIndex < classDeclaration->parameterTypes.size() &&
+              runtimeTypeName(classDeclaration->parameterTypes[parameterIndex]) ==
+                  "Object") {
+            if (const std::string primitive =
+                    boxedObjectTypeName(contextual.type.kind);
+                !primitive.empty()) {
+              argument =
+                  nir::boxValue(primitive, std::move(argument), expression.span);
+            }
+          }
+          arguments.push_back(std::move(argument));
+        }
+      }
       return nir::newValue(qualifyTypeName(constructor->text, context),
                            std::move(arguments), expression.span);
     }

@@ -1523,7 +1523,9 @@ TypedDeclaration Typechecker::typecheckDeclaration(const AstDeclaration& declara
   validateInheritedMemberCompatibility(declaration, typed.parentTypes,
                                        typed.parentTypeInfos, ownMemberScope);
   if (declaration.kind == AstDeclarationKind::Class) {
-    for (const std::string& parameter : typed.parameters) {
+    for (std::size_t parameterIndex = 0;
+         parameterIndex < typed.parameters.size(); ++parameterIndex) {
+      const std::string& parameter = typed.parameters[parameterIndex];
       const std::string name = parameterName(parameter);
       if (name.empty()) {
         continue;
@@ -1533,6 +1535,9 @@ TypedDeclaration Typechecker::typecheckDeclaration(const AstDeclaration& declara
       field.name = name;
       field.symbolName = qualify(typed.symbolName, name);
       field.type = parameterType(parameter, &signatureScope);
+      field.isContextParameter =
+          parameterIndex < typed.contextualParameters.size() &&
+          typed.contextualParameters[parameterIndex];
       ownMemberScope[name] = std::move(field);
 
       const std::vector<SymbolInfo> inherited = specializedInheritedMembers(
@@ -2318,7 +2323,9 @@ void Typechecker::collectDeclaration(const AstDeclaration& declaration,
       declaration.kind == AstDeclarationKind::Trait) {
     Scope ownMembers;
     if (declaration.kind == AstDeclarationKind::Class) {
-      for (const std::string& parameter : declaration.parameters) {
+      for (std::size_t parameterIndex = 0;
+           parameterIndex < declaration.parameters.size(); ++parameterIndex) {
+        const std::string& parameter = declaration.parameters[parameterIndex];
         const std::string name = parameterName(parameter);
         if (name.empty()) {
           continue;
@@ -2328,6 +2335,9 @@ void Typechecker::collectDeclaration(const AstDeclaration& declaration,
         field.name = name;
         field.symbolName = qualify(symbolName, name);
         field.type = parameterType(parameter, &declarationScope);
+        field.isContextParameter =
+            parameterIndex < declaration.contextualParameters.size() &&
+            declaration.contextualParameters[parameterIndex];
         ownMembers[name] = std::move(field);
       }
     }
@@ -4333,6 +4343,23 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
       }
 
       if (classSymbol != nullptr && classSymbol->typeParameters.empty()) {
+        std::size_t firstContextParameter = classSymbol->parameterTypes.size();
+        for (std::size_t i = 0; i < classSymbol->contextualParameters.size(); ++i) {
+          if (classSymbol->contextualParameters[i]) {
+            firstContextParameter = i;
+            break;
+          }
+        }
+        if (firstContextParameter < classSymbol->parameterTypes.size() &&
+            argumentTypes.size() == firstContextParameter) {
+          std::vector<TypedContextArgument> contextArguments =
+              resolveContextArguments(*classSymbol, firstContextParameter, scope,
+                                      expression.span);
+          for (const TypedContextArgument& argument : contextArguments) {
+            argumentTypes.push_back(argument.type);
+          }
+          recordContextApplication(expression.span, std::move(contextArguments));
+        }
         if (argumentTypes.size() != classSymbol->parameterTypes.size()) {
           diagnostics_.error(expression.span,
                              "constructor for " + classSymbol->name + " has " +
@@ -4349,7 +4376,10 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
                   ? isSupportedAnyArrayValueType(argumentTypes[i])
                   : isAssignable(classSymbol->parameterTypes[i], argumentTypes[i]);
           if (!argumentConforms) {
-            diagnostics_.error(expression.children[i + 1].span,
+            const support::SourceSpan argumentSpan =
+                i + 1 < expression.children.size() ? expression.children[i + 1].span
+                                                   : expression.span;
+            diagnostics_.error(argumentSpan,
                                "constructor argument " + std::to_string(i) +
                                    " of type " + argumentTypes[i].name +
                                    " does not conform to field type " +

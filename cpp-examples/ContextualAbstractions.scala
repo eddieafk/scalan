@@ -141,6 +141,15 @@ class BoxShow[A](val elementShow: Show[A]) extends Show[Box[A]] {
   override def show(value: Box[A]): String = "box"
 }
 
+class ContextBoundRenderer[A: Show as show](val value: A) {
+  def render: String = show.show(value)
+  def summoned: String = summon[Show[A]].show(value)
+}
+
+class GeneratedContextBound[A: ContextGenerated](val value: A) {
+  def label: String = summon[ContextGenerated[A]].label
+}
+
 object Show {
   given catShow: Show[Cat] = new CatShow("companion:")
   given foxShow: Show[Fox] = new FoxShow("typeclass-companion:")
@@ -435,5 +444,8 @@ object ContextualAbstractions {
     println(summonedRender(new Dog("summoned")))
     println(summonedGenericEvidence[Dog]())
     println(summonedLocal(new Dog("dog")))
+    println(new ContextBoundRenderer[Dog](new Dog("class-bound")).render)
+    println(new ContextBoundRenderer(new Dog("class-inferred")).summoned)
+    println(new GeneratedContextBound[Dog](new Dog("class-generated")).label)
   }
 }
