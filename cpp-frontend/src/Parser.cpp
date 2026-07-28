@@ -446,7 +446,8 @@ AstDeclaration Parser::parseImport(const Token& keyword) {
           hasLeadingNewline(peek())) {
         declaration.importsGivens = true;
       } else {
-        const std::string filter = parseTypeName();
+        const std::string filter =
+            parseTypeName(false, false, false, false, false, true);
         if (filter.empty()) {
           diagnostics_.error(previous().span,
                              "expected type after given import selector");
@@ -467,7 +468,8 @@ AstDeclaration Parser::parseImport(const Token& keyword) {
           if (check(TokenKind::Comma) || check(TokenKind::RightBrace)) {
             declaration.importsGivens = true;
           } else {
-            const std::string filter = parseTypeName();
+            const std::string filter =
+                parseTypeName(false, false, false, false, false, true);
             if (filter.empty()) {
               diagnostics_.error(previous().span,
                                  "expected type after given import selector");
@@ -977,30 +979,38 @@ std::vector<AstExpression> Parser::parseArgumentList() {
 
 std::string Parser::parseTypeName(bool stopAtUpperBound, bool stopAtRightBracket,
                                   bool stopAtMatchAlternative, bool stopAtContextBound,
-                                  bool stopAtNamedContextBound) {
+                                  bool stopAtNamedContextBound,
+                                  bool allowParenthesized) {
   std::string type;
   bool previousWasTypeJoiner = false;
   std::size_t bracketDepth = 0;
+  std::size_t parenthesisDepth = 0;
   while (!isAtEnd()) {
-    if (stopAtUpperBound && check(TokenKind::Operator) && peek().text == "<" &&
+    if (stopAtUpperBound && parenthesisDepth == 0 &&
+        check(TokenKind::Operator) && peek().text == "<" &&
         current_ + 1 < tokens_.size() &&
         tokens_[current_ + 1].kind == TokenKind::Colon) {
       return type;
     }
-    if (stopAtRightBracket && check(TokenKind::RightBracket) && bracketDepth == 0) {
+    if (stopAtRightBracket && parenthesisDepth == 0 &&
+        check(TokenKind::RightBracket) && bracketDepth == 0) {
       return type;
     }
-    if (stopAtMatchAlternative && check(TokenKind::Operator) && peek().text == "|") {
+    if (stopAtMatchAlternative && parenthesisDepth == 0 &&
+        check(TokenKind::Operator) && peek().text == "|") {
       return type;
     }
-    if (stopAtContextBound && check(TokenKind::Colon)) {
+    if (stopAtContextBound && parenthesisDepth == 0 &&
+        check(TokenKind::Colon)) {
       return type;
     }
-    if (stopAtNamedContextBound && bracketDepth == 0 && check(TokenKind::Identifier) &&
+    if (stopAtNamedContextBound && bracketDepth == 0 && parenthesisDepth == 0 &&
+        check(TokenKind::Identifier) &&
         peek().text == "as" && !previousWasTypeJoiner) {
       return type;
     }
-    if (check(TokenKind::Comma) && bracketDepth > 0) {
+    if (check(TokenKind::Comma) &&
+        (bracketDepth > 0 || parenthesisDepth > 0)) {
       if (!type.empty() && !previousWasTypeJoiner) {
         type += ' ';
       }
@@ -1009,14 +1019,20 @@ std::string Parser::parseTypeName(bool stopAtUpperBound, bool stopAtRightBracket
       advance();
       continue;
     }
+    if (allowParenthesized && check(TokenKind::LeftParen)) {
+      ++parenthesisDepth;
+    } else if (allowParenthesized && check(TokenKind::RightParen) &&
+               parenthesisDepth > 0) {
+      --parenthesisDepth;
+    } else if (check(TokenKind::LeftParen) || check(TokenKind::RightParen)) {
+      return type;
+    }
     switch (peek().kind) {
     case TokenKind::Equals:
     case TokenKind::Comma:
     case TokenKind::Semicolon:
-    case TokenKind::LeftParen:
     case TokenKind::LeftBrace:
     case TokenKind::RightBrace:
-    case TokenKind::RightParen:
     case TokenKind::Arrow:
     case TokenKind::KeywordIf:
     case TokenKind::KeywordDerives:

@@ -185,6 +185,25 @@ trait FactoryBoundedContext[A] {
 class FactoryBoundedContextValue[A](val label: String)
     extends FactoryBoundedContext[A]
 
+trait PrecedenceLeft
+trait PrecedenceRight
+trait PrecedenceTagged
+class PrecedenceLeftValue(val label: String) extends PrecedenceLeft
+class PrecedenceRightValue(val label: String) extends PrecedenceRight
+class PrecedenceRightTaggedValue(val label: String)
+    extends PrecedenceRight with PrecedenceTagged
+class PrecedenceTaggedValue(val label: String) extends PrecedenceTagged
+
+trait GroupedLeft
+trait GroupedRight
+trait GroupedTagged
+class GroupedLeftValue(val label: String) extends GroupedLeft
+class GroupedRightValue(val label: String) extends GroupedRight
+class GroupedLeftTaggedValue(val label: String)
+    extends GroupedLeft with GroupedTagged
+class GroupedRightTaggedValue(val label: String)
+    extends GroupedRight with GroupedTagged
+
 trait PairNamed[A, B] {
   val name: String
   val value: B
@@ -300,6 +319,28 @@ object BoundedGivenImportProviders {
     new FactoryBoundedContextValue[A]("bounded-factory")
 }
 
+object PrecedenceGivenImportProviders {
+  given precedenceLeft: PrecedenceLeftValue =
+    new PrecedenceLeftValue("infix-left")
+  given precedenceRight: PrecedenceRightValue =
+    new PrecedenceRightValue("must-not-import")
+  given precedenceRightTagged: PrecedenceRightTaggedValue =
+    new PrecedenceRightTaggedValue("infix-right-tagged")
+  given precedenceTagged: PrecedenceTaggedValue =
+    new PrecedenceTaggedValue("must-not-import")
+}
+
+object GroupedGivenImportProviders {
+  given groupedLeft: GroupedLeftValue =
+    new GroupedLeftValue("must-not-import")
+  given groupedRight: GroupedRightValue =
+    new GroupedRightValue("must-not-import")
+  given groupedLeftTagged: GroupedLeftTaggedValue =
+    new GroupedLeftTaggedValue("grouped-left-tagged")
+  given groupedRightTagged: GroupedRightTaggedValue =
+    new GroupedRightTaggedValue("grouped-right-tagged")
+}
+
 import GivenImportProviders.given
 import StarImportProviders.*
 import CombinedImportProviders.{given, *}
@@ -314,6 +355,8 @@ import BoundedGivenImportProviders.{
   given RangeBoundedContext[? >: ImportDog <: ImportAnimal],
   given FactoryBoundedContext[? <: ImportAnimal]
 }
+import PrecedenceGivenImportProviders.given PrecedenceLeft | PrecedenceRight & PrecedenceTagged
+import GroupedGivenImportProviders.given (GroupedLeft | GroupedRight) & GroupedTagged
 
 object Main {
   implicit val legacyIntNamed: LegacyNamed[Int] =
@@ -382,6 +425,21 @@ object Main {
 
   def factoryBoundedContextName[A](
       using imported: FactoryBoundedContext[A]): String =
+    imported.label
+
+  def precedenceLeftName()(using imported: PrecedenceLeftValue): String =
+    imported.label
+
+  def precedenceRightTaggedName()(
+      using imported: PrecedenceRightTaggedValue): String =
+    imported.label
+
+  def groupedLeftTaggedName()(
+      using imported: GroupedLeftTaggedValue): String =
+    imported.label
+
+  def groupedRightTaggedName()(
+      using imported: GroupedRightTaggedValue): String =
     imported.label
 
   def localLegacyContextName: String = {
@@ -635,6 +693,10 @@ object Main {
     println(rangeBoundedContextName[ImportDog]())
     println(rangeBoundedContextName[ImportAnimal]())
     println(factoryBoundedContextName[ImportDog]())
+    println(precedenceLeftName())
+    println(precedenceRightTaggedName())
+    println(groupedLeftTaggedName())
+    println(groupedRightTaggedName())
     println(contextName())
     println(forwardedContextName[Int]())
     println(repeatedContextName())
@@ -843,6 +905,7 @@ object Providers {
 
 import Providers.given Marker[? >: Child <: Parent]
 import Providers.given Marker[? >: Parent <: Child]
+import Providers.{given Parent |, *}
 
 object Main {
   def requireMarker[A]()(using marker: Marker[A]): String = "marker"
@@ -981,6 +1044,8 @@ object Main {
               "wildcard-int\nwildcard-string\n"
               "upper-dog\nupper-cat\nrange-dog\nrange-animal\n"
               "bounded-factory\n"
+              "infix-left\ninfix-right-tagged\n"
+              "grouped-left-tagged\ngrouped-right-tagged\n"
               "context-int\n"
               "context-int\ncontext-int:context-int\ncontext-int-string\n"
               "context-int-string\nexpected-context\ncontext-int-string\n"
@@ -1063,6 +1128,9 @@ object Main {
                "wildcard lower bound demo.invalidfilteredgivenimport.Parent "
                "does not conform to upper bound "
                "demo.invalidfilteredgivenimport.Child in given import filter") &&
+      contains(invalidFilteredGivenImport.diagnosticsText,
+               "malformed intersection or union type in given import filter: "
+               "Parent |") &&
       !invalidNestedDerivation.ok &&
       contains(invalidNestedDerivation.diagnosticsText,
                "derives declarations nested in classes or traits are not "
@@ -1252,6 +1320,34 @@ object Main {
       contains(result.nirText,
                "call %factoryBoundedContextName(call "
                "%demo.qualifiedcases.BoundedGivenImportProviders.boundedFactory())") &&
+      contains(result.nirText,
+               "call %precedenceLeftName(call "
+               "%demo.qualifiedcases.PrecedenceGivenImportProviders."
+               "precedenceLeft())") &&
+      contains(result.nirText,
+               "call %precedenceRightTaggedName(call "
+               "%demo.qualifiedcases.PrecedenceGivenImportProviders."
+               "precedenceRightTagged())") &&
+      !contains(result.nirText,
+                "call %demo.qualifiedcases.PrecedenceGivenImportProviders."
+                "precedenceRight()") &&
+      !contains(result.nirText,
+                "call %demo.qualifiedcases.PrecedenceGivenImportProviders."
+                "precedenceTagged()") &&
+      contains(result.nirText,
+               "call %groupedLeftTaggedName(call "
+               "%demo.qualifiedcases.GroupedGivenImportProviders."
+               "groupedLeftTagged())") &&
+      contains(result.nirText,
+               "call %groupedRightTaggedName(call "
+               "%demo.qualifiedcases.GroupedGivenImportProviders."
+               "groupedRightTagged())") &&
+      !contains(result.nirText,
+                "call %demo.qualifiedcases.GroupedGivenImportProviders."
+                "groupedLeft()") &&
+      !contains(result.nirText,
+                "call %demo.qualifiedcases.GroupedGivenImportProviders."
+                "groupedRight()") &&
       contains(result.nirText, "define @demo.qualifiedcases.Main.contextName : "
                                "(demo.qualifiedcases.Named)String") &&
       contains(result.nirText, "ret String call %contextName(%named)") &&

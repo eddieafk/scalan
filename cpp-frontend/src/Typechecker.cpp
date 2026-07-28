@@ -436,6 +436,109 @@ struct WildcardTypeSyntax {
   bool malformed = false;
 };
 
+enum class GivenImportInfixKind { None, Intersection, Union };
+
+struct GivenImportInfixSyntax {
+  GivenImportInfixKind kind = GivenImportInfixKind::None;
+  std::vector<std::string> operands;
+  bool malformed = false;
+};
+
+std::string normalizeGivenImportType(std::string_view typeName, bool* malformed) {
+  std::string normalized = compactTypeName(typeName);
+  std::vector<char> delimiters;
+  for (char ch : normalized) {
+    if (ch == '[' || ch == '(') {
+      delimiters.push_back(ch);
+      continue;
+    }
+    if (ch != ']' && ch != ')') {
+      continue;
+    }
+    const char expected = ch == ']' ? '[' : '(';
+    if (delimiters.empty() || delimiters.back() != expected) {
+      *malformed = true;
+      return normalized;
+    }
+    delimiters.pop_back();
+  }
+  if (!delimiters.empty()) {
+    *malformed = true;
+    return normalized;
+  }
+
+  while (normalized.size() >= 2 && normalized.front() == '(') {
+    std::size_t depth = 0;
+    std::size_t closing = std::string::npos;
+    for (std::size_t i = 0; i < normalized.size(); ++i) {
+      if (normalized[i] == '(') {
+        ++depth;
+      } else if (normalized[i] == ')') {
+        --depth;
+        if (depth == 0) {
+          closing = i;
+          break;
+        }
+      }
+    }
+    if (closing == std::string::npos || closing + 1 != normalized.size()) {
+      break;
+    }
+    normalized = normalized.substr(1, normalized.size() - 2);
+  }
+  if (normalized.empty()) {
+    *malformed = true;
+  }
+  return normalized;
+}
+
+GivenImportInfixSyntax parseGivenImportInfixSyntax(std::string_view typeName) {
+  const auto split = [&](char operation) {
+    GivenImportInfixSyntax parsed;
+    parsed.kind = operation == '|'
+                      ? GivenImportInfixKind::Union
+                      : GivenImportInfixKind::Intersection;
+    std::size_t bracketDepth = 0;
+    std::size_t parenthesisDepth = 0;
+    std::size_t operandStart = 0;
+    for (std::size_t i = 0; i <= typeName.size(); ++i) {
+      if (i != typeName.size()) {
+        if (typeName[i] == '[') {
+          ++bracketDepth;
+        } else if (typeName[i] == ']') {
+          --bracketDepth;
+        } else if (typeName[i] == '(') {
+          ++parenthesisDepth;
+        } else if (typeName[i] == ')') {
+          --parenthesisDepth;
+        }
+      }
+      if (i != typeName.size() &&
+          (typeName[i] != operation || bracketDepth != 0 ||
+           parenthesisDepth != 0)) {
+        continue;
+      }
+      if (i == operandStart) {
+        parsed.malformed = true;
+        return parsed;
+      }
+      parsed.operands.emplace_back(typeName.substr(operandStart, i - operandStart));
+      operandStart = i + 1;
+    }
+    if (parsed.operands.size() == 1) {
+      parsed.kind = GivenImportInfixKind::None;
+      parsed.operands.clear();
+    }
+    return parsed;
+  };
+
+  GivenImportInfixSyntax unionType = split('|');
+  if (unionType.malformed || unionType.kind != GivenImportInfixKind::None) {
+    return unionType;
+  }
+  return split('&');
+}
+
 std::size_t findTopLevelTypeBound(std::string_view typeName,
                                   std::string_view marker,
                                   std::size_t start) {
@@ -567,25 +670,6 @@ AppliedTypeSyntax parseAppliedTypeSyntax(std::string_view typeName) {
     parsed.malformed = true;
   }
   return parsed;
-}
-
-bool hasWellFormedGivenImportWildcards(std::string_view typeName) {
-  const std::string compact = compactTypeName(typeName);
-  const WildcardTypeSyntax wildcard = parseWildcardTypeSyntax(compact);
-  if (wildcard.wildcard) {
-    return !wildcard.malformed &&
-           (wildcard.lowerBound.empty() ||
-            hasWellFormedGivenImportWildcards(wildcard.lowerBound)) &&
-           (wildcard.upperBound.empty() ||
-            hasWellFormedGivenImportWildcards(wildcard.upperBound));
-  }
-  if (compact.find('?') == std::string::npos) {
-    return true;
-  }
-  const AppliedTypeSyntax applied = parseAppliedTypeSyntax(compact);
-  return applied.applied && !applied.malformed &&
-         std::all_of(applied.arguments.begin(), applied.arguments.end(),
-                     hasWellFormedGivenImportWildcards);
 }
 
 std::vector<std::string> typeArgumentsFor(const AstExpression& expression) {
@@ -3467,20 +3551,51 @@ bool Typechecker::givenImportTypeMatches(const std::string& filter,
                                          const Scope& scope) const {
   std::unordered_set<std::string> visiting;
   std::function<bool(const std::string&, const TypeInfo&)> matches;
+  std::function<bool(const std::string&, const TypeInfo&)> patternConformsTo;
+  patternConformsTo = [&](const std::string& patternName,
+                          const TypeInfo& target) {
+    bool malformed = false;
+    const std::string pattern =
+        normalizeGivenImportType(patternName, &malformed);
+    if (malformed) {
+      return false;
+    }
+    const GivenImportInfixSyntax infix =
+        parseGivenImportInfixSyntax(pattern);
+    if (infix.malformed) {
+      return false;
+    }
+    if (infix.kind == GivenImportInfixKind::Union) {
+      return std::all_of(
+          infix.operands.begin(), infix.operands.end(),
+          [&](const std::string& operand) {
+            return patternConformsTo(operand, target);
+          });
+    }
+    if (infix.kind == GivenImportInfixKind::Intersection) {
+      return std::any_of(
+          infix.operands.begin(), infix.operands.end(),
+          [&](const std::string& operand) {
+            return patternConformsTo(operand, target);
+          });
+    }
+    const TypeInfo source = typeFromDeclaredName(pattern, &scope);
+    return source.kind != SimpleTypeKind::Unknown &&
+           isAssignable(target, source);
+  };
   matches = [&](const std::string& patternName, const TypeInfo& value) {
-    const std::string pattern = compactTypeName(patternName);
+    bool malformed = false;
+    const std::string pattern =
+        normalizeGivenImportType(patternName, &malformed);
+    if (malformed) {
+      return false;
+    }
     const WildcardTypeSyntax wildcard = parseWildcardTypeSyntax(pattern);
     if (wildcard.wildcard) {
       if (wildcard.malformed) {
         return false;
       }
 
-      const TypeInfo lower = wildcard.lowerBound.empty()
-                                 ? TypeInfo{SimpleTypeKind::Unknown, "Unknown"}
-                                 : typeFromDeclaredName(wildcard.lowerBound, &scope);
-      const TypeInfo upper = wildcard.upperBound.empty()
-                                 ? TypeInfo{SimpleTypeKind::Unknown, "Unknown"}
-                                 : typeFromDeclaredName(wildcard.upperBound, &scope);
       if (value.typeParameter) {
         const auto parameter = std::find_if(
             candidate.typeParameters.begin(), candidate.typeParameters.end(),
@@ -3491,15 +3606,33 @@ bool Typechecker::givenImportTypeMatches(const std::string& filter,
           return false;
         }
         return (wildcard.lowerBound.empty() ||
-                isAssignable(parameter->lowerBound, lower)) &&
+                patternConformsTo(wildcard.lowerBound,
+                                  parameter->lowerBound)) &&
                (wildcard.upperBound.empty() ||
                 isUniversalWildcardUpperBound(wildcard.upperBound) ||
-                isAssignable(upper, parameter->upperBound));
+                matches(wildcard.upperBound, parameter->upperBound));
       }
-      return (wildcard.lowerBound.empty() || isAssignable(value, lower)) &&
+      return (wildcard.lowerBound.empty() ||
+              patternConformsTo(wildcard.lowerBound, value)) &&
              (wildcard.upperBound.empty() ||
               isUniversalWildcardUpperBound(wildcard.upperBound) ||
-              isAssignable(upper, value));
+              matches(wildcard.upperBound, value));
+    }
+
+    const GivenImportInfixSyntax infix =
+        parseGivenImportInfixSyntax(pattern);
+    if (infix.malformed) {
+      return false;
+    }
+    if (infix.kind == GivenImportInfixKind::Union) {
+      return std::any_of(
+          infix.operands.begin(), infix.operands.end(),
+          [&](const std::string& operand) { return matches(operand, value); });
+    }
+    if (infix.kind == GivenImportInfixKind::Intersection) {
+      return std::all_of(
+          infix.operands.begin(), infix.operands.end(),
+          [&](const std::string& operand) { return matches(operand, value); });
     }
 
     const AppliedTypeSyntax applied = parseAppliedTypeSyntax(pattern);
@@ -3579,7 +3712,15 @@ bool Typechecker::validateGivenImportFilter(
     const support::SourceSpan& span) const {
   std::function<bool(const std::string&)> validate;
   validate = [&](const std::string& patternName) {
-    const std::string pattern = compactTypeName(patternName);
+    bool malformed = false;
+    const std::string pattern =
+        normalizeGivenImportType(patternName, &malformed);
+    if (malformed) {
+      diagnostics_.error(
+          span, "malformed parenthesized type in given import filter: " +
+                    patternName);
+      return false;
+    }
     const WildcardTypeSyntax wildcard = parseWildcardTypeSyntax(pattern);
     if (wildcard.wildcard) {
       if (wildcard.malformed) {
@@ -3587,14 +3728,36 @@ bool Typechecker::validateGivenImportFilter(
                                      patternName);
         return false;
       }
+      if ((!wildcard.lowerBound.empty() && !validate(wildcard.lowerBound)) ||
+          (!wildcard.upperBound.empty() && !validate(wildcard.upperBound))) {
+        return false;
+      }
+      const auto containsInfix = [](const std::string& bound) {
+        bool malformedBound = false;
+        const std::string normalized =
+            normalizeGivenImportType(bound, &malformedBound);
+        return !malformedBound &&
+               parseGivenImportInfixSyntax(normalized).kind !=
+                   GivenImportInfixKind::None;
+      };
+      if (containsInfix(wildcard.lowerBound) ||
+          containsInfix(wildcard.upperBound)) {
+        return true;
+      }
+      bool malformedLower = false;
+      bool malformedUpper = false;
+      const std::string normalizedLower =
+          normalizeGivenImportType(wildcard.lowerBound, &malformedLower);
+      const std::string normalizedUpper =
+          normalizeGivenImportType(wildcard.upperBound, &malformedUpper);
       const TypeInfo lower =
           wildcard.lowerBound.empty()
               ? TypeInfo{SimpleTypeKind::Nothing, "Nothing"}
-              : typeFromDeclaredName(wildcard.lowerBound, &scope, &span);
+              : typeFromDeclaredName(normalizedLower, &scope, &span);
       const TypeInfo upper =
           wildcard.upperBound.empty()
               ? TypeInfo{SimpleTypeKind::Object, "Object"}
-              : typeFromDeclaredName(wildcard.upperBound, &scope, &span);
+              : typeFromDeclaredName(normalizedUpper, &scope, &span);
       if (!isAssignable(upper, lower)) {
         diagnostics_.error(
             span, "wildcard lower bound " + lower.name +
@@ -3605,7 +3768,25 @@ bool Typechecker::validateGivenImportFilter(
       return true;
     }
 
+    const GivenImportInfixSyntax infix =
+        parseGivenImportInfixSyntax(pattern);
+    if (infix.malformed) {
+      diagnostics_.error(span, "malformed intersection or union type in given "
+                               "import filter: " +
+                                   patternName);
+      return false;
+    }
+    if (infix.kind != GivenImportInfixKind::None) {
+      return std::all_of(infix.operands.begin(), infix.operands.end(),
+                         validate);
+    }
+
     const AppliedTypeSyntax applied = parseAppliedTypeSyntax(pattern);
+    if (applied.applied && applied.malformed) {
+      diagnostics_.error(span, "malformed applied type in given import filter: " +
+                                   patternName);
+      return false;
+    }
     if (applied.applied && !applied.malformed) {
       const SymbolInfo* constructor =
           typeSymbolForDeclaredName(applied.constructor, &scope);
@@ -3659,11 +3840,6 @@ void Typechecker::applyImport(const AstDeclaration& declaration, Scope& scope) {
       return;
     }
     for (const std::string& filter : declaration.importGivenTypes) {
-      if (!hasWellFormedGivenImportWildcards(filter)) {
-        diagnostics_.error(declaration.span,
-                           "malformed wildcard in given import filter: " + filter);
-        continue;
-      }
       (void)validateGivenImportFilter(filter, scope, declaration.span);
     }
     for (const AstImportSelector& selector : declaration.importSelectors) {

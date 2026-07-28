@@ -8,6 +8,9 @@ class Fox(val name: String)
 class Box[A](val value: A)
 class DerivationSeed(val prefix: String)
 class TypeName[A](val name: String)
+trait PreferredTypeName
+class PreferredDogTypeName(name: String)
+    extends TypeName[Dog](name) with PreferredTypeName
 class ContextPair[A, B](val name: String, val value: B)
 class ContextSeed[A](val label: String)
 class ContextIntermediate[A](val label: String)
@@ -195,14 +198,14 @@ object Bird {
 import Show.{catShow => selectedCatShow}
 
 object LegacyContextualImports {
-  implicit val dogTypeName: TypeName[Dog] =
-    new TypeName[Dog]("context-dog")
+  implicit val dogTypeName: PreferredDogTypeName =
+    new PreferredDogTypeName("context-dog")
   implicit val catTypeName: TypeName[Cat] =
     new TypeName[Cat]("must-not-import")
   val ordinaryLabel: String = "not-contextual"
 }
 
-import LegacyContextualImports.given TypeName[? <: ContextualImportTarget]
+import LegacyContextualImports.given TypeName[? <: ContextualImportTarget] & PreferredTypeName
 
 object ContextualAbstractions {
   given dogShow: Show[Dog] = new DogShow("dog:")

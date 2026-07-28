@@ -1192,8 +1192,16 @@ Current scaffold status:
   selector may still combine filtered givens with `*`, which imports ordinary
   members independently. Runtime and NIR coverage verifies concrete inclusion,
   non-selected exclusion, multiple filters, unbounded and bounded wildcard
-  matching, invalid ranges, and imported legacy implicits. General infix
-  type patterns remain a later import slice.
+  matching, invalid ranges, and imported legacy implicits.
+- Given import filters now evaluate Scala 3 intersection and union types.
+  Intersection operands must all match, union operands may match independently,
+  `&` binds more tightly than `|`, and parentheses can override that precedence.
+  These filters compose with applied and wildcard operands, so selectors such as
+  `given Context[?] & Tagged` remain import-only type tests without changing
+  runtime erasure. Runtime and NIR coverage verifies both branches, precedence,
+  grouping, non-selected exclusion, and malformed infix diagnostics. General
+  user-defined infix type constructors and whole-program intersection/union type
+  representation remain later type-system slices.
 - Full inline call-site specialization remains a later milestone.
 - Postfix type application now supports typed `value.isInstanceOf[Target]` and
   checked `value.asInstanceOf[Target]` for known classes, traits, and objects.
