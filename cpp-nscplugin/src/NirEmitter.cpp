@@ -1675,7 +1675,15 @@ nir::Value materializeContextArgument(const frontend::TypedContextArgument& cont
     std::vector<nir::Value> nestedArguments;
     const std::size_t firstCallArgument =
         std::min(contextual.prerequisiteArgumentCount, contextual.arguments.size());
-    nestedArguments.reserve(contextual.arguments.size() - firstCallArgument);
+    nestedArguments.reserve(contextual.captureArgumentNames.size() +
+                            contextual.arguments.size() - firstCallArgument);
+    for (const std::string& captureName : contextual.captureArgumentNames) {
+      frontend::AstExpression captureExpression;
+      captureExpression.kind = frontend::AstExpressionKind::Identifier;
+      captureExpression.text = captureName;
+      captureExpression.span = expression.span;
+      nestedArguments.push_back(expressionValueFor(captureExpression, context));
+    }
     for (std::size_t index = firstCallArgument; index < contextual.arguments.size();
          ++index) {
       nestedArguments.push_back(

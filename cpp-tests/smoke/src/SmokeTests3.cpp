@@ -268,6 +268,39 @@ object Main {
     generatedName()
   }
 
+  def capturedLocalGeneratedName: String = {
+    val prefix: String = "captured-local:"
+    given captured[A](using seed: Seed[A]): Generated[A] =
+      new GeneratedValue[A](prefix + seed.label)
+    generatedName[Int]()
+  }
+
+  def capturedParameterGeneratedName(prefix: String): String = {
+    given capturedParameter[A](using seed: Seed[A]): Generated[A] =
+      new GeneratedValue[A](prefix + seed.label)
+    generatedName[Int]()
+  }
+
+  def capturedLocalChainName: String = {
+    val intermediatePrefix: String = "captured-intermediate:"
+    val generatedPrefix: String = "captured-generated:"
+    given capturedIntermediate[A](using seed: Seed[A]): Intermediate[A] =
+      new IntermediateValue[A](intermediatePrefix + seed.label)
+    given capturedGenerated[A](
+        using intermediate: Intermediate[A]): Generated[A] =
+      new GeneratedValue[A](generatedPrefix + intermediate.label)
+    generatedName[Int]()
+  }
+
+  def initializerLocalDoesNotCaptureName: String = {
+    val prefix: String = "outer-unused:"
+    given initializerScoped[A](using seed: Seed[A]): Generated[A] = {
+      val prefix: String = "initializer-local:"
+      new GeneratedValue[A](prefix + seed.label)
+    }
+    generatedName[Int]()
+  }
+
   def nestedLocalGeneratedName: String = {
     given outer[A](using seed: Seed[A]): Generated[A] =
       new GeneratedValue[A]("outer-local:" + seed.label)
@@ -314,6 +347,10 @@ object Main {
     println(anonymousGeneratedName())
     println(localNamedGeneratedName)
     println(localAnonymousGeneratedName)
+    println(capturedLocalGeneratedName)
+    println(capturedParameterGeneratedName("captured-parameter:"))
+    println(capturedLocalChainName)
+    println(initializerLocalDoesNotCaptureName)
     println(nestedLocalGeneratedName)
     println(inferredContextBoundName(1))
     println(combinedContextBounds(2))
@@ -357,6 +394,13 @@ trait Generated[A] {
   val label: String
 }
 class GeneratedValue[A](val label: String) extends Generated[A]
+class ReceiverCapture(val prefix: String) {
+  def value(using intSeed: Seed[Int]): Generated[Int] = {
+    given capturedReceiver[A](using seed: Seed[A]): Generated[A] =
+      new GeneratedValue[A](prefix)
+    summon[Generated[Int]]
+  }
+}
 trait LoopEvidence[A]
 class RequiredContext[A: Named](val value: A)
 trait DependentEvidence[A] {
@@ -506,7 +550,11 @@ object Main {
               "generated:intermediate:seed-int\n"
               "generated:intermediate:seed-int\nanonymous-member:seed-int\n"
               "local-generated:local-intermediate:seed-int\n"
-              "local-anonymous:seed-int\ninner-local:seed-int\n"
+              "local-anonymous:seed-int\ncaptured-local:seed-int\n"
+              "captured-parameter:seed-int\n"
+              "captured-generated:captured-intermediate:seed-int\n"
+              "initializer-local:seed-int\n"
+              "inner-local:seed-int\n"
               "context-int\ncontext-int:seed-int\ncontext-int:seed-int\n"
               "context-int:seed-int\n"
               "named-context-bound-factory:seed-int\n"
@@ -538,9 +586,11 @@ object Main {
       contains(invalid.diagnosticsText,
                "cannot infer type argument A for chooseLoop from value arguments; "
                "use explicit type arguments") &&
+      !contains(invalid.diagnosticsText,
+                "capturing local parameterized given references local value") &&
       contains(invalid.diagnosticsText,
-               "capturing local parameterized given references local value "
-               "prefix") &&
+               "capturing this or super in a local parameterized given is not "
+               "supported yet") &&
       !invalidContextBound.ok &&
       contains(invalidContextBound.diagnosticsText,
                "context bounds are currently supported only on methods and classes") &&
@@ -639,6 +689,32 @@ object Main {
                                "demo.qualifiedcases.Generated") &&
       contains(result.nirText,
                "call %generatedName(call %demo.qualifiedcases.$local$") &&
+      contains(result.nirText,
+               ".captured : (String,demo.qualifiedcases.Seed)"
+               "demo.qualifiedcases.Generated") &&
+      contains(result.nirText,
+               ".capturedParameter : (String,demo.qualifiedcases.Seed)"
+               "demo.qualifiedcases.Generated") &&
+      contains(result.nirText,
+               ".capturedIntermediate : (String,demo.qualifiedcases.Seed)"
+               "demo.qualifiedcases.Intermediate") &&
+      contains(result.nirText,
+               ".capturedGenerated : (String,demo.qualifiedcases.Intermediate)"
+               "demo.qualifiedcases.Generated") &&
+      contains(result.nirText,
+               ".initializerScoped : (demo.qualifiedcases.Seed)"
+               "demo.qualifiedcases.Generated") &&
+      !contains(result.nirText,
+                ".initializerScoped : (String,demo.qualifiedcases.Seed)") &&
+      contains(result.nirText,
+               ".captured(%prefix, call "
+               "%demo.qualifiedcases.Main.intSeed())") &&
+      contains(result.nirText,
+               ".capturedGenerated(%generatedPrefix, call "
+               "%demo.qualifiedcases.$local$") &&
+      contains(result.nirText,
+               ".capturedIntermediate(%intermediatePrefix, call "
+               "%demo.qualifiedcases.Main.intSeed())") &&
       contains(result.nirText,
                "define @demo.qualifiedcases.Main.inferredContextBoundName : "
                "(Object,demo.qualifiedcases.Named)String") &&

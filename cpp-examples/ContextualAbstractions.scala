@@ -287,6 +287,14 @@ object ContextualAbstractions {
     genericEvidenceContextType()
   }
 
+  def capturedLocalParameterizedContextType: String = {
+    val prefix: String = "captured-local:"
+    given captured[A](
+        using seed: ContextSeed[A]): ContextGenerated[A] =
+      new ContextGenerated[A](prefix + seed.label)
+    genericEvidenceContextType[Dog]()
+  }
+
   def forwarded[A](value: A)(using show: Show[A]): String =
     render(value)
 
@@ -461,6 +469,7 @@ object ContextualAbstractions {
     println(forwardedGenericEvidenceContextType[Dog]())
     println(anonymousGenericEvidenceContextType())
     println(localParameterizedContextType)
+    println(capturedLocalParameterizedContextType)
     println(contextBoundRender(new Dog("bounded")))
     println(combinedContextBounds(new Dog("combined")))
     println(summonedRender(new Dog("summoned")))

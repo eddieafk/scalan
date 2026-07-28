@@ -1331,6 +1331,7 @@ TypedDeclaration Typechecker::typecheckDeclaration(const AstDeclaration& declara
                          ? typed.parameterTypes[i]
                          : TypeInfo{SimpleTypeKind::Unknown, "Unknown"};
     parameter.isContextParameter = typed.contextualParameters[i];
+    parameter.isLexicalValue = true;
     signatureScope[name] = std::move(parameter);
   }
 
@@ -1538,6 +1539,7 @@ TypedDeclaration Typechecker::typecheckDeclaration(const AstDeclaration& declara
       field.isContextParameter =
           parameterIndex < typed.contextualParameters.size() &&
           typed.contextualParameters[parameterIndex];
+      field.isInstanceMember = true;
       ownMemberScope[name] = std::move(field);
 
       const std::vector<SymbolInfo> inherited = specializedInheritedMembers(
@@ -1741,6 +1743,12 @@ TypedDeclaration Typechecker::typecheckDeclaration(const AstDeclaration& declara
     updated.isModuleMember = declaration.kind == AstDeclarationKind::Object &&
                              (typedMember.kind == AstDeclarationKind::Val ||
                               typedMember.kind == AstDeclarationKind::Var);
+    updated.isInstanceMember =
+        (declaration.kind == AstDeclarationKind::Class ||
+         declaration.kind == AstDeclarationKind::Trait) &&
+        (typedMember.kind == AstDeclarationKind::Def ||
+         typedMember.kind == AstDeclarationKind::Val ||
+         typedMember.kind == AstDeclarationKind::Var);
     updated.hasImplementation =
         declarationHasImplementation(typedMember.kind, typedMember.hasInitializer);
     if ((declaration.kind == AstDeclarationKind::Class ||
@@ -2275,6 +2283,12 @@ void Typechecker::collectDeclaration(const AstDeclaration& declaration,
       enclosing->second.kind == AstDeclarationKind::Object) {
     symbol.isModuleMember = declaration.kind == AstDeclarationKind::Val ||
                             declaration.kind == AstDeclarationKind::Var;
+  } else if (enclosing != globalSymbols_.end() &&
+             (enclosing->second.kind == AstDeclarationKind::Class ||
+              enclosing->second.kind == AstDeclarationKind::Trait)) {
+    symbol.isInstanceMember = declaration.kind == AstDeclarationKind::Def ||
+                              declaration.kind == AstDeclarationKind::Val ||
+                              declaration.kind == AstDeclarationKind::Var;
   }
   if (isClassLikeDeclaration(declaration.kind)) {
     for (const std::string& parentName : sourceParentTypes(declaration)) {
@@ -4623,34 +4637,83 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
               factoryParameters.insert(name);
             }
           }
-          std::unordered_set<std::string> reportedCaptures;
-          std::function<void(const AstExpression&)> validateCaptures;
-          validateCaptures = [&](const AstExpression& candidate) {
+          std::vector<std::pair<std::string, TypeInfo>> captures;
+          std::unordered_set<std::string> capturedNames;
+          std::unordered_set<std::string> reportedReceiverCaptures;
+          std::function<void(const AstExpression&,
+                             const std::unordered_set<std::string>&)>
+              collectCaptures;
+          collectCaptures =
+              [&](const AstExpression& candidate,
+                  const std::unordered_set<std::string>& locallyBoundNames) {
+            if (candidate.kind == AstExpressionKind::Block) {
+              std::unordered_set<std::string> blockBindings = locallyBoundNames;
+              for (const AstExpression& child : candidate.children) {
+                collectCaptures(child, blockBindings);
+                if (child.kind == AstExpressionKind::LocalDeclaration &&
+                    !child.text.empty()) {
+                  blockBindings.insert(child.text);
+                }
+              }
+              return;
+            }
+            if (candidate.kind == AstExpressionKind::Catch) {
+              std::unordered_set<std::string> catchBindings = locallyBoundNames;
+              if (!candidate.text.empty()) {
+                catchBindings.insert(candidate.text);
+              }
+              for (const AstExpression& child : candidate.children) {
+                collectCaptures(child, catchBindings);
+              }
+              return;
+            }
+            if (candidate.kind == AstExpressionKind::LocalDeclaration &&
+                candidate.localMethod != nullptr) {
+              std::unordered_set<std::string> methodBindings = locallyBoundNames;
+              methodBindings.insert(candidate.text);
+              for (const std::string& parameter :
+                   candidate.localMethod->parameters) {
+                const std::string name = parameterName(parameter);
+                if (!name.empty()) {
+                  methodBindings.insert(name);
+                }
+              }
+              for (const AstExpression& child : candidate.children) {
+                collectCaptures(child, methodBindings);
+              }
+              return;
+            }
             if (candidate.kind == AstExpressionKind::This ||
                 candidate.kind == AstExpressionKind::Super) {
-              if (reportedCaptures.insert(candidate.text).second) {
+              if (reportedReceiverCaptures.insert(candidate.text).second) {
                 diagnostics_.error(
                     candidate.span,
-                    "capturing local parameterized givens are not supported yet");
+                    "capturing this or super in a local parameterized given is "
+                    "not supported yet");
               }
             } else if (candidate.kind == AstExpressionKind::Identifier &&
-                       !factoryParameters.contains(candidate.text)) {
+                       !locallyBoundNames.contains(candidate.text)) {
               auto captured = blockScope.find(candidate.text);
               if (captured != blockScope.end() &&
-                  !globalSymbols_.contains(captured->second.symbolName) &&
-                  reportedCaptures.insert(candidate.text).second) {
-                diagnostics_.error(
-                    candidate.span,
-                    "capturing local parameterized given references local value " +
-                        candidate.text);
+                  captured->second.isInstanceMember) {
+                if (reportedReceiverCaptures.insert(candidate.text).second) {
+                  diagnostics_.error(
+                      candidate.span,
+                      "capturing this or super in a local parameterized given is "
+                      "not supported yet");
+                }
+              } else if (captured != blockScope.end() &&
+                         captured->second.isLexicalValue &&
+                         capturedNames.insert(candidate.text).second) {
+                captures.emplace_back(candidate.text, captured->second.type);
               }
             }
             for (const AstExpression& child : candidate.children) {
-              validateCaptures(child);
+              collectCaptures(child, locallyBoundNames);
             }
           };
           if (!local.children.empty()) {
-            validateCaptures(local.children.front());
+            collectCaptures(local.children.front(), factoryParameters);
           }
 
           AstDeclaration factory;
@@ -4658,8 +4721,15 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
           factory.name = local.text;
           factory.span = local.span;
           factory.typeParameters = method.typeParameters;
-          factory.parameters = method.parameters;
-          factory.contextualParameters = method.contextualParameters;
+          for (const auto& [name, type] : captures) {
+            factory.parameters.push_back(name + ": " + type.name);
+            factory.contextualParameters.push_back(false);
+          }
+          factory.parameters.insert(factory.parameters.end(), method.parameters.begin(),
+                                    method.parameters.end());
+          factory.contextualParameters.insert(factory.contextualParameters.end(),
+                                              method.contextualParameters.begin(),
+                                              method.contextualParameters.end());
           factory.declaredType = local.declaredType;
           factory.isGiven = local.isGiven;
           factory.isAnonymousGiven = local.isAnonymousGiven;
@@ -4674,9 +4744,11 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
           if (auto inserted = blockScope.find(local.text);
               inserted != blockScope.end()) {
             inserted->second.contextualNestingDepth = contextualNestingDepth;
+            inserted->second.captureParameterCount = captures.size();
             if (auto global = globalSymbols_.find(inserted->second.symbolName);
                 global != globalSymbols_.end()) {
               global->second.contextualNestingDepth = contextualNestingDepth;
+              global->second.captureParameterCount = captures.size();
             }
           }
           localFactoryDeclarations_.push_back(std::move(typedFactory));
@@ -4693,6 +4765,7 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
         symbol.isGiven = local.isGiven;
         symbol.isAnonymousGiven = local.isAnonymousGiven;
         symbol.contextualNestingDepth = contextualNestingDepth;
+        symbol.isLexicalValue = true;
         blockScope[local.text] = std::move(symbol);
       };
       for (std::size_t i = 0; i + 1 < expression.children.size(); ++i) {
@@ -7340,12 +7413,17 @@ std::vector<SymbolInfo> Typechecker::inferContextualTypeApplications(
   }
   std::vector<SymbolInfo> expandedGenericEvidence;
   for (const SymbolInfo* candidate : genericGivenEvidence) {
-    const bool allContextual =
-        candidate->contextualParameters.size() == candidate->parameterTypes.size() &&
-        std::all_of(candidate->contextualParameters.begin(),
-                    candidate->contextualParameters.end(),
-                    [](bool contextual) { return contextual; });
-    if (!allContextual || candidate->parameterTypes.empty() ||
+    bool materializableParameters =
+        candidate->captureParameterCount <= candidate->parameterTypes.size() &&
+        candidate->contextualParameters.size() == candidate->parameterTypes.size();
+    for (std::size_t index = 0;
+         materializableParameters && index < candidate->parameterTypes.size();
+         ++index) {
+      materializableParameters =
+          candidate->contextualParameters[index] ==
+          (index >= candidate->captureParameterCount);
+    }
+    if (!materializableParameters || candidate->parameterTypes.empty() ||
         !expandingGenericEvidence->insert(candidate->symbolName).second) {
       continue;
     }
@@ -8321,18 +8399,30 @@ std::vector<TypedContextArgument> Typechecker::resolveContextArguments(
         return argument;
       }
 
-      const bool allContextual =
-          selected.contextualParameters.size() == selected.parameterTypes.size() &&
-          std::all_of(selected.contextualParameters.begin(),
-                      selected.contextualParameters.end(),
-                      [](bool contextual) { return contextual; });
-      if (!allContextual) {
+      bool materializableParameters =
+          selected.captureParameterCount <= selected.parameterTypes.size() &&
+          selected.contextualParameters.size() == selected.parameterTypes.size();
+      for (std::size_t index = 0;
+           materializableParameters && index < selected.parameterTypes.size();
+           ++index) {
+        materializableParameters =
+            selected.contextualParameters[index] ==
+            (index >= selected.captureParameterCount);
+      }
+      if (!materializableParameters) {
         if (emitDiagnostics) {
           diagnostics_.error(span, "given method " + selected.name +
                                        " cannot be materialized because it has "
                                        "ordinary parameters");
         }
         return std::nullopt;
+      }
+      for (std::size_t index = 0;
+           index < selected.captureParameterCount &&
+           index < selected.parameters.size();
+           ++index) {
+        argument.captureArgumentNames.push_back(
+            parameterName(selected.parameters[index]));
       }
 
       const std::string expansionKey =
@@ -8460,6 +8550,7 @@ void Typechecker::addParametersToScope(const AstDeclaration& declaration,
     symbol.type = parameterType(parameter, &scope, &declaration.span);
     symbol.isContextParameter = i < declaration.contextualParameters.size() &&
                                 declaration.contextualParameters[i];
+    symbol.isLexicalValue = true;
     scope[name] = std::move(symbol);
   }
 }

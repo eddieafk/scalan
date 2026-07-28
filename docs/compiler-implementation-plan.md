@@ -928,16 +928,17 @@ Current scaffold status:
   ungrounded recursive factory, and nested erased calls in NIR.
 - Anonymous parameterized givens use stable synthetic source names and otherwise
   participate in the same specialization, ranking, and recursive materialization
-  path as named factories. Capture-free parameterized givens are also accepted
-  inside blocks: their full generic signatures are preserved in the local AST,
-  typechecked in lexical order, and hoisted to uniquely named internal functions.
+  path as named factories. Parameterized givens are also accepted inside blocks:
+  their full generic signatures are preserved in the local AST, typechecked in
+  lexical order, and hoisted to uniquely named internal functions. Captured
+  lexical locals become leading erased parameters on those functions and are
+  supplied before recursively materialized `using` evidence at each call site.
   Their lexical nesting depth still controls contextual preference, so named and
-  anonymous local factories can shadow member or outer-block factories. Local
-  factory initializers may use their own `using` parameters; references that
-  require closure capture receive a focused diagnostic until closure conversion
-  is available. Native coverage exercises anonymous member factories, a
-  two-level named local chain, anonymous locals, nested shadowing, capture
-  diagnostics, and hoisted erased calls.
+  anonymous local factories can shadow member or outer-block factories.
+  Capturing `this` or `super` remains diagnosed until receiver closure conversion
+  is available. Native coverage exercises anonymous member factories, named and
+  anonymous locals, a two-level capture/evidence chain, nested shadowing, receiver
+  capture diagnostics, and hoisted erased calls.
 - Scala 3 method context bounds preserve each bound type and optional `as`
   witness name on the type-parameter AST. Unnamed bounds such as `[A: Show]`
   desugar to stable hidden `using` parameters, while
@@ -946,8 +947,8 @@ Current scaffold status:
   precede an existing trailing `using` clause in accordance with Scala 3
   placement rules, then reuse ordinary contextual inference, recursive
   given-factory materialization, forwarding, and erased call lowering. The same
-  representation supports named witnesses in member and capture-free local
-  parameterized givens. Focused native coverage exercises value-inferred
+  representation supports named witnesses in member and local parameterized
+  givens. Focused native coverage exercises value-inferred
   method bounds, named aggregate bounds, explicit contextual clauses, member
   and local given factories, missing evidence, duplicate and malformed names,
   NIR signatures, and runtime witness access. Trait type-parameter context
@@ -1128,9 +1129,8 @@ Current scaffold status:
   non-invertible generic parent mappings, tuple-value operations, compile-time
   tuple recursion, and higher-kinded derivation remain later derivation
   milestones.
-  Capturing local parameterized givens, general derivation from nested
-  declarations, compile-time `summonFrom`, and Scala 2 `implicit` syntax also
-  remain later milestones.
+  General derivation from nested declarations, compile-time `summonFrom`, and
+  Scala 2 `implicit` syntax also remain later milestones.
 - Postfix type application now supports typed `value.isInstanceOf[Target]` and
   checked `value.asInstanceOf[Target]` for known classes, traits, and objects.
   NIR uses dedicated `is-instance-of[T]` and `as-instance-of[T]` values; verification
