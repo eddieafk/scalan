@@ -3552,6 +3552,9 @@ std::string Typechecker::desugarGivenImportUserInfix(
     std::size_t start = 0;
     std::size_t end = 0;
     std::string name;
+    int precedence = 0;
+    bool rightAssociative = false;
+    bool builtIn = false;
   };
 
   const auto isIdentifierStart = [](char ch) {
@@ -3568,6 +3571,72 @@ std::string Typechecker::desugarGivenImportUserInfix(
       ++start;
     }
     return start;
+  };
+  const auto isSymbolicPart = [](char ch) {
+    switch (ch) {
+    case '!':
+    case '#':
+    case '%':
+    case '&':
+    case '*':
+    case '+':
+    case '-':
+    case '/':
+    case ':':
+    case '<':
+    case '=':
+    case '>':
+    case '?':
+    case '\\':
+    case '^':
+    case '|':
+    case '~':
+      return true;
+    default:
+      return false;
+    }
+  };
+  const auto precedence = [&](std::string_view name) {
+    if (name.size() > 1 && name.back() == '=' && name.front() != '=' &&
+        name != "<=" && name != ">=" && name != "!=") {
+      return 0;
+    }
+    const char first = name.front();
+    if (isIdentifierStart(first)) {
+      return 1;
+    }
+    switch (first) {
+    case '|':
+      return 2;
+    case '^':
+      return 3;
+    case '&':
+      return 4;
+    case '=':
+    case '!':
+      return 5;
+    case '<':
+    case '>':
+      return 6;
+    case ':':
+      return 7;
+    case '+':
+    case '-':
+      return 8;
+    case '*':
+    case '/':
+    case '%':
+      return 9;
+    default:
+      return 10;
+    }
+  };
+  const auto isBinaryTypeConstructor = [&](const std::string& name) {
+    const SymbolInfo* symbol = typeSymbolForDeclaredName(name, &scope);
+    return symbol != nullptr &&
+           (symbol->kind == AstDeclarationKind::Class ||
+            symbol->kind == AstDeclarationKind::Trait) &&
+           symbol->typeParameters.size() == 2;
   };
 
   std::function<std::string(std::string)> desugar;
@@ -3639,96 +3708,87 @@ std::string Typechecker::desugarGivenImportUserInfix(
         ++i;
         continue;
       }
-      if (bracketDepth != 0 || parenthesisDepth != 0 ||
-          !isIdentifierStart(source[i])) {
+      if (bracketDepth != 0 || parenthesisDepth != 0) {
         ++i;
         continue;
       }
 
-      const std::size_t start = i++;
-      while (i < source.size() && isIdentifierPart(source[i])) {
+      const bool alphanumeric = isIdentifierStart(source[i]);
+      const bool symbolic = isSymbolicPart(source[i]);
+      if (!alphanumeric && !symbolic) {
         ++i;
-      }
-      const std::string name = source.substr(start, i - start);
-      if ((start != 0 && source[start - 1] == '.') ||
-          (i < source.size() && source[i] == '.')) {
         continue;
       }
-      const SymbolInfo* symbol = typeSymbolForDeclaredName(name, &scope);
-      if (symbol == nullptr ||
-          (symbol->kind != AstDeclarationKind::Class &&
-           symbol->kind != AstDeclarationKind::Trait) ||
-          symbol->typeParameters.size() != 2) {
+      const std::size_t start = i++;
+      if (alphanumeric) {
+        while (i < source.size() && isIdentifierPart(source[i])) {
+          ++i;
+        }
+      } else {
+        while (i < source.size() && isSymbolicPart(source[i])) {
+          ++i;
+        }
+      }
+      const std::string name = source.substr(start, i - start);
+      if (alphanumeric &&
+          ((start != 0 && source[start - 1] == '.') ||
+           (i < source.size() && source[i] == '.'))) {
+        continue;
+      }
+      const bool builtIn = name == "|" || name == "&";
+      if (!builtIn && !isBinaryTypeConstructor(name)) {
         continue;
       }
       const std::size_t after = nextNonSpace(source, i);
       if (start == 0 && after < source.size() && source[after] == '[') {
         continue;
       }
-      operators.push_back(OperatorToken{start, i, name});
+      operators.push_back(OperatorToken{start, i, name, precedence(name),
+                                        name.ends_with(':'), builtIn});
     }
 
     if (!operators.empty()) {
-      const OperatorToken& operation = operators.back();
+      int lowestPrecedence = operators.front().precedence;
+      for (const OperatorToken& operation : operators) {
+        lowestPrecedence = std::min(lowestPrecedence, operation.precedence);
+      }
+      bool rightAssociative = false;
+      for (const OperatorToken& operation : operators) {
+        if (operation.precedence == lowestPrecedence) {
+          rightAssociative = operation.rightAssociative;
+          break;
+        }
+      }
+      for (const OperatorToken& operation : operators) {
+        if (operation.precedence == lowestPrecedence &&
+            operation.rightAssociative != rightAssociative) {
+          *malformed = true;
+          return source;
+        }
+      }
+
+      const OperatorToken* selected = nullptr;
+      for (const OperatorToken& operation : operators) {
+        if (operation.precedence != lowestPrecedence) {
+          continue;
+        }
+        if (selected == nullptr || !rightAssociative) {
+          selected = &operation;
+        }
+      }
+      const OperatorToken& operation = *selected;
       const std::string left = trim(source.substr(0, operation.start));
       const std::string right = trim(source.substr(operation.end));
       if (left.empty() || right.empty()) {
-        *malformed = true;
+        if (!operation.builtIn) {
+          *malformed = true;
+        }
         return source;
+      }
+      if (operation.builtIn) {
+        return desugar(left) + operation.name + desugar(right);
       }
       return operation.name + "[" + desugar(left) + "," + desugar(right) + "]";
-    }
-
-    const auto rewriteBuiltIn = [&](char operation) -> std::optional<std::string> {
-      std::size_t squareDepth = 0;
-      std::size_t roundDepth = 0;
-      std::vector<std::string> operands;
-      std::size_t operandStart = 0;
-      for (std::size_t i = 0; i <= source.size(); ++i) {
-        if (i != source.size()) {
-          if (source[i] == '[') {
-            ++squareDepth;
-          } else if (source[i] == ']') {
-            --squareDepth;
-          } else if (source[i] == '(') {
-            ++roundDepth;
-          } else if (source[i] == ')') {
-            --roundDepth;
-          }
-        }
-        if (i != source.size() &&
-            (source[i] != operation || squareDepth != 0 || roundDepth != 0)) {
-          continue;
-        }
-        if (i != source.size() || !operands.empty()) {
-          operands.push_back(source.substr(operandStart, i - operandStart));
-          operandStart = i + 1;
-        }
-      }
-      if (operands.empty()) {
-        return std::nullopt;
-      }
-      if (std::any_of(operands.begin(), operands.end(),
-                      [](const std::string& operand) {
-                        return trim(operand).empty();
-                      })) {
-        return source;
-      }
-      std::string rewritten;
-      for (std::size_t i = 0; i < operands.size(); ++i) {
-        if (i != 0) {
-          rewritten += operation;
-        }
-        rewritten += desugar(operands[i]);
-      }
-      return rewritten;
-    };
-    if (const auto unionType = rewriteBuiltIn('|'); unionType.has_value()) {
-      return *unionType;
-    }
-    if (const auto intersectionType = rewriteBuiltIn('&');
-        intersectionType.has_value()) {
-      return *intersectionType;
     }
 
     std::size_t open = std::string::npos;

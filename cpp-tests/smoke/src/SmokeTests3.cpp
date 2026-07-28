@@ -209,6 +209,16 @@ infix trait Relates[A, B] {
 }
 class RelatesValue[A, B](val label: String) extends Relates[A, B]
 
+trait +>[A, B] {
+  val label: String
+}
+class PlusArrowValue[A, B](val label: String) extends +>[A, B]
+
+trait *:[A, B] {
+  val label: String
+}
+class StarColonValue[A, B](val label: String) extends *:[A, B]
+
 trait PairNamed[A, B] {
   val name: String
   val value: B
@@ -365,6 +375,39 @@ object UserInfixGivenImportProviders {
       Relates[ImportCat, ImportAnimal]]("user-infix-right-chain")
 }
 
+object SymbolicInfixGivenImportProviders {
+  given plusLeft:
+      +>[+>[ImportDog, ImportCat], ImportAnimal] =
+    new PlusArrowValue[
+      +>[ImportDog, ImportCat],
+      ImportAnimal]("symbolic-left-chain")
+  given starRight:
+      *:[ImportDog, *:[ImportCat, ImportAnimal]] =
+    new StarColonValue[
+      ImportDog,
+      *:[ImportCat, ImportAnimal]]("symbolic-right-chain")
+  given plusThenStar:
+      +>[ImportDog, *:[ImportCat, ImportAnimal]] =
+    new PlusArrowValue[
+      ImportDog,
+      *:[ImportCat, ImportAnimal]]("symbolic-precedence-right")
+  given starThenPlus:
+      +>[*:[ImportDog, ImportCat], ImportAnimal] =
+    new PlusArrowValue[
+      *:[ImportDog, ImportCat],
+      ImportAnimal]("symbolic-precedence-left")
+  given groupedStar:
+      *:[*:[ImportDog, ImportCat], ImportAnimal] =
+    new StarColonValue[
+      *:[ImportDog, ImportCat],
+      ImportAnimal]("symbolic-grouped")
+  given reversed:
+      +>[ImportAnimal, ImportDog] =
+    new PlusArrowValue[
+      ImportAnimal,
+      ImportDog]("must-not-import")
+}
+
 import GivenImportProviders.given
 import StarImportProviders.*
 import CombinedImportProviders.{given, *}
@@ -386,6 +429,13 @@ import UserInfixGivenImportProviders.{
   given ? Relates ImportRock,
   given ImportDog Relates ImportCat Relates ImportAnimal,
   given ImportDog Relates (ImportCat Relates ImportAnimal)
+}
+import SymbolicInfixGivenImportProviders.{
+  given ImportDog +> ImportCat +> ImportAnimal,
+  given ImportDog *: ImportCat *: ImportAnimal,
+  given ImportDog +> ImportCat *: ImportAnimal,
+  given ImportDog *: ImportCat +> ImportAnimal,
+  given (ImportDog *: ImportCat) *: ImportAnimal
 }
 
 object Main {
@@ -473,6 +523,12 @@ object Main {
     imported.label
 
   def userInfixName[A, B]()(using imported: Relates[A, B]): String =
+    imported.label
+
+  def plusOperatorName[A, B]()(using imported: +>[A, B]): String =
+    imported.label
+
+  def starColonOperatorName[A, B]()(using imported: *:[A, B]): String =
     imported.label
 
   def localLegacyContextName: String = {
@@ -736,6 +792,19 @@ object Main {
       userInfixName[Relates[ImportDog, ImportCat], ImportAnimal]())
     println(
       userInfixName[ImportDog, Relates[ImportCat, ImportAnimal]]())
+    println(plusOperatorName[+>[ImportDog, ImportCat], ImportAnimal]())
+    println(starColonOperatorName[
+      ImportDog,
+      *:[ImportCat, ImportAnimal]]())
+    println(plusOperatorName[
+      ImportDog,
+      *:[ImportCat, ImportAnimal]]())
+    println(plusOperatorName[
+      *:[ImportDog, ImportCat],
+      ImportAnimal]())
+    println(starColonOperatorName[
+      *:[ImportDog, ImportCat],
+      ImportAnimal]())
     println(contextName())
     println(forwardedContextName[Int]())
     println(repeatedContextName())
@@ -938,6 +1007,8 @@ class Sibling extends Parent
 trait Marker[A]
 infix trait Relation[A, B]
 infix trait UnaryRelation[A]
+trait +[A, B]
+trait +:[A, B]
 object Providers {
   given childMarker: Marker[Child] = null
   given parentMarker: Marker[Parent] = null
@@ -948,6 +1019,7 @@ import Providers.given Marker[? >: Child <: Parent]
 import Providers.given Marker[? >: Parent <: Child]
 import Providers.{given Parent |, *}
 import Providers.{given Child Relation, *}
+import Providers.{given Child + Parent +: Sibling, *}
 
 object Main {
   def requireMarker[A]()(using marker: Marker[A]): String = "marker"
@@ -1090,6 +1162,9 @@ object Main {
               "grouped-left-tagged\ngrouped-right-tagged\n"
               "user-infix\nuser-infix-wildcard\n"
               "user-infix-left-chain\nuser-infix-right-chain\n"
+              "symbolic-left-chain\nsymbolic-right-chain\n"
+              "symbolic-precedence-right\nsymbolic-precedence-left\n"
+              "symbolic-grouped\n"
               "context-int\n"
               "context-int\ncontext-int:context-int\ncontext-int-string\n"
               "context-int-string\nexpected-context\ncontext-int-string\n"
@@ -1178,6 +1253,9 @@ object Main {
       contains(invalidFilteredGivenImport.diagnosticsText,
                "malformed user-defined infix type in given import filter: "
                "Child Relation") &&
+      contains(invalidFilteredGivenImport.diagnosticsText,
+               "malformed user-defined infix type in given import filter: "
+               "Child + Parent +: Sibling") &&
       contains(invalidFilteredGivenImport.diagnosticsText,
                "infix class or trait requires exactly two type parameters") &&
       !invalidNestedDerivation.ok &&
@@ -1416,6 +1494,29 @@ object Main {
       !contains(result.nirText,
                 "call %demo.qualifiedcases.UserInfixGivenImportProviders."
                 "animalDog()") &&
+      contains(result.nirText,
+               "call %plusOperatorName(call "
+               "%demo.qualifiedcases.SymbolicInfixGivenImportProviders."
+               "plusLeft())") &&
+      contains(result.nirText,
+               "call %starColonOperatorName(call "
+               "%demo.qualifiedcases.SymbolicInfixGivenImportProviders."
+               "starRight())") &&
+      contains(result.nirText,
+               "call %plusOperatorName(call "
+               "%demo.qualifiedcases.SymbolicInfixGivenImportProviders."
+               "plusThenStar())") &&
+      contains(result.nirText,
+               "call %plusOperatorName(call "
+               "%demo.qualifiedcases.SymbolicInfixGivenImportProviders."
+               "starThenPlus())") &&
+      contains(result.nirText,
+               "call %starColonOperatorName(call "
+               "%demo.qualifiedcases.SymbolicInfixGivenImportProviders."
+               "groupedStar())") &&
+      !contains(result.nirText,
+                "call %demo.qualifiedcases."
+                "SymbolicInfixGivenImportProviders.reversed()") &&
       contains(result.nirText, "define @demo.qualifiedcases.Main.contextName : "
                                "(demo.qualifiedcases.Named)String") &&
       contains(result.nirText, "ret String call %contextName(%named)") &&

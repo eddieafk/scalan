@@ -82,8 +82,8 @@ build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
   cpp-examples/VarianceAndInheritance.scala
 
 # Compile ranked/recursive contextual evidence, bounded, union/intersection,
-# and user-defined infix Scala 3 `given` imports, interoperable `given`/`using`
-# and legacy `implicit` syntax, and generic `derives` clauses.
+# and alphanumeric/symbolic infix Scala 3 `given` imports, interoperable
+# `given`/`using` and legacy `implicit` syntax, and generic `derives` clauses.
 build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
   --output /tmp/contextual-abstractions \
   cpp-examples/ContextualAbstractions.scala

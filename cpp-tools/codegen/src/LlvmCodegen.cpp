@@ -335,12 +335,18 @@ std::string defaultValue(const std::string& type) {
 }
 
 std::string sanitizeIdentifier(std::string_view text) {
+  constexpr char hex[] = "0123456789abcdef";
   std::string sanitized;
   for (char ch : text) {
     const unsigned char byte = static_cast<unsigned char>(ch);
     if (std::isalnum(byte) != 0 || ch == '_') {
       sanitized.push_back(ch);
+    } else if (ch == '.' || ch == '$') {
+      sanitized.push_back('_');
     } else {
+      sanitized += "_x";
+      sanitized.push_back(hex[byte >> 4]);
+      sanitized.push_back(hex[byte & 0x0f]);
       sanitized.push_back('_');
     }
   }

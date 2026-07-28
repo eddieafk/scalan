@@ -158,7 +158,12 @@ std::vector<Token> Lexer::lex(support::SourceId source) {
       emitToken(makeToken(TokenKind::Semicolon, start, 1, ";"));
       break;
     case ':':
-      emitToken(makeToken(TokenKind::Colon, start, 1, ":"));
+      if (index < text_.size() && isOperatorChar(text_[index])) {
+        --index;
+        emitToken(lexOperator(index));
+      } else {
+        emitToken(makeToken(TokenKind::Colon, start, 1, ":"));
+      }
       break;
     case ',':
       emitToken(makeToken(TokenKind::Comma, start, 1, ","));
@@ -682,7 +687,12 @@ std::vector<Token> Lexer::lexInterpolationExpression(std::size_t& index) const {
       emitToken(makeToken(TokenKind::Semicolon, start, 1, ";"));
       break;
     case ':':
-      emitToken(makeToken(TokenKind::Colon, start, 1, ":"));
+      if (index < text_.size() && isOperatorChar(text_[index])) {
+        --index;
+        emitToken(lexOperator(index));
+      } else {
+        emitToken(makeToken(TokenKind::Colon, start, 1, ":"));
+      }
       break;
     case ',':
       emitToken(makeToken(TokenKind::Comma, start, 1, ","));
@@ -791,6 +801,10 @@ Token Lexer::lexCharOrSymbol(std::size_t& index) const {
 Token Lexer::lexOperator(std::size_t& index) const {
   const std::size_t start = index;
   while (index < text_.size() && isOperatorChar(text_[index])) {
+    if (text_[index] == ':' && index == start + 1 &&
+        (text_[start] == '<' || text_[start] == '>')) {
+      break;
+    }
     if (text_[index] == '=' && index + 1 < text_.size() && text_[index + 1] == '>') {
       break;
     }
@@ -943,6 +957,7 @@ bool Lexer::isOperatorChar(char ch) {
   case '^':
   case '|':
   case '~':
+  case ':':
     return true;
   default:
     return false;

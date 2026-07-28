@@ -10,10 +10,12 @@ class DerivationSeed(val prefix: String)
 class TypeName[A](val name: String)
 trait PreferredTypeName
 infix trait ImportRelation[A, B]
+trait *:[A, B]
 class PreferredDogTypeName(name: String)
     extends TypeName[Dog](name)
     with PreferredTypeName
     with ImportRelation[Dog, PreferredTypeName]
+    with *:[Dog, PreferredTypeName]
 class ContextPair[A, B](val name: String, val value: B)
 class ContextSeed[A](val label: String)
 class ContextIntermediate[A](val label: String)
@@ -208,7 +210,7 @@ object LegacyContextualImports {
   val ordinaryLabel: String = "not-contextual"
 }
 
-import LegacyContextualImports.given (Dog ImportRelation PreferredTypeName) & TypeName[? <: ContextualImportTarget] & PreferredTypeName
+import LegacyContextualImports.given (Dog ImportRelation PreferredTypeName) & Dog *: PreferredTypeName & TypeName[? <: ContextualImportTarget] & PreferredTypeName
 
 object ContextualAbstractions {
   given dogShow: Show[Dog] = new DogShow("dog:")

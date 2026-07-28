@@ -356,7 +356,10 @@ AstDeclaration Parser::parseObjectLike(AstDeclarationKind kind, const Token& key
   declaration.kind = kind;
   declaration.span = keyword.span;
 
-  if (!match(TokenKind::Identifier)) {
+  const bool acceptsSymbolicName =
+      kind == AstDeclarationKind::Class || kind == AstDeclarationKind::Trait;
+  if (!match(TokenKind::Identifier) &&
+      !(acceptsSymbolicName && match(TokenKind::Operator))) {
     diagnostics_.error(peek().span, "expected declaration name");
     synchronize();
     return declaration;

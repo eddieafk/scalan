@@ -1207,8 +1207,16 @@ Current scaffold status:
   reuse applied-filter matching. The desugaring also composes beneath built-in
   intersection/union filters and nested applied arguments. Runtime and NIR
   coverage verifies exact, wildcard, left-chain, right-grouped, malformed, and
-  non-selected cases. Symbolic user operators, right-associative `:` operators,
-  generic infix type aliases, and whole-program intersection/union type
+  non-selected cases.
+- Symbolic user-defined infix class and trait constructors now participate in
+  the same given-import filtering. Operator precedence follows the leading
+  character categories used by Scala term operators, operators ending in `:`
+  associate to the right, parentheses override grouping, and mixed
+  associativity at one precedence is rejected. Symbolic declaration names are
+  preserved through collision-safe LLVM identifier escaping. Runtime and NIR
+  coverage verifies left and right chains, both mixed-precedence directions,
+  explicit grouping, non-selected exclusion, and malformed associativity.
+  Generic infix type aliases and whole-program intersection/union type
   representation remain later type-system slices.
 - Full inline call-site specialization remains a later milestone.
 - Postfix type application now supports typed `value.isInstanceOf[Target]` and
