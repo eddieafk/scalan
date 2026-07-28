@@ -1143,8 +1143,22 @@ Current scaffold status:
   non-invertible generic parent mappings, tuple-value operations, compile-time
   tuple recursion, and higher-kinded derivation remain later derivation
   milestones.
-  General derivation from nested declarations, full inline call-site
-  specialization, and Scala 2 `implicit` syntax also remain later milestones.
+  Deriving classes and sealed traits may themselves now be nested to arbitrary
+  depth beneath stable objects. Companion discovery preserves distinct nested
+  type/module symbols, generated product and sum implementations remain
+  compiler-private package declarations, and stored mirror/type-class evidence
+  is attached to an existing nested companion or to a generated companion under
+  the same enclosing object. Qualified type paths keep resolving the type side
+  while term paths and deeper case paths traverse the companion module. NIR
+  emission uses the frontend's authoritative nested symbol names, preserving
+  companion `$` owners through fields, accessors, constructors, and module
+  initialization. Product and sum examples plus optimized native coverage
+  exercise monomorphic and generic products, existing and generated companions,
+  singleton/class sum children, metadata, evidence identity, and qualified
+  construction. A focused diagnostic rejects `derives` declarations owned by a
+  class or trait because those paths are instance-dependent rather than stable.
+  Full inline call-site specialization and Scala 2 `implicit` syntax remain
+  later milestones.
 - Postfix type application now supports typed `value.isInstanceOf[Target]` and
   checked `value.asInstanceOf[Target]` for known classes, traits, and objects.
   NIR uses dedicated `is-instance-of[T]` and `as-instance-of[T]` values; verification

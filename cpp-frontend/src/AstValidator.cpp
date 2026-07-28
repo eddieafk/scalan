@@ -24,9 +24,9 @@ std::string parameterName(const std::string& parameter) {
   return name;
 }
 
-bool validateParameterNames(
-    const std::vector<std::string>& parameters,
-    const support::SourceSpan& span, support::DiagnosticEngine& diagnostics) {
+bool validateParameterNames(const std::vector<std::string>& parameters,
+                            const support::SourceSpan& span,
+                            support::DiagnosticEngine& diagnostics) {
   bool ok = true;
   std::unordered_set<std::string> parameterNames;
   for (const std::string& parameter : parameters) {
@@ -54,13 +54,13 @@ bool AstValidator::validate(const AstModule& module,
     }
   }
 
-  ok = validateScope(module.declarations, diagnostics, true) && ok;
+  ok = validateScope(module.declarations, diagnostics, true, true) && ok;
   return ok;
 }
 
 bool AstValidator::validateScope(const std::vector<AstDeclaration>& declarations,
                                  support::DiagnosticEngine& diagnostics,
-                                 bool isTopLevel) const {
+                                 bool isTopLevel, bool allowsCompanionPair) const {
   bool ok = true;
   std::unordered_map<std::string, unsigned> names;
 
@@ -78,7 +78,7 @@ bool AstValidator::validateScope(const std::vector<AstDeclaration>& declarations
                                   : 4U;
         unsigned& seen = names[declaration.name];
         const bool companionPair =
-            isTopLevel && (seen | kind) == 3U && (seen & kind) == 0U;
+            allowsCompanionPair && (seen | kind) == 3U && (seen & kind) == 0U;
         if (seen != 0U && !companionPair) {
           diagnostics.error(declaration.span,
                             "duplicate declaration in the same scope: " +
@@ -89,7 +89,9 @@ bool AstValidator::validateScope(const std::vector<AstDeclaration>& declarations
       }
     }
 
-    ok = validateDeclaration(declaration, diagnostics, isTopLevel) && ok;
+    ok = validateDeclaration(declaration, diagnostics, isTopLevel,
+                             allowsCompanionPair) &&
+         ok;
   }
 
   return ok;
@@ -97,7 +99,7 @@ bool AstValidator::validateScope(const std::vector<AstDeclaration>& declarations
 
 bool AstValidator::validateDeclaration(const AstDeclaration& declaration,
                                        support::DiagnosticEngine& diagnostics,
-                                       bool isTopLevel) const {
+                                       bool isTopLevel, bool hasStableOwner) const {
   bool ok = true;
   if (declaration.isSealed && declaration.kind != AstDeclarationKind::Class &&
       declaration.kind != AstDeclarationKind::Trait) {
@@ -145,6 +147,13 @@ bool AstValidator::validateDeclaration(const AstDeclaration& declaration,
     diagnostics.error(declaration.span,
                       "derives clauses are only supported on classes, traits, and "
                       "objects");
+    ok = false;
+  }
+  if (!declaration.derivedTypes.empty() && !isTopLevel && !hasStableOwner) {
+    diagnostics.error(
+        declaration.span,
+        "derives declarations nested in classes or traits are not supported; "
+        "move the declaration into a stable object");
     ok = false;
   }
   std::unordered_set<std::string> derivedTypeNames;
@@ -228,7 +237,7 @@ bool AstValidator::validateDeclaration(const AstDeclaration& declaration,
                         "class-like declaration cannot have an initializer");
       ok = false;
     }
-    ok = validateScope(declaration.members, diagnostics, false) && ok;
+    ok = validateScope(declaration.members, diagnostics, false, true) && ok;
     break;
   case AstDeclarationKind::Trait:
     if (declaration.hasInitializer) {
@@ -241,7 +250,7 @@ bool AstValidator::validateDeclaration(const AstDeclaration& declaration,
                         "constructor body statements are only supported in classes");
       ok = false;
     }
-    ok = validateScope(declaration.members, diagnostics, false) && ok;
+    ok = validateScope(declaration.members, diagnostics, false, false) && ok;
     break;
   case AstDeclarationKind::Class:
     if (declaration.hasInitializer) {
@@ -252,7 +261,7 @@ bool AstValidator::validateDeclaration(const AstDeclaration& declaration,
     for (const AstExpression& expression : declaration.constructorBody) {
       ok = validateExpression(expression, diagnostics) && ok;
     }
-    ok = validateScope(declaration.members, diagnostics, false) && ok;
+    ok = validateScope(declaration.members, diagnostics, false, false) && ok;
     break;
   case AstDeclarationKind::Type:
     if (isTopLevel) {

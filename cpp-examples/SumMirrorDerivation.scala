@@ -73,6 +73,14 @@ object Idle extends Signal
 class Active(val value: Int) extends Signal
 object Done extends Signal
 
+object StableSums {
+  sealed trait State derives Ordinal
+  object State {
+    object Ready extends State
+    class Failed(val code: Int) extends State
+  }
+}
+
 object SumMirrorDerivation {
   def ordinal[A](value: A)(using instance: Ordinal[A]): Int =
     instance.ordinal(value)
@@ -129,5 +137,7 @@ object SumMirrorDerivation {
     println(ordinal[Placed](new Before))
     println(ordinal[Placed](PlacedCases.Middle))
     println(ordinal[Placed](new After))
+    println(ordinal[StableSums.State](StableSums.State.Ready))
+    println(ordinal[StableSums.State](new StableSums.State.Failed(5)))
   }
 }

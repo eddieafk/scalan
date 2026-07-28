@@ -86,12 +86,12 @@ build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
   --output /tmp/contextual-abstractions \
   cpp-examples/ContextualAbstractions.scala
 
-# Compile product `Mirror` evidence, type metadata, and singleton field labels.
+# Compile top-level and stable-object-nested product `Mirror` derivation.
 build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
   --output /tmp/product-mirror-derivation \
   cpp-examples/ProductMirrorDerivation.scala
 
-# Compile source-ordered sum cases nested under arbitrary stable objects.
+# Compile source-ordered sums, including a deriving sum nested in a stable object.
 build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
   --output /tmp/sum-mirror-derivation \
   cpp-examples/SumMirrorDerivation.scala

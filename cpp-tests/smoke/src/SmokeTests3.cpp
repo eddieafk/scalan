@@ -81,6 +81,51 @@ object DeepMaybe {
   }
 }
 
+trait Rebuild[A] {
+  def rebuild(product: scala.Product): A
+}
+class DerivedRebuild[A](val mirror: scala.deriving.Mirror.ProductOf[A])
+    extends Rebuild[A] {
+  override def rebuild(product: scala.Product): A =
+    mirror.fromProduct(product)
+}
+class StringRebuild extends Rebuild[String] {
+  override def rebuild(product: scala.Product): String =
+    product.productElement(0).asInstanceOf[String]
+}
+object Rebuild {
+  given stringRebuild: Rebuild[String] = new StringRebuild
+  def derived[A](using mirror: scala.deriving.Mirror.ProductOf[A]): Rebuild[A] =
+    new DerivedRebuild[A](mirror)
+}
+
+class Product1(val first: Object) extends scala.Product {
+  override def productArity(): Int = 1
+  override def productElement(index: Int): Object = first
+}
+class Product2(val first: Object, val second: Object) extends scala.Product {
+  override def productArity(): Int = 2
+  override def productElement(index: Int): Object =
+    if (index == 0) first else second
+}
+
+object StableDerivation {
+  class Entry(val number: Int, val text: String) derives Rebuild
+  object Entry {
+    def companionMarker: Int = 41
+  }
+
+  object Models {
+    class Box[A](val value: A) derives Rebuild
+  }
+
+  sealed trait Status derives Ordinal
+  object Status {
+    object Ready extends Status
+    class Failed(val code: Int) extends Status
+  }
+}
+
 trait Named[A] {
   val name: String
 }
@@ -168,6 +213,9 @@ object Main {
 
   def ordinal[A](value: A)(using instance: Ordinal[A]): Int =
     instance.ordinal(value)
+
+  def rebuild[A](product: scala.Product)(using instance: Rebuild[A]): A =
+    instance.rebuild(product)
 
   def stopped(value: Event.Stopped): Event.Stopped = value
 
@@ -371,6 +419,27 @@ object Main {
       ordinal[DeepMaybe[String]](
         new DeepMaybe.Cases.Found[String]("nested")))
     println(new Command.Primary.Stop(9).code)
+    val nestedEntry: StableDerivation.Entry =
+      rebuild[StableDerivation.Entry](new Product2(21, "nested-product"))
+    println(nestedEntry.number)
+    println(nestedEntry.text)
+    println(StableDerivation.Entry.companionMarker)
+    println(
+      summon[Rebuild[StableDerivation.Entry]] ==
+        summon[Rebuild[StableDerivation.Entry]])
+    val nestedBox: StableDerivation.Models.Box[String] =
+      rebuild[StableDerivation.Models.Box[String]](
+        new Product1("nested-generic"))
+    println(nestedBox.value)
+    println(
+      summon[Rebuild[StableDerivation.Models.Box[String]]] !=
+        summon[Rebuild[StableDerivation.Models.Box[String]]])
+    println(
+      ordinal[StableDerivation.Status](
+        StableDerivation.Status.Ready))
+    println(
+      ordinal[StableDerivation.Status](
+        new StableDerivation.Status.Failed(5)))
     println(contextName())
     println(forwardedContextName[Int]())
     println(repeatedContextName())
@@ -521,6 +590,17 @@ object Main {
   val captured = capturedLocalFactory
 }
 )";
+  constexpr const char* invalidNestedDerivationSource =
+      R"(package demo.invalidnestedderivation
+
+trait Marker[A]
+object Marker {
+  def derived[A]: Marker[A] = null
+}
+class UnstableDerivationOwner {
+  class Nested derives Marker
+}
+)";
   constexpr const char* invalidSummonFromSyntaxSource =
       R"(package demo.invalidsummonfromsyntax
 
@@ -584,15 +664,18 @@ object Main {
   scalanative::support::DiagnosticEngine invalidDiagnostics;
   const scalanative::tools::build::BuildResult invalid = driver.buildSource(
       "InvalidScala3Incremental.scala", invalidSource, {}, invalidDiagnostics);
+  scalanative::support::DiagnosticEngine invalidNestedDerivationDiagnostics;
+  const scalanative::tools::build::BuildResult invalidNestedDerivation =
+      driver.buildSource("InvalidNestedDerivation.scala", invalidNestedDerivationSource,
+                         {}, invalidNestedDerivationDiagnostics);
   scalanative::support::DiagnosticEngine invalidContextBoundDiagnostics;
   const scalanative::tools::build::BuildResult invalidContextBound =
       driver.buildSource("InvalidContextBounds.scala", invalidContextBoundSource, {},
                          invalidContextBoundDiagnostics);
   scalanative::support::DiagnosticEngine invalidSummonFromSyntaxDiagnostics;
   const scalanative::tools::build::BuildResult invalidSummonFromSyntax =
-      driver.buildSource("InvalidSummonFromSyntax.scala",
-                         invalidSummonFromSyntaxSource, {},
-                         invalidSummonFromSyntaxDiagnostics);
+      driver.buildSource("InvalidSummonFromSyntax.scala", invalidSummonFromSyntaxSource,
+                         {}, invalidSummonFromSyntaxDiagnostics);
   scalanative::support::DiagnosticEngine invalidContextBoundSyntaxDiagnostics;
   const scalanative::tools::build::BuildResult invalidContextBoundSyntax =
       driver.buildSource("InvalidContextBoundSyntax.scala",
@@ -614,7 +697,9 @@ object Main {
 
   const bool valid =
       status == 0 &&
-      text == "0\n1\n0\n1\n7\n0\n1\n2\n0\n1\n9\ncontext-int\n"
+      text == "0\n1\n0\n1\n7\n0\n1\n2\n0\n1\n9\n"
+              "21\nnested-product\n41\ntrue\nnested-generic\ntrue\n0\n1\n"
+              "context-int\n"
               "context-int\ncontext-int:context-int\ncontext-int-string\n"
               "context-int-string\nexpected-context\ncontext-int-string\n"
               "generated:intermediate:seed-int\n"
@@ -667,6 +752,10 @@ object Main {
       contains(invalid.diagnosticsText,
                "capturing this or super in a local parameterized given is not "
                "supported yet") &&
+      !invalidNestedDerivation.ok &&
+      contains(invalidNestedDerivation.diagnosticsText,
+               "derives declarations nested in classes or traits are not "
+               "supported; move the declaration into a stable object") &&
       !invalidContextBound.ok &&
       contains(invalidContextBound.diagnosticsText,
                "context bounds are currently supported only on methods and classes") &&
@@ -747,6 +836,36 @@ object Main {
       contains(result.nirText, "new demo.qualifiedcases.Maybe$.Present") &&
       contains(result.nirText, "new demo.qualifiedcases.Command$.Primary.Stop") &&
       contains(result.nirText, "new demo.qualifiedcases.DeepMaybe$.Cases.Found") &&
+      contains(result.nirText, "module @demo.qualifiedcases.StableDerivation.Entry$ : "
+                               "@java.lang.Object") &&
+      contains(result.nirText, "field @demo.qualifiedcases.StableDerivation.Entry$."
+                               "$mirror$Product$type$field : "
+                               "scala.deriving.Mirror.ProductOf") &&
+      contains(result.nirText,
+               "module @demo.qualifiedcases.StableDerivation.Models.Box$ : "
+               "@java.lang.Object") &&
+      contains(result.nirText,
+               "define @demo.qualifiedcases.StableDerivation.Models.Box$."
+               "$mirror$Product$type : ()scala.deriving.Mirror.ProductOf") &&
+      contains(result.nirText,
+               "class @demo.qualifiedcases."
+               "$mirror$Product$demo$qualifiedcases$StableDerivation$Entry : "
+               "@scala.deriving.Mirror.ProductOf") &&
+      contains(result.nirText,
+               "$mirror$Product$demo$qualifiedcases$StableDerivation$Entry."
+               "MirroredElemTypes : scala.Tuple2 [ Int, String ]") &&
+      contains(result.nirText,
+               "$mirror$Product$demo$qualifiedcases$StableDerivation$Models$Box."
+               "MirroredElemTypes : scala.Tuple1 [ A ]") &&
+      contains(result.nirText,
+               "class @demo.qualifiedcases."
+               "$mirror$Sum$demo$qualifiedcases$StableDerivation$Status : "
+               "@scala.deriving.Mirror.SumOf") &&
+      contains(result.nirText,
+               "$mirror$Sum$demo$qualifiedcases$StableDerivation$Status."
+               "MirroredElemTypes : scala.Tuple2 [ "
+               "demo.qualifiedcases.StableDerivation.Status$.Ready, "
+               "demo.qualifiedcases.StableDerivation.Status$.Failed ]") &&
       contains(result.nirText, "define @demo.qualifiedcases.Main.contextName : "
                                "(demo.qualifiedcases.Named)String") &&
       contains(result.nirText, "ret String call %contextName(%named)") &&
@@ -776,32 +895,26 @@ object Main {
                                "demo.qualifiedcases.Generated") &&
       contains(result.nirText,
                "call %generatedName(call %demo.qualifiedcases.$local$") &&
-      contains(result.nirText,
-               ".captured : (String,demo.qualifiedcases.Seed)"
-               "demo.qualifiedcases.Generated") &&
-      contains(result.nirText,
-               ".capturedParameter : (String,demo.qualifiedcases.Seed)"
-               "demo.qualifiedcases.Generated") &&
+      contains(result.nirText, ".captured : (String,demo.qualifiedcases.Seed)"
+                               "demo.qualifiedcases.Generated") &&
+      contains(result.nirText, ".capturedParameter : (String,demo.qualifiedcases.Seed)"
+                               "demo.qualifiedcases.Generated") &&
       contains(result.nirText,
                ".capturedIntermediate : (String,demo.qualifiedcases.Seed)"
                "demo.qualifiedcases.Intermediate") &&
       contains(result.nirText,
                ".capturedGenerated : (String,demo.qualifiedcases.Intermediate)"
                "demo.qualifiedcases.Generated") &&
-      contains(result.nirText,
-               ".initializerScoped : (demo.qualifiedcases.Seed)"
-               "demo.qualifiedcases.Generated") &&
+      contains(result.nirText, ".initializerScoped : (demo.qualifiedcases.Seed)"
+                               "demo.qualifiedcases.Generated") &&
       !contains(result.nirText,
                 ".initializerScoped : (String,demo.qualifiedcases.Seed)") &&
-      contains(result.nirText,
-               ".captured(%prefix, call "
-               "%demo.qualifiedcases.Main.intSeed())") &&
-      contains(result.nirText,
-               ".capturedGenerated(%generatedPrefix, call "
-               "%demo.qualifiedcases.$local$") &&
-      contains(result.nirText,
-               ".capturedIntermediate(%intermediatePrefix, call "
-               "%demo.qualifiedcases.Main.intSeed())") &&
+      contains(result.nirText, ".captured(%prefix, call "
+                               "%demo.qualifiedcases.Main.intSeed())") &&
+      contains(result.nirText, ".capturedGenerated(%generatedPrefix, call "
+                               "%demo.qualifiedcases.$local$") &&
+      contains(result.nirText, ".capturedIntermediate(%intermediatePrefix, call "
+                               "%demo.qualifiedcases.Main.intSeed())") &&
       contains(result.nirText,
                "define @demo.qualifiedcases.Main.inferredContextBoundName : "
                "(Object,demo.qualifiedcases.Named)String") &&
@@ -867,9 +980,8 @@ object Main {
       contains(result.nirText,
                "define @demo.qualifiedcases.Main.summonFromContextParameter : "
                "(demo.qualifiedcases.Named)String") &&
-      contains(result.nirText,
-               "block(let %found : demo.qualifiedcases.Named = %named; "
-               "(\"summon-from-context:\" + %found.name))") &&
+      contains(result.nirText, "block(let %found : demo.qualifiedcases.Named = %named; "
+                               "(\"summon-from-context:\" + %found.name))") &&
       !contains(result.nirText, "\"summon-from-context-fallback\"") &&
       contains(result.nirText,
                "define @demo.qualifiedcases.Main.summonFromGenerated : ()String") &&
@@ -881,9 +993,8 @@ object Main {
       !contains(result.nirText, "\"summon-from-generated-fallback\"") &&
       contains(result.nirText,
                "class @demo.qualifiedcases.NamedContextBox : @java.lang.Object") &&
-      contains(result.nirText,
-               "field @demo.qualifiedcases.NamedContextBox.named : "
-               "demo.qualifiedcases.Named") &&
+      contains(result.nirText, "field @demo.qualifiedcases.NamedContextBox.named : "
+                               "demo.qualifiedcases.Named") &&
       contains(result.nirText,
                "define @demo.qualifiedcases.NamedContextBox.witnessName : "
                "(demo.qualifiedcases.NamedContextBox)String") &&
@@ -925,6 +1036,8 @@ object Main {
   return valid ? 0
                : fail("Scala 3 incremental smoke test failed (output='" + text +
                       "', invalid-diagnostics='" + invalid.diagnosticsText +
+                      "', invalid-nested-derivation-diagnostics='" +
+                      invalidNestedDerivation.diagnosticsText +
                       "', invalid-context-bound-diagnostics='" +
                       invalidContextBound.diagnosticsText +
                       "', invalid-summon-from-syntax-diagnostics='" +

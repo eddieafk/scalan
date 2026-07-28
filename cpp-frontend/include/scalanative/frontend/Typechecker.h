@@ -180,6 +180,10 @@ private:
                              const std::string& owner, Scope& scope);
   void collectSumMirrors(const std::vector<AstDeclaration>& declarations,
                          const std::string& owner, Scope& scope);
+  void collectSumMirrorsRecursive(const std::vector<AstDeclaration>& declarations,
+                                  const std::string& owner, Scope& scope,
+                                  const std::vector<AstDeclaration>& allDeclarations,
+                                  const std::string& allDeclarationsOwner);
   void collectDerivedGivens(const std::vector<AstDeclaration>& declarations,
                             const std::string& owner, const Scope& scope);
   void attachDerivedInstances(std::vector<TypedDeclaration>& declarations);

@@ -1703,15 +1703,16 @@ nir::Value materializeContextArgument(const frontend::TypedContextArgument& cont
   return expressionValueFor(argumentExpression, context);
 }
 
-std::size_t explicitParameterIndex(
-    std::size_t argumentIndex, const frontend::TypedDeclaration* target,
-    const frontend::TypedContextApplication* contextApplication) {
+std::size_t
+explicitParameterIndex(std::size_t argumentIndex,
+                       const frontend::TypedDeclaration* target,
+                       const frontend::TypedContextApplication* contextApplication) {
   if (target == nullptr || contextApplication == nullptr) {
     return argumentIndex;
   }
   std::size_t ordinaryIndex = 0;
-  for (std::size_t parameterIndex = 0;
-       parameterIndex < target->parameterTypes.size(); ++parameterIndex) {
+  for (std::size_t parameterIndex = 0; parameterIndex < target->parameterTypes.size();
+       ++parameterIndex) {
     if (parameterIndex < target->contextualParameters.size() &&
         target->contextualParameters[parameterIndex]) {
       continue;
@@ -2115,20 +2116,17 @@ nir::Value valueFor(const frontend::AstExpression& expression,
       return scopedBodyValueFor(branch.children.front(), branchContext);
     }
 
-    const frontend::TypedContextArgument& contextual =
-        application->arguments.front();
+    const frontend::TypedContextArgument& contextual = application->arguments.front();
     std::vector<nir::Value> values;
     values.push_back(nir::localLetValue(
         branch.text, runtimeTypeName(contextual.type),
         materializeContextArgument(contextual, expression, context), branch.span));
     branchContext.localNames.insert(branch.text);
-    values.push_back(
-        scopedBodyValueFor(branch.children.front(), branchContext));
+    values.push_back(scopedBodyValueFor(branch.children.front(), branchContext));
     return nir::blockValue(std::move(values), expression.span);
   }
   case AstExpressionKind::SummonFromCase:
-    return nir::unknownValue("<summon-from-case-outside-summon-from>",
-                             expression.span);
+    return nir::unknownValue("<summon-from-case-outside-summon-from>", expression.span);
   case AstExpressionKind::Block:
     if (expression.children.empty()) {
       return nir::unitValue(expression.span);
@@ -2806,8 +2804,8 @@ nir::Value valueFor(const frontend::AstExpression& expression,
       std::vector<nir::Value> arguments;
       for (std::size_t i = 1; i < expression.children.size(); ++i) {
         nir::Value argument = expressionValueFor(expression.children[i], context);
-        const std::size_t parameterIndex = explicitParameterIndex(
-            i - 1, classDeclaration, contextApplication);
+        const std::size_t parameterIndex =
+            explicitParameterIndex(i - 1, classDeclaration, contextApplication);
         if (classDeclaration != nullptr &&
             parameterIndex < classDeclaration->parameterTypes.size()) {
           argument = boxForObjectStorage(
@@ -2827,15 +2825,12 @@ nir::Value valueFor(const frontend::AstExpression& expression,
               parameterIndex < classDeclaration->parameterTypes.size() &&
               runtimeTypeName(classDeclaration->parameterTypes[parameterIndex]) ==
                   "Object") {
-            if (const std::string primitive =
-                    boxedObjectTypeName(contextual.type.kind);
+            if (const std::string primitive = boxedObjectTypeName(contextual.type.kind);
                 !primitive.empty()) {
-              argument =
-                  nir::boxValue(primitive, std::move(argument), expression.span);
+              argument = nir::boxValue(primitive, std::move(argument), expression.span);
             }
           }
-          const std::size_t insertionIndex =
-              std::min(parameterIndex, arguments.size());
+          const std::size_t insertionIndex = std::min(parameterIndex, arguments.size());
           arguments.insert(arguments.begin() + insertionIndex, std::move(argument));
         }
       }
@@ -2901,8 +2896,7 @@ nir::Value valueFor(const frontend::AstExpression& expression,
             }
           }
         }
-        const std::size_t insertionIndex =
-            std::min(parameterIndex, arguments.size());
+        const std::size_t insertionIndex = std::min(parameterIndex, arguments.size());
         arguments.insert(arguments.begin() + insertionIndex, std::move(argument));
       }
     }
@@ -4202,10 +4196,11 @@ void NirEmitter::emitDeclaration(
     return;
   }
 
-  std::string globalName = owner.empty() ? (declaration.symbolName.empty()
-                                                ? qualify(module, declaration.name)
-                                                : declaration.symbolName)
-                                         : qualifyMember(owner, declaration.name);
+  std::string globalName =
+      declaration.symbolName.empty()
+          ? (owner.empty() ? qualify(module, declaration.name)
+                           : qualifyMember(owner, declaration.name))
+          : declaration.symbolName;
   const bool hasImplicitReceiver = ownerKind == frontend::AstDeclarationKind::Class ||
                                    ownerKind == frontend::AstDeclarationKind::Trait;
   const std::string receiverType = hasImplicitReceiver ? owner : std::string{};

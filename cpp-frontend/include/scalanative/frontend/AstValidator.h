@@ -13,13 +13,12 @@ public:
 private:
   [[nodiscard]] bool validateScope(const std::vector<AstDeclaration>& declarations,
                                    support::DiagnosticEngine& diagnostics,
-                                   bool isTopLevel) const;
+                                   bool isTopLevel, bool allowsCompanionPair) const;
   [[nodiscard]] bool validateDeclaration(const AstDeclaration& declaration,
                                          support::DiagnosticEngine& diagnostics,
-                                         bool isTopLevel) const;
+                                         bool isTopLevel, bool hasStableOwner) const;
   [[nodiscard]] bool validateExpression(const AstExpression& expression,
                                         support::DiagnosticEngine& diagnostics) const;
 };
 
 } // namespace scalanative::frontend
-

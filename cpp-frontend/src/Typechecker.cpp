@@ -942,14 +942,26 @@ standardDerivationDeclarations(const AstModule& module) {
       tupleArities.push_back(arity);
     }
   };
-  for (const AstDeclaration& declaration : module.declarations) {
-    if (declaration.kind != AstDeclarationKind::Class ||
-        declaration.derivedTypes.empty()) {
-      continue;
+  std::vector<const AstDeclaration*> derivationCandidates;
+  const std::function<void(const std::vector<AstDeclaration>&)>
+      collectDerivationCandidates =
+          [&](const std::vector<AstDeclaration>& declarations) {
+            for (const AstDeclaration& declaration : declarations) {
+              derivationCandidates.push_back(&declaration);
+              if (declaration.kind == AstDeclarationKind::Object) {
+                collectDerivationCandidates(declaration.members);
+              }
+            }
+          };
+  collectDerivationCandidates(module.declarations);
+  for (const AstDeclaration* declaration : derivationCandidates) {
+    if (declaration->kind == AstDeclarationKind::Class &&
+        !declaration->derivedTypes.empty()) {
+      addTupleArity(declaration->parameters.size());
     }
-    addTupleArity(declaration.parameters.size());
   }
-  for (const AstDeclaration& declaration : module.declarations) {
+  for (const AstDeclaration* declarationPointer : derivationCandidates) {
+    const AstDeclaration& declaration = *declarationPointer;
     if (declaration.kind != AstDeclarationKind::Trait || !declaration.isSealed ||
         declaration.derivedTypes.empty()) {
       continue;
@@ -1223,24 +1235,37 @@ TypedModule Typechecker::typecheck(const AstModule& module) {
   for (const auto& [owner, declaration] : derivationDeclarations) {
     collectDeclaration(declaration, owner, scope);
   }
-  std::unordered_map<std::string, unsigned> companionKinds;
-  for (const AstDeclaration& declaration : module.declarations) {
-    if (declaration.name.empty()) {
-      continue;
-    }
-    const std::string name = qualify(module.packageName, declaration.name);
-    if (declaration.kind == AstDeclarationKind::Class ||
-        declaration.kind == AstDeclarationKind::Trait) {
-      companionKinds[name] |= 1U;
-    } else if (declaration.kind == AstDeclarationKind::Object) {
-      companionKinds[name] |= 2U;
-    }
-  }
-  for (const auto& [name, kinds] : companionKinds) {
-    if (kinds == 3U) {
-      companionTypeNames_.insert(name);
-    }
-  }
+  const std::function<void(const std::vector<AstDeclaration>&, const std::string&)>
+      collectCompanionNames = [&](const std::vector<AstDeclaration>& declarations,
+                                  const std::string& owner) {
+        std::unordered_map<std::string, unsigned> companionKinds;
+        for (const AstDeclaration& declaration : declarations) {
+          if (declaration.name.empty()) {
+            continue;
+          }
+          const std::string name = qualify(owner, declaration.name);
+          if (declaration.kind == AstDeclarationKind::Class ||
+              declaration.kind == AstDeclarationKind::Trait) {
+            companionKinds[name] |= 1U;
+          } else if (declaration.kind == AstDeclarationKind::Object) {
+            companionKinds[name] |= 2U;
+          }
+        }
+        for (const auto& [name, kinds] : companionKinds) {
+          if (kinds == 3U) {
+            companionTypeNames_.insert(name);
+          }
+        }
+        for (const AstDeclaration& declaration : declarations) {
+          if (declaration.kind == AstDeclarationKind::Class ||
+              declaration.kind == AstDeclarationKind::Trait ||
+              declaration.kind == AstDeclarationKind::Object) {
+            collectCompanionNames(declaration.members,
+                                  declarationSymbolName(declaration, owner));
+          }
+        }
+      };
+  collectCompanionNames(module.declarations, module.packageName);
   for (const AstDeclaration& declaration : module.declarations) {
     if (declaration.kind == AstDeclarationKind::Class ||
         declaration.kind == AstDeclarationKind::Trait) {
@@ -1524,8 +1549,8 @@ TypedDeclaration Typechecker::typecheckDeclaration(const AstDeclaration& declara
   validateInheritedMemberCompatibility(declaration, typed.parentTypes,
                                        typed.parentTypeInfos, ownMemberScope);
   if (declaration.kind == AstDeclarationKind::Class) {
-    for (std::size_t parameterIndex = 0;
-         parameterIndex < typed.parameters.size(); ++parameterIndex) {
+    for (std::size_t parameterIndex = 0; parameterIndex < typed.parameters.size();
+         ++parameterIndex) {
       const std::string& parameter = typed.parameters[parameterIndex];
       const std::string name = parameterName(parameter);
       if (name.empty()) {
@@ -1536,9 +1561,8 @@ TypedDeclaration Typechecker::typecheckDeclaration(const AstDeclaration& declara
       field.name = name;
       field.symbolName = qualify(typed.symbolName, name);
       field.type = parameterType(parameter, &signatureScope);
-      field.isContextParameter =
-          parameterIndex < typed.contextualParameters.size() &&
-          typed.contextualParameters[parameterIndex];
+      field.isContextParameter = parameterIndex < typed.contextualParameters.size() &&
+                                 typed.contextualParameters[parameterIndex];
       field.isInstanceMember = true;
       ownMemberScope[name] = std::move(field);
 
@@ -1743,12 +1767,11 @@ TypedDeclaration Typechecker::typecheckDeclaration(const AstDeclaration& declara
     updated.isModuleMember = declaration.kind == AstDeclarationKind::Object &&
                              (typedMember.kind == AstDeclarationKind::Val ||
                               typedMember.kind == AstDeclarationKind::Var);
-    updated.isInstanceMember =
-        (declaration.kind == AstDeclarationKind::Class ||
-         declaration.kind == AstDeclarationKind::Trait) &&
-        (typedMember.kind == AstDeclarationKind::Def ||
-         typedMember.kind == AstDeclarationKind::Val ||
-         typedMember.kind == AstDeclarationKind::Var);
+    updated.isInstanceMember = (declaration.kind == AstDeclarationKind::Class ||
+                                declaration.kind == AstDeclarationKind::Trait) &&
+                               (typedMember.kind == AstDeclarationKind::Def ||
+                                typedMember.kind == AstDeclarationKind::Val ||
+                                typedMember.kind == AstDeclarationKind::Var);
     updated.hasImplementation =
         declarationHasImplementation(typedMember.kind, typedMember.hasInitializer);
     if ((declaration.kind == AstDeclarationKind::Class ||
@@ -1764,9 +1787,16 @@ TypedDeclaration Typechecker::typecheckDeclaration(const AstDeclaration& declara
               declaration.name + " member " + typedMember.name +
               " uses an unresolved abstract type in its runtime signature");
     }
-    memberScope[member.name] = updated;
-    ownMemberScope[member.name] = std::move(updated);
-    globalSymbols_[typedMember.symbolName] = memberScope[member.name];
+    const bool companionObjectMember =
+        typedMember.kind == AstDeclarationKind::Object &&
+        companionTypeNames_.contains(qualify(typed.symbolName, typedMember.name));
+    if (companionObjectMember) {
+      globalSymbols_[typedMember.symbolName] = std::move(updated);
+    } else {
+      memberScope[member.name] = updated;
+      ownMemberScope[member.name] = std::move(updated);
+      globalSymbols_[typedMember.symbolName] = memberScope[member.name];
+    }
     if ((declaration.kind == AstDeclarationKind::Class ||
          declaration.kind == AstDeclarationKind::Trait) &&
         typedMember.kind == AstDeclarationKind::Def && typedMember.hasInitializer) {
@@ -2392,6 +2422,15 @@ void Typechecker::collectProductMirrors(const std::vector<AstDeclaration>& decla
   const SymbolInfo mirrorOf = mirrorOfSymbol->second;
 
   for (const AstDeclaration& declaration : declarations) {
+    if (declaration.kind == AstDeclarationKind::Object) {
+      Scope nestedScope = scope;
+      const std::string nestedOwner = declarationSymbolName(declaration, owner);
+      if (auto members = memberScopes_.find(nestedOwner);
+          members != memberScopes_.end()) {
+        mergeScope(nestedScope, members->second);
+      }
+      collectProductMirrors(declaration.members, nestedOwner, nestedScope);
+    }
     if (declaration.kind != AstDeclarationKind::Class ||
         declaration.derivedTypes.empty()) {
       continue;
@@ -2582,9 +2621,9 @@ void Typechecker::collectProductMirrors(const std::vector<AstDeclaration>& decla
 
     mirrorDeclarations_.push_back(std::move(implementation));
     AstDeclaration& storedImplementation = mirrorDeclarations_.back();
-    collectDeclaration(storedImplementation, owner, scope);
+    collectDeclaration(storedImplementation, currentPackageName_, scope);
     const std::string implementationName =
-        declarationSymbolName(storedImplementation, owner);
+        declarationSymbolName(storedImplementation, currentPackageName_);
 
     const TypeInfo mirrorType = specializeResolvedTypeApplication(
                                     productOf, {derivingType}, declaration.span, false)
@@ -2637,6 +2676,13 @@ void Typechecker::collectProductMirrors(const std::vector<AstDeclaration>& decla
 
 void Typechecker::collectSumMirrors(const std::vector<AstDeclaration>& declarations,
                                     const std::string& owner, Scope& scope) {
+  collectSumMirrorsRecursive(declarations, owner, scope, declarations, owner);
+}
+
+void Typechecker::collectSumMirrorsRecursive(
+    const std::vector<AstDeclaration>& declarations, const std::string& owner,
+    Scope& scope, const std::vector<AstDeclaration>& allDeclarations,
+    const std::string& allDeclarationsOwner) {
   const auto sumOfSymbol = globalSymbols_.find("scala.deriving.Mirror.SumOf");
   const auto mirrorOfSymbol = globalSymbols_.find("scala.deriving.Mirror.Of");
   if (sumOfSymbol == globalSymbols_.end() || mirrorOfSymbol == globalSymbols_.end()) {
@@ -2646,6 +2692,16 @@ void Typechecker::collectSumMirrors(const std::vector<AstDeclaration>& declarati
   const SymbolInfo mirrorOf = mirrorOfSymbol->second;
 
   for (const AstDeclaration& declaration : declarations) {
+    if (declaration.kind == AstDeclarationKind::Object) {
+      Scope nestedScope = scope;
+      const std::string nestedOwner = declarationSymbolName(declaration, owner);
+      if (auto members = memberScopes_.find(nestedOwner);
+          members != memberScopes_.end()) {
+        mergeScope(nestedScope, members->second);
+      }
+      collectSumMirrorsRecursive(declaration.members, nestedOwner, nestedScope,
+                                 allDeclarations, allDeclarationsOwner);
+    }
     if (declaration.kind != AstDeclarationKind::Trait ||
         declaration.derivedTypes.empty()) {
       continue;
@@ -2767,7 +2823,7 @@ void Typechecker::collectSumMirrors(const std::vector<AstDeclaration>& declarati
             }
           }
         };
-    collectCandidates(declarations, owner);
+    collectCandidates(allDeclarations, allDeclarationsOwner);
     std::stable_sort(candidates.begin(), candidates.end(),
                      [](const SumCandidate& lhs, const SumCandidate& rhs) {
                        return lhs.declaration->span.start < rhs.declaration->span.start;
@@ -3002,9 +3058,9 @@ void Typechecker::collectSumMirrors(const std::vector<AstDeclaration>& declarati
 
     mirrorDeclarations_.push_back(std::move(implementation));
     AstDeclaration& storedImplementation = mirrorDeclarations_.back();
-    collectDeclaration(storedImplementation, owner, scope);
+    collectDeclaration(storedImplementation, currentPackageName_, scope);
     const std::string implementationName =
-        declarationSymbolName(storedImplementation, owner);
+        declarationSymbolName(storedImplementation, currentPackageName_);
 
     const TypeInfo mirrorType = specializeResolvedTypeApplication(
                                     sumOf, {derivingType}, declaration.span, false)
@@ -3110,14 +3166,12 @@ void Typechecker::collectDerivedGivens(const std::vector<AstDeclaration>& declar
       const TypeInfo derivingType =
           derivingTypeArguments.empty()
               ? target->second.type
-              : specializeResolvedTypeApplication(target->second,
-                                                  derivingTypeArguments,
+              : specializeResolvedTypeApplication(target->second, derivingTypeArguments,
                                                   declaration.span, false)
                     .type;
-      const TypeInfo expected =
-          specializeResolvedTypeApplication(*typeclass, {derivingType},
-                                            declaration.span, false)
-              .type;
+      const TypeInfo expected = specializeResolvedTypeApplication(
+                                    *typeclass, {derivingType}, declaration.span, false)
+                                    .type;
       auto companionMembers = memberScopes_.find(typeclass->symbolName + '$');
       if (companionMembers == memberScopes_.end()) {
         diagnostics_.error(declaration.span,
@@ -3223,7 +3277,9 @@ void Typechecker::collectDerivedGivens(const std::vector<AstDeclaration>& declar
       derivedGivens_[targetName].push_back(std::move(candidate));
     }
 
-    collectDerivedGivens(declaration.members, targetName, declarationScope);
+    if (declaration.kind == AstDeclarationKind::Object) {
+      collectDerivedGivens(declaration.members, targetName, declarationScope);
+    }
   }
 }
 
@@ -3260,8 +3316,22 @@ void Typechecker::attachDerivedInstances(std::vector<TypedDeclaration>& declarat
       companion.span = instance.member.span;
       companion.inferredType =
           TypeInfo{SimpleTypeKind::Object, instance.ownerSymbolName};
-      declarations.push_back(std::move(companion));
-      owner = &declarations.back();
+      const std::size_t enclosingSeparator = instance.ownerSymbolName.rfind('.');
+      TypedDeclaration* enclosing =
+          enclosingSeparator == std::string::npos
+              ? nullptr
+              : findDeclaration(findDeclaration, declarations,
+                                instance.ownerSymbolName.substr(0, enclosingSeparator));
+      if (enclosing != nullptr && enclosing->kind == AstDeclarationKind::Object) {
+        const std::size_t companionIndex = enclosing->members.size();
+        enclosing->members.push_back(std::move(companion));
+        enclosing->classBodyItems.push_back(
+            AstClassBodyItem{AstClassBodyItemKind::Declaration, companionIndex});
+        owner = &enclosing->members.back();
+      } else {
+        declarations.push_back(std::move(companion));
+        owner = &declarations.back();
+      }
     }
 
     const std::size_t memberIndex = owner->members.size();
@@ -3681,11 +3751,10 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
         (target == nullptr || (target->kind != AstDeclarationKind::Class &&
                                target->kind != AstDeclarationKind::Trait &&
                                target->kind != AstDeclarationKind::Object))) {
-      diagnostics_.error(
-          expression.span,
-          std::string(isTypeTest ? "isInstanceOf" : "asInstanceOf") +
-              " target must be a known class, trait, or object: " +
-              expression.declaredType);
+      diagnostics_.error(expression.span,
+                         std::string(isTypeTest ? "isInstanceOf" : "asInstanceOf") +
+                             " target must be a known class, trait, or object: " +
+                             expression.declaredType);
     }
     if (isTypeTest) {
       return TypeInfo{SimpleTypeKind::Boolean, "Boolean"};
@@ -4357,10 +4426,9 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
       }
 
       if (classSymbol != nullptr && classSymbol->typeParameters.empty()) {
-        const std::size_t contextualParameterCount =
-            static_cast<std::size_t>(std::count(
-                classSymbol->contextualParameters.begin(),
-                classSymbol->contextualParameters.end(), true));
+        const std::size_t contextualParameterCount = static_cast<std::size_t>(
+            std::count(classSymbol->contextualParameters.begin(),
+                       classSymbol->contextualParameters.end(), true));
         const std::size_t ordinaryParameterCount =
             classSymbol->parameterTypes.size() - contextualParameterCount;
         bool materializedContextArguments = false;
@@ -4371,8 +4439,7 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
           for (const TypedContextArgument& argument : contextArguments) {
             const std::size_t insertionIndex =
                 std::min(argument.parameterIndex, argumentTypes.size());
-            argumentTypes.insert(argumentTypes.begin() + insertionIndex,
-                                 argument.type);
+            argumentTypes.insert(argumentTypes.begin() + insertionIndex, argument.type);
           }
           recordContextApplication(expression.span, std::move(contextArguments));
           materializedContextArguments = true;
@@ -4395,10 +4462,9 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
                   : isAssignable(classSymbol->parameterTypes[i], argumentTypes[i]);
           if (!argumentConforms) {
             support::SourceSpan argumentSpan = expression.span;
-            const bool synthesized =
-                materializedContextArguments &&
-                i < classSymbol->contextualParameters.size() &&
-                classSymbol->contextualParameters[i];
+            const bool synthesized = materializedContextArguments &&
+                                     i < classSymbol->contextualParameters.size() &&
+                                     classSymbol->contextualParameters[i];
             if (!synthesized) {
               const std::size_t childIndex =
                   materializedContextArguments ? sourceArgumentIndex : i;
@@ -4406,11 +4472,11 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
                 argumentSpan = expression.children[childIndex + 1].span;
               }
             }
-            diagnostics_.error(argumentSpan,
-                               "constructor argument " + std::to_string(i) +
-                                   " of type " + argumentTypes[i].name +
-                                   " does not conform to field type " +
-                                   classSymbol->parameterTypes[i].name);
+            diagnostics_.error(argumentSpan, "constructor argument " +
+                                                 std::to_string(i) + " of type " +
+                                                 argumentTypes[i].name +
+                                                 " does not conform to field type " +
+                                                 classSymbol->parameterTypes[i].name);
           }
           if (!materializedContextArguments ||
               i >= classSymbol->contextualParameters.size() ||
@@ -4487,10 +4553,9 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
             break;
           }
         }
-        const std::size_t contextualParameterCount =
-            static_cast<std::size_t>(
-                std::count(inferenceTarget.contextualParameters.begin(),
-                           inferenceTarget.contextualParameters.end(), true));
+        const std::size_t contextualParameterCount = static_cast<std::size_t>(
+            std::count(inferenceTarget.contextualParameters.begin(),
+                       inferenceTarget.contextualParameters.end(), true));
         const std::size_t ordinaryParameterCount =
             inferenceTarget.parameterTypes.size() - contextualParameterCount;
         std::vector<SymbolInfo> contextualApplications;
@@ -4523,17 +4588,16 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
     }
 
     if (calleeSymbol != nullptr && calleeSymbol->typeParameters.empty()) {
-      const std::size_t contextualParameterCount =
-          static_cast<std::size_t>(std::count(
-              calleeSymbol->contextualParameters.begin(),
-              calleeSymbol->contextualParameters.end(), true));
+      const std::size_t contextualParameterCount = static_cast<std::size_t>(
+          std::count(calleeSymbol->contextualParameters.begin(),
+                     calleeSymbol->contextualParameters.end(), true));
       const std::size_t ordinaryParameterCount =
           calleeSymbol->parameterTypes.size() - contextualParameterCount;
       bool materializedContextArguments = false;
       if (contextualParameterCount != 0 &&
           argumentTypes.size() == ordinaryParameterCount) {
-        std::vector<TypedContextArgument> contextArguments = resolveContextArguments(
-            *calleeSymbol, 0, scope, expression.span);
+        std::vector<TypedContextArgument> contextArguments =
+            resolveContextArguments(*calleeSymbol, 0, scope, expression.span);
         for (const TypedContextArgument& argument : contextArguments) {
           const std::size_t insertionIndex =
               std::min(argument.parameterIndex, argumentTypes.size());
@@ -4560,10 +4624,9 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
                 : isAssignable(calleeSymbol->parameterTypes[i], argumentTypes[i]);
         if (!argumentConforms) {
           support::SourceSpan argumentSpan = expression.span;
-          const bool synthesized =
-              materializedContextArguments &&
-              i < calleeSymbol->contextualParameters.size() &&
-              calleeSymbol->contextualParameters[i];
+          const bool synthesized = materializedContextArguments &&
+                                   i < calleeSymbol->contextualParameters.size() &&
+                                   calleeSymbol->contextualParameters[i];
           if (!synthesized) {
             const std::size_t childIndex =
                 materializedContextArguments ? sourceArgumentIndex : i;
@@ -4571,11 +4634,10 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
               argumentSpan = expression.children[childIndex + 1].span;
             }
           }
-          diagnostics_.error(argumentSpan,
-                             "argument " + std::to_string(i) + " of type " +
-                                 argumentTypes[i].name +
-                                 " does not conform to parameter type " +
-                                 calleeSymbol->parameterTypes[i].name);
+          diagnostics_.error(argumentSpan, "argument " + std::to_string(i) +
+                                               " of type " + argumentTypes[i].name +
+                                               " does not conform to parameter type " +
+                                               calleeSymbol->parameterTypes[i].name);
         }
         if (!materializedContextArguments ||
             i >= calleeSymbol->contextualParameters.size() ||
@@ -4646,82 +4708,82 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
           collectCaptures =
               [&](const AstExpression& candidate,
                   const std::unordered_set<std::string>& locallyBoundNames) {
-            if (candidate.kind == AstExpressionKind::Block) {
-              std::unordered_set<std::string> blockBindings = locallyBoundNames;
-              for (const AstExpression& child : candidate.children) {
-                collectCaptures(child, blockBindings);
-                if (child.kind == AstExpressionKind::LocalDeclaration &&
-                    !child.text.empty()) {
-                  blockBindings.insert(child.text);
+                if (candidate.kind == AstExpressionKind::Block) {
+                  std::unordered_set<std::string> blockBindings = locallyBoundNames;
+                  for (const AstExpression& child : candidate.children) {
+                    collectCaptures(child, blockBindings);
+                    if (child.kind == AstExpressionKind::LocalDeclaration &&
+                        !child.text.empty()) {
+                      blockBindings.insert(child.text);
+                    }
+                  }
+                  return;
                 }
-              }
-              return;
-            }
-            if (candidate.kind == AstExpressionKind::Catch) {
-              std::unordered_set<std::string> catchBindings = locallyBoundNames;
-              if (!candidate.text.empty()) {
-                catchBindings.insert(candidate.text);
-              }
-              for (const AstExpression& child : candidate.children) {
-                collectCaptures(child, catchBindings);
-              }
-              return;
-            }
-            if (candidate.kind == AstExpressionKind::SummonFromCase) {
-              std::unordered_set<std::string> caseBindings = locallyBoundNames;
-              if (!candidate.text.empty() && candidate.text != "_") {
-                caseBindings.insert(candidate.text);
-              }
-              for (const AstExpression& child : candidate.children) {
-                collectCaptures(child, caseBindings);
-              }
-              return;
-            }
-            if (candidate.kind == AstExpressionKind::LocalDeclaration &&
-                candidate.localMethod != nullptr) {
-              std::unordered_set<std::string> methodBindings = locallyBoundNames;
-              methodBindings.insert(candidate.text);
-              for (const std::string& parameter :
-                   candidate.localMethod->parameters) {
-                const std::string name = parameterName(parameter);
-                if (!name.empty()) {
-                  methodBindings.insert(name);
+                if (candidate.kind == AstExpressionKind::Catch) {
+                  std::unordered_set<std::string> catchBindings = locallyBoundNames;
+                  if (!candidate.text.empty()) {
+                    catchBindings.insert(candidate.text);
+                  }
+                  for (const AstExpression& child : candidate.children) {
+                    collectCaptures(child, catchBindings);
+                  }
+                  return;
                 }
-              }
-              for (const AstExpression& child : candidate.children) {
-                collectCaptures(child, methodBindings);
-              }
-              return;
-            }
-            if (candidate.kind == AstExpressionKind::This ||
-                candidate.kind == AstExpressionKind::Super) {
-              if (reportedReceiverCaptures.insert(candidate.text).second) {
-                diagnostics_.error(
-                    candidate.span,
-                    "capturing this or super in a local parameterized given is "
-                    "not supported yet");
-              }
-            } else if (candidate.kind == AstExpressionKind::Identifier &&
-                       !locallyBoundNames.contains(candidate.text)) {
-              auto captured = blockScope.find(candidate.text);
-              if (captured != blockScope.end() &&
-                  captured->second.isInstanceMember) {
-                if (reportedReceiverCaptures.insert(candidate.text).second) {
-                  diagnostics_.error(
-                      candidate.span,
-                      "capturing this or super in a local parameterized given is "
-                      "not supported yet");
+                if (candidate.kind == AstExpressionKind::SummonFromCase) {
+                  std::unordered_set<std::string> caseBindings = locallyBoundNames;
+                  if (!candidate.text.empty() && candidate.text != "_") {
+                    caseBindings.insert(candidate.text);
+                  }
+                  for (const AstExpression& child : candidate.children) {
+                    collectCaptures(child, caseBindings);
+                  }
+                  return;
                 }
-              } else if (captured != blockScope.end() &&
-                         captured->second.isLexicalValue &&
-                         capturedNames.insert(candidate.text).second) {
-                captures.emplace_back(candidate.text, captured->second.type);
-              }
-            }
-            for (const AstExpression& child : candidate.children) {
-              collectCaptures(child, locallyBoundNames);
-            }
-          };
+                if (candidate.kind == AstExpressionKind::LocalDeclaration &&
+                    candidate.localMethod != nullptr) {
+                  std::unordered_set<std::string> methodBindings = locallyBoundNames;
+                  methodBindings.insert(candidate.text);
+                  for (const std::string& parameter :
+                       candidate.localMethod->parameters) {
+                    const std::string name = parameterName(parameter);
+                    if (!name.empty()) {
+                      methodBindings.insert(name);
+                    }
+                  }
+                  for (const AstExpression& child : candidate.children) {
+                    collectCaptures(child, methodBindings);
+                  }
+                  return;
+                }
+                if (candidate.kind == AstExpressionKind::This ||
+                    candidate.kind == AstExpressionKind::Super) {
+                  if (reportedReceiverCaptures.insert(candidate.text).second) {
+                    diagnostics_.error(
+                        candidate.span,
+                        "capturing this or super in a local parameterized given is "
+                        "not supported yet");
+                  }
+                } else if (candidate.kind == AstExpressionKind::Identifier &&
+                           !locallyBoundNames.contains(candidate.text)) {
+                  auto captured = blockScope.find(candidate.text);
+                  if (captured != blockScope.end() &&
+                      captured->second.isInstanceMember) {
+                    if (reportedReceiverCaptures.insert(candidate.text).second) {
+                      diagnostics_.error(
+                          candidate.span,
+                          "capturing this or super in a local parameterized given is "
+                          "not supported yet");
+                    }
+                  } else if (captured != blockScope.end() &&
+                             captured->second.isLexicalValue &&
+                             capturedNames.insert(candidate.text).second) {
+                    captures.emplace_back(candidate.text, captured->second.type);
+                  }
+                }
+                for (const AstExpression& child : candidate.children) {
+                  collectCaptures(child, locallyBoundNames);
+                }
+              };
           if (!local.children.empty()) {
             collectCaptures(local.children.front(), factoryParameters);
           }
@@ -4938,9 +5000,8 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
         ContextResolutionFailure failure = ContextResolutionFailure::None;
         arguments = resolveContextArguments(request, 0, scope, branch.span, nullptr,
                                             false, &failure);
-        const bool matched =
-            arguments.size() == 1 &&
-            arguments.front().type.kind != SimpleTypeKind::Unknown;
+        const bool matched = arguments.size() == 1 &&
+                             arguments.front().type.kind != SimpleTypeKind::Unknown;
         if (!matched && (failure == ContextResolutionFailure::None ||
                          failure == ContextResolutionFailure::Missing)) {
           continue;
@@ -5365,8 +5426,8 @@ bool Typechecker::expressionDirectlyEscapesReceiver(
   case AstExpressionKind::SummonFrom: {
     bool result = false;
     for (const AstExpression& child : expression.children) {
-      result = expressionDirectlyEscapesReceiver(
-                   child, receiverAliases, localNames, receiverMethodCallSites) ||
+      result = expressionDirectlyEscapesReceiver(child, receiverAliases, localNames,
+                                                 receiverMethodCallSites) ||
                result;
     }
     return result;
@@ -5460,9 +5521,8 @@ void Typechecker::collectImplicitReceiverMethodNames(
     return;
   }
   if (expression.kind == AstExpressionKind::SummonFromCase) {
-    const bool introduced =
-        !expression.text.empty() && expression.text != "_" &&
-        localNames.insert(expression.text).second;
+    const bool introduced = !expression.text.empty() && expression.text != "_" &&
+                            localNames.insert(expression.text).second;
     for (const AstExpression& child : expression.children) {
       collectImplicitReceiverMethodNames(child, localNames, methodNames);
     }
@@ -5994,6 +6054,14 @@ TypeInfo Typechecker::inferSelectType(const AstExpression& expression, Scope& sc
     const TypeInfo receiver = inferExpressionType(expression.children.front(), scope);
     specializedMember = specializeMemberForReceiver(*member, receiver);
   }
+  if ((specializedMember.kind == AstDeclarationKind::Class ||
+       specializedMember.kind == AstDeclarationKind::Trait) &&
+      companionTypeNames_.contains(specializedMember.symbolName)) {
+    auto companion = globalSymbols_.find(specializedMember.symbolName + '$');
+    if (companion != globalSymbols_.end()) {
+      return companion->second.type;
+    }
+  }
   if (!specializedMember.typeParameters.empty()) {
     diagnostics_.error(expression.span,
                        "generic method " + specializedMember.name + " requires " +
@@ -6319,7 +6387,15 @@ const SymbolInfo* Typechecker::qualifiedPathSymbol(const std::string& name,
     if (nextDot == std::string::npos) {
       return resolved;
     }
-    if (resolved->kind != AstDeclarationKind::Object) {
+    if ((resolved->kind == AstDeclarationKind::Class ||
+         resolved->kind == AstDeclarationKind::Trait) &&
+        companionTypeNames_.contains(resolved->symbolName)) {
+      auto companion = globalSymbols_.find(resolved->symbolName + '$');
+      if (companion == globalSymbols_.end()) {
+        return nullptr;
+      }
+      resolved = &companion->second;
+    } else if (resolved->kind != AstDeclarationKind::Object) {
       return nullptr;
     }
     segmentStart = nextDot + 1;
@@ -7349,8 +7425,7 @@ SymbolInfo Typechecker::inferTypeApplication(
         return;
       }
       for (const TypeInfo& parentPattern : constructor->second.parentTypes) {
-        const TypeInfo parent =
-            specializeTypeForReceiver(parentPattern, parameterType);
+        const TypeInfo parent = specializeTypeForReceiver(parentPattern, parameterType);
         if (parent.typeConstructorName == argumentType.typeConstructorName) {
           collectInference(parent, argumentType, onlyIfMissing);
         }
@@ -7358,9 +7433,8 @@ SymbolInfo Typechecker::inferTypeApplication(
     }
   };
 
-  const std::size_t contextualParameterCount =
-      static_cast<std::size_t>(std::count(symbol.contextualParameters.begin(),
-                                          symbol.contextualParameters.end(), true));
+  const std::size_t contextualParameterCount = static_cast<std::size_t>(std::count(
+      symbol.contextualParameters.begin(), symbol.contextualParameters.end(), true));
   const bool contextsAreOmitted =
       contextualParameterCount != 0 &&
       argumentTypes.size() + contextualParameterCount == symbol.parameterTypes.size();
@@ -7550,9 +7624,8 @@ std::vector<SymbolInfo> Typechecker::inferContextualTypeApplications(
     for (std::size_t index = 0;
          materializableParameters && index < candidate->parameterTypes.size();
          ++index) {
-      materializableParameters =
-          candidate->contextualParameters[index] ==
-          (index >= candidate->captureParameterCount);
+      materializableParameters = candidate->contextualParameters[index] ==
+                                 (index >= candidate->captureParameterCount);
     }
     if (!materializableParameters || candidate->parameterTypes.empty() ||
         !expandingGenericEvidence->insert(candidate->symbolName).second) {
@@ -7674,12 +7747,11 @@ std::vector<SymbolInfo> Typechecker::inferContextualTypeApplications(
         specializeResolvedTypeApplication(symbol, arguments, span, false);
     const std::vector<TypedContextArgument> resolved = resolveContextArguments(
         specialized, firstContextParameter, scope, span, nullptr, false);
-    const std::size_t expectedContextArguments =
-        static_cast<std::size_t>(std::count(
-            specialized.contextualParameters.begin() +
-                static_cast<std::ptrdiff_t>(std::min(
-                    firstContextParameter, specialized.contextualParameters.size())),
-            specialized.contextualParameters.end(), true));
+    const std::size_t expectedContextArguments = static_cast<std::size_t>(std::count(
+        specialized.contextualParameters.begin() +
+            static_cast<std::ptrdiff_t>(std::min(
+                firstContextParameter, specialized.contextualParameters.size())),
+        specialized.contextualParameters.end(), true));
     if (resolved.size() != expectedContextArguments ||
         !std::all_of(resolved.begin(), resolved.end(), isMaterialized)) {
       continue;
@@ -8312,8 +8384,7 @@ std::vector<TypedContextArgument> Typechecker::resolveContextArguments(
 
   std::vector<TypedContextArgument> result;
   for (std::size_t i = firstContextParameter; i < callee.parameterTypes.size(); ++i) {
-    if (i >= callee.contextualParameters.size() ||
-        !callee.contextualParameters[i]) {
+    if (i >= callee.contextualParameters.size() || !callee.contextualParameters[i]) {
       continue;
     }
     const TypeInfo& expected = callee.parameterTypes[i];
@@ -8333,9 +8404,9 @@ std::vector<TypedContextArgument> Typechecker::resolveContextArguments(
           !isAssignable(expected, candidate.type)) {
         return;
       }
-      candidates.push_back(
-          ContextCandidate{referenceName, std::move(candidate), std::nullopt,
-                           ContextResolutionFailure::None});
+      candidates.push_back(ContextCandidate{referenceName, std::move(candidate),
+                                            std::nullopt,
+                                            ContextResolutionFailure::None});
     };
     for (const auto& [name, candidate] : scope) {
       if (!candidate.isGiven && !candidate.isContextParameter) {
@@ -8420,8 +8491,8 @@ std::vector<TypedContextArgument> Typechecker::resolveContextArguments(
       std::vector<bool> dominated(ranked.size(), false);
       for (std::size_t candidateIndex = 0; candidateIndex < ranked.size();
            ++candidateIndex) {
-        for (std::size_t alternativeIndex = 0;
-             alternativeIndex < ranked.size(); ++alternativeIndex) {
+        for (std::size_t alternativeIndex = 0; alternativeIndex < ranked.size();
+             ++alternativeIndex) {
           if (candidateIndex != alternativeIndex &&
               dominates(ranked[alternativeIndex], ranked[candidateIndex])) {
             dominated[candidateIndex] = true;
@@ -8442,8 +8513,7 @@ std::vector<TypedContextArgument> Typechecker::resolveContextArguments(
     const auto companionClassOfObject = [&](const std::string& owner) {
       auto symbol = globalSymbols_.find(owner);
       if (symbol == globalSymbols_.end() ||
-          symbol->second.kind != AstDeclarationKind::Object ||
-          !owner.ends_with('$')) {
+          symbol->second.kind != AstDeclarationKind::Object || !owner.ends_with('$')) {
         return std::string{};
       }
       const std::string companionClass = owner.substr(0, owner.size() - 1);
@@ -8460,8 +8530,7 @@ std::vector<TypedContextArgument> Typechecker::resolveContextArguments(
         return false;
       }
       return std::any_of(
-          members->second.begin(), members->second.end(),
-          [&](const auto& entry) {
+          members->second.begin(), members->second.end(), [&](const auto& entry) {
             const SymbolInfo& member = entry.second;
             return member.isGiven && ownerNameOf(member.symbolName) != owner;
           });
@@ -8482,8 +8551,7 @@ std::vector<TypedContextArgument> Typechecker::resolveContextArguments(
       }
       const std::string rhsCompanion = companionClassOfObject(rhsOwner);
       return !lhsCompanion.empty() && !rhsCompanion.empty() &&
-             !inheritsGivens(rhsOwner) &&
-             isSubtypeOf(lhsCompanion, rhsCompanion);
+             !inheritsGivens(rhsOwner) && isSubtypeOf(lhsCompanion, rhsCompanion);
     };
 
     const auto contextualParameterTypes = [](const SymbolInfo& symbol) {
@@ -8501,11 +8569,11 @@ std::vector<TypedContextArgument> Typechecker::resolveContextArguments(
       // Owner inheritance is the explicit Scala priority mechanism and precedes
       // the Scala 3.7+ preference for a uniquely most-general result type.
       retainUndominated(ranked, hasMoreSpecificOwner);
-      retainUndominated(
-          ranked, [&](const ContextCandidate& lhs, const ContextCandidate& rhs) {
-            return isAssignable(lhs.symbol.type, rhs.symbol.type) &&
-                   !isAssignable(rhs.symbol.type, lhs.symbol.type);
-          });
+      retainUndominated(ranked,
+                        [&](const ContextCandidate& lhs, const ContextCandidate& rhs) {
+                          return isAssignable(lhs.symbol.type, rhs.symbol.type) &&
+                                 !isAssignable(rhs.symbol.type, lhs.symbol.type);
+                        });
       retainUndominated(
           ranked, [&](const ContextCandidate& lhs, const ContextCandidate& rhs) {
             const std::vector<const TypeInfo*> lhsParameters =
@@ -8515,13 +8583,12 @@ std::vector<TypedContextArgument> Typechecker::resolveContextArguments(
             if (lhsParameters.empty() != rhsParameters.empty()) {
               return lhsParameters.empty();
             }
-            if (lhsParameters.empty() ||
-                lhsParameters.size() != rhsParameters.size()) {
+            if (lhsParameters.empty() || lhsParameters.size() != rhsParameters.size()) {
               return false;
             }
             bool strictlyMoreSpecific = false;
-            for (std::size_t parameterIndex = 0;
-                 parameterIndex < lhsParameters.size(); ++parameterIndex) {
+            for (std::size_t parameterIndex = 0; parameterIndex < lhsParameters.size();
+                 ++parameterIndex) {
               const TypeInfo& lhsParameter = *lhsParameters[parameterIndex];
               const TypeInfo& rhsParameter = *rhsParameters[parameterIndex];
               if (!isAssignable(rhsParameter, lhsParameter)) {
@@ -8562,9 +8629,8 @@ std::vector<TypedContextArgument> Typechecker::resolveContextArguments(
       for (std::size_t index = 0;
            materializableParameters && index < selected.parameterTypes.size();
            ++index) {
-        materializableParameters =
-            selected.contextualParameters[index] ==
-            (index >= selected.captureParameterCount);
+        materializableParameters = selected.contextualParameters[index] ==
+                                   (index >= selected.captureParameterCount);
       }
       if (!materializableParameters) {
         if (candidateFailure != nullptr) {
@@ -8578,8 +8644,7 @@ std::vector<TypedContextArgument> Typechecker::resolveContextArguments(
         return std::nullopt;
       }
       for (std::size_t index = 0;
-           index < selected.captureParameterCount &&
-           index < selected.parameters.size();
+           index < selected.captureParameterCount && index < selected.parameters.size();
            ++index) {
         argument.captureArgumentNames.push_back(
             parameterName(selected.parameters[index]));
@@ -8598,7 +8663,7 @@ std::vector<TypedContextArgument> Typechecker::resolveContextArguments(
         return std::nullopt;
       }
       argument.arguments = resolveContextArguments(selected, 0, scope, span, resolving,
-                                                    emitDiagnostics, candidateFailure);
+                                                   emitDiagnostics, candidateFailure);
       resolving->erase(expansionKey);
       return isMaterialized(argument)
                  ? std::optional<TypedContextArgument>{std::move(argument)}
@@ -8623,8 +8688,7 @@ std::vector<TypedContextArgument> Typechecker::resolveContextArguments(
         mergeFailure(ContextResolutionFailure::Missing);
       } else {
         rankCandidates(allCandidates);
-        mergeFailure(allCandidates.front().failure ==
-                             ContextResolutionFailure::None
+        mergeFailure(allCandidates.front().failure == ContextResolutionFailure::None
                          ? ContextResolutionFailure::Unsupported
                          : allCandidates.front().failure);
       }
@@ -8664,9 +8728,10 @@ std::vector<TypedContextArgument> Typechecker::resolveContextArguments(
   return result;
 }
 
-void Typechecker::recordContextApplication(
-    const support::SourceSpan& span, std::vector<TypedContextArgument> arguments,
-    bool hasSelectedBranch, std::size_t selectedBranch) {
+void Typechecker::recordContextApplication(const support::SourceSpan& span,
+                                           std::vector<TypedContextArgument> arguments,
+                                           bool hasSelectedBranch,
+                                           std::size_t selectedBranch) {
   auto sameSpan = [&](const TypedContextApplication& application) {
     return application.span.source == span.source &&
            application.span.start == span.start &&

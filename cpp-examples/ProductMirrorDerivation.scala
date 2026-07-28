@@ -27,9 +27,25 @@ class Empty() derives Rebuild {
   def marker(): Int = 0
 }
 
+object StableProducts {
+  class NestedPair(val number: Int, val text: String) derives Rebuild
+  object NestedPair {
+    def companionMarker: Int = 41
+  }
+
+  object Models {
+    class Box[A](val value: A) derives Rebuild
+  }
+}
+
 class Product0() extends scala.Product {
   override def productArity(): Int = 0
   override def productElement(index: Int): Object = null
+}
+
+class Product1(val first: Object) extends scala.Product {
+  override def productArity(): Int = 1
+  override def productElement(index: Int): Object = first
 }
 
 class Product2(val first: Object, val second: Object) extends scala.Product {
@@ -89,5 +105,13 @@ object ProductMirrorDerivation {
     println(
       mirrorOf[GenericPair[String, String]]() !=
         mirror[GenericPair[String, String]]())
+    val nested: StableProducts.NestedPair =
+      rebuild[StableProducts.NestedPair](new Product2(21, "nested"))
+    println(nested.number)
+    println(nested.text)
+    println(StableProducts.NestedPair.companionMarker)
+    val nestedGeneric: StableProducts.Models.Box[String] =
+      rebuild[StableProducts.Models.Box[String]](new Product1("nested-generic"))
+    println(nestedGeneric.value)
   }
 }
