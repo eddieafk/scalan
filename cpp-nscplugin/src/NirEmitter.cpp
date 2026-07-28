@@ -1695,6 +1695,27 @@ nir::Value materializeContextArgument(const frontend::TypedContextArgument& cont
   return expressionValueFor(argumentExpression, context);
 }
 
+std::size_t explicitParameterIndex(
+    std::size_t argumentIndex, const frontend::TypedDeclaration* target,
+    const frontend::TypedContextApplication* contextApplication) {
+  if (target == nullptr || contextApplication == nullptr) {
+    return argumentIndex;
+  }
+  std::size_t ordinaryIndex = 0;
+  for (std::size_t parameterIndex = 0;
+       parameterIndex < target->parameterTypes.size(); ++parameterIndex) {
+    if (parameterIndex < target->contextualParameters.size() &&
+        target->contextualParameters[parameterIndex]) {
+      continue;
+    }
+    if (ordinaryIndex == argumentIndex) {
+      return parameterIndex;
+    }
+    ++ordinaryIndex;
+  }
+  return argumentIndex;
+}
+
 nir::Value promoteNarrowIntegral(const frontend::AstExpression& expression,
                                  const ValueContext& context) {
   nir::Value value = expressionValueFor(expression, context);
@@ -2733,10 +2754,13 @@ nir::Value valueFor(const frontend::AstExpression& expression,
               ? nullptr
               : findDeclarationBySymbol(*context.declarations,
                                         qualifyTypeName(constructor->text, context));
+      const frontend::TypedContextApplication* contextApplication =
+          contextApplicationFor(expression, context);
       std::vector<nir::Value> arguments;
       for (std::size_t i = 1; i < expression.children.size(); ++i) {
         nir::Value argument = expressionValueFor(expression.children[i], context);
-        const std::size_t parameterIndex = i - 1;
+        const std::size_t parameterIndex = explicitParameterIndex(
+            i - 1, classDeclaration, contextApplication);
         if (classDeclaration != nullptr &&
             parameterIndex < classDeclaration->parameterTypes.size()) {
           argument = boxForObjectStorage(
@@ -2746,11 +2770,10 @@ nir::Value valueFor(const frontend::AstExpression& expression,
         }
         arguments.push_back(std::move(argument));
       }
-      if (const frontend::TypedContextApplication* application =
-              contextApplicationFor(expression, context)) {
+      if (contextApplication != nullptr) {
         for (const frontend::TypedContextArgument& contextual :
-             application->arguments) {
-          const std::size_t parameterIndex = arguments.size();
+             contextApplication->arguments) {
+          const std::size_t parameterIndex = contextual.parameterIndex;
           nir::Value argument =
               materializeContextArgument(contextual, expression, context);
           if (classDeclaration != nullptr &&
@@ -2764,7 +2787,9 @@ nir::Value valueFor(const frontend::AstExpression& expression,
                   nir::boxValue(primitive, std::move(argument), expression.span);
             }
           }
-          arguments.push_back(std::move(argument));
+          const std::size_t insertionIndex =
+              std::min(parameterIndex, arguments.size());
+          arguments.insert(arguments.begin() + insertionIndex, std::move(argument));
         }
       }
       return nir::newValue(qualifyTypeName(constructor->text, context),
@@ -2786,10 +2811,13 @@ nir::Value valueFor(const frontend::AstExpression& expression,
         declarationForExpression(expression.children.front(), context);
     const std::string targetReceiver =
         memberReceiverType(expression.children.front(), context);
+    const frontend::TypedContextApplication* contextApplication =
+        contextApplicationFor(expression, context);
     std::vector<nir::Value> arguments;
     for (std::size_t i = 1; i < expression.children.size(); ++i) {
       nir::Value argument = expressionValueFor(expression.children[i], context);
-      const std::size_t parameterIndex = i - 1;
+      const std::size_t parameterIndex =
+          explicitParameterIndex(i - 1, target, contextApplication);
       const std::string primitive =
           target != nullptr && parameterIndex < target->parameterTypes.size()
               ? boxedPrimitiveTypeFor(target->parameterTypes[parameterIndex],
@@ -2810,10 +2838,10 @@ nir::Value valueFor(const frontend::AstExpression& expression,
       }
       arguments.push_back(std::move(argument));
     }
-    if (const frontend::TypedContextApplication* application =
-            contextApplicationFor(expression, context)) {
-      for (const frontend::TypedContextArgument& contextual : application->arguments) {
-        const std::size_t parameterIndex = arguments.size();
+    if (contextApplication != nullptr) {
+      for (const frontend::TypedContextArgument& contextual :
+           contextApplication->arguments) {
+        const std::size_t parameterIndex = contextual.parameterIndex;
         nir::Value argument =
             materializeContextArgument(contextual, expression, context);
         if (target != nullptr && parameterIndex < target->parameterTypes.size()) {
@@ -2826,7 +2854,9 @@ nir::Value valueFor(const frontend::AstExpression& expression,
             }
           }
         }
-        arguments.push_back(std::move(argument));
+        const std::size_t insertionIndex =
+            std::min(parameterIndex, arguments.size());
+        arguments.insert(arguments.begin() + insertionIndex, std::move(argument));
       }
     }
     nir::Value call =

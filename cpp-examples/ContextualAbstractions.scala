@@ -150,6 +150,19 @@ class GeneratedContextBound[A: ContextGenerated](val value: A) {
   def label: String = summon[ContextGenerated[A]].label
 }
 
+trait DependentInput[A] {
+  type Input = String
+  def render(value: String): String
+}
+
+class DogDependentInput extends DependentInput[Dog] {
+  override def render(value: String): String = "dependent:" + value
+}
+
+class DependentInputBox[A: DependentInput as input](val value: input.Input) {
+  def render: String = input.render(value)
+}
+
 object Show {
   given catShow: Show[Cat] = new CatShow("companion:")
   given foxShow: Show[Fox] = new FoxShow("typeclass-companion:")
@@ -183,6 +196,7 @@ import Show.{catShow => selectedCatShow}
 object ContextualAbstractions {
   given dogShow: Show[Dog] = new DogShow("dog:")
   given dogTypeName: TypeName[Dog] = new TypeName[Dog]("context-dog")
+  given dogDependentInput: DependentInput[Dog] = new DogDependentInput
   given dogStringContext: ContextPair[Dog, String] =
     new ContextPair[Dog, String]("mixed-dog-string", "expected-dog-string")
   given dogContextSeed: ContextSeed[Dog] =
@@ -243,6 +257,14 @@ object ContextualAbstractions {
   def combinedContextBounds[
       A: {Show as show, TypeName as typeName}](value: A): String =
     show.show(value) + ":" + typeName.name
+
+  def dependentContextRender[A: DependentInput as input](
+      value: input.Input): String =
+    input.render(value)
+
+  def dependentContextAndUsing[A: DependentInput as input](
+      value: input.Input)(using typeName: TypeName[A]): String =
+    input.render(value) + ":" + typeName.name
 
   def summonedRender[A: Show](value: A): String =
     summon[Show[A]].show(value)
@@ -447,5 +469,9 @@ object ContextualAbstractions {
     println(new ContextBoundRenderer[Dog](new Dog("class-bound")).render)
     println(new ContextBoundRenderer(new Dog("class-inferred")).summoned)
     println(new GeneratedContextBound[Dog](new Dog("class-generated")).label)
+    println(dependentContextRender[Dog]("method"))
+    println(dependentContextRender("inferred"))
+    println(dependentContextAndUsing[Dog]("using"))
+    println(new DependentInputBox[Dog]("class").render)
   }
 }

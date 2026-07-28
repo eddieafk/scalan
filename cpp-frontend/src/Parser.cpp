@@ -2,6 +2,7 @@
 
 #include "scalanative/support/StdNames.h"
 
+#include <algorithm>
 #include <cctype>
 #include <utility>
 
@@ -60,8 +61,33 @@ std::string runtimeFormatSpecifier(std::string format) {
   return format;
 }
 
+bool parameterTypeContainsWitnessSelection(const std::string& parameter,
+                                           const std::string& witnessName) {
+  const std::size_t colon = parameter.find(':');
+  if (colon == std::string::npos) {
+    return false;
+  }
+  const std::string selection = witnessName + ".";
+  const std::string_view type(parameter.data() + colon + 1,
+                              parameter.size() - colon - 1);
+  std::size_t position = type.find(selection);
+  while (position != std::string_view::npos) {
+    if (position == 0) {
+      return true;
+    }
+    const unsigned char previous = static_cast<unsigned char>(type[position - 1]);
+    if (std::isalnum(previous) == 0 && previous != '_' && previous != '$' &&
+        previous != '.') {
+      return true;
+    }
+    position = type.find(selection, position + 1);
+  }
+  return false;
+}
+
 void appendContextBoundParameters(AstDeclaration& declaration) {
   std::vector<std::string> contextParameters;
+  std::vector<std::string> namedWitnesses;
   for (std::size_t parameterIndex = 0;
        parameterIndex < declaration.typeParameters.size(); ++parameterIndex) {
     const AstTypeParameter& parameter = declaration.typeParameters[parameterIndex];
@@ -75,6 +101,9 @@ void appendContextBoundParameters(AstDeclaration& declaration) {
                                           : bound.witnessName;
       contextParameters.push_back(witnessName + ": " + bound.type + "[" +
                                   parameter.name + "]");
+      if (!bound.witnessName.empty()) {
+        namedWitnesses.push_back(bound.witnessName);
+      }
     }
   }
   if (contextParameters.empty()) {
@@ -83,10 +112,23 @@ void appendContextBoundParameters(AstDeclaration& declaration) {
 
   declaration.contextualParameters.resize(declaration.parameters.size(), false);
   std::size_t insertionIndex = declaration.parameters.size();
-  for (std::size_t i = 0; i < declaration.contextualParameters.size(); ++i) {
-    if (declaration.contextualParameters[i]) {
-      insertionIndex = i;
-      break;
+  bool hasDependentPlacement = false;
+  for (const std::string& witnessName : namedWitnesses) {
+    for (std::size_t i = 0; i < declaration.parameters.size(); ++i) {
+      if (parameterTypeContainsWitnessSelection(declaration.parameters[i],
+                                                witnessName)) {
+        insertionIndex = std::min(insertionIndex, i);
+        hasDependentPlacement = true;
+        break;
+      }
+    }
+  }
+  if (!hasDependentPlacement) {
+    for (std::size_t i = 0; i < declaration.contextualParameters.size(); ++i) {
+      if (declaration.contextualParameters[i]) {
+        insertionIndex = i;
+        break;
+      }
     }
   }
   declaration.parameters.insert(declaration.parameters.begin() + insertionIndex,

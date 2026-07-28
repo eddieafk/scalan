@@ -134,6 +134,21 @@ class AggregateContextBox[
   def contextName: String = named.name + ":" + seed.label
 }
 
+trait DependentEvidence[A] {
+  type Input = String
+  def describe(value: String): String
+}
+
+class DependentEvidenceValue[A](val prefix: String)
+    extends DependentEvidence[A] {
+  override def describe(value: String): String = prefix + value
+}
+
+class DependentContextBox[A: DependentEvidence as evidence](
+    val value: evidence.Input) {
+  def description: String = evidence.describe(value)
+}
+
 object Main {
   given intNamed: Named[Int] = new NamedValue[Int]("context-int")
   given intStringPairNamed: PairNamed[Int, String] =
@@ -148,6 +163,8 @@ object Main {
     new AnonymousGeneratedValue[A]("anonymous-member:" + seed.label)
   given contextBoundGenerated[A: Seed as seed]: ContextBoundGenerated[A] =
     new ContextBoundGeneratedValue[A]("named-context-bound-factory:" + seed.label)
+  given intDependentEvidence: DependentEvidence[Int] =
+    new DependentEvidenceValue[Int]("dependent:")
 
   def ordinal[A](value: A)(using instance: Ordinal[A]): Int =
     instance.ordinal(value)
@@ -211,6 +228,15 @@ object Main {
   def namedContextBoundAndUsing[A: Named as named](
       value: A)(using seed: Seed[A]): String =
     named.name + ":" + seed.label
+
+  def dependentContextBound[A: DependentEvidence as evidence](
+      value: evidence.Input): String =
+    evidence.describe(value)
+
+  def dependentContextBoundAndUsing[
+      A: DependentEvidence as evidence](
+      value: evidence.Input)(using seed: Seed[A]): String =
+    evidence.describe(value) + ":" + seed.label
 
   def summonedContextName[A: Named as named](value: A): String =
     summon[Named[A]].name
@@ -307,6 +333,10 @@ object Main {
     println(new NamedContextBox(11).witnessName)
     println(new GeneratedContextBox[Int](12).generatedName)
     println(new AggregateContextBox[Int](13).contextName)
+    println(dependentContextBound[Int]("method"))
+    println(dependentContextBound("inferred"))
+    println(dependentContextBoundAndUsing[Int]("using"))
+    println(new DependentContextBox[Int]("class").description)
   }
 }
 )";
@@ -329,12 +359,20 @@ trait Generated[A] {
 class GeneratedValue[A](val label: String) extends Generated[A]
 trait LoopEvidence[A]
 class RequiredContext[A: Named](val value: A)
+trait DependentEvidence[A] {
+  type Input = String
+}
+class DependentEvidenceValue[A] extends DependentEvidence[A]
 
 object Main {
   given intNamed: Named[Int] = new NamedValue[Int]
   given stringNamed: Named[String] = new NamedValue[String]
   given firstLongNamed: Named[Long] = new NamedValue[Long]
   given secondLongNamed: Named[Long] = new NamedValue[Long]
+  given firstLongDependent: DependentEvidence[Long] =
+    new DependentEvidenceValue[Long]
+  given secondLongDependent: DependentEvidence[Long] =
+    new DependentEvidenceValue[Long]
   given intStringPairNamed: PairNamed[Int, String] =
     new PairNamedValue[Int, String]
   given intLongPairNamed: PairNamed[Int, Long] =
@@ -357,6 +395,9 @@ object Main {
     loop
   def missingContextBound[A: Named](value: A): Named[A] =
     choose[A]()
+  def missingDependentContext[
+      A: DependentEvidence as evidence](value: evidence.Input): String =
+    value
   def capturedLocalFactory: Generated[Int] = {
     val prefix: String = "captured"
     given captured[A](using seed: Seed[A]): Generated[A] =
@@ -377,6 +418,10 @@ object Main {
   val malformedSummon = summon[Named[Int], Seed[Int]]
   val missingClassContext = new RequiredContext[Boolean](true)
   val ambiguousClassContext = new RequiredContext[Long](1L)
+  val missingDependent =
+    missingDependentContext[Boolean]("missing-dependent")
+  val ambiguousDependent =
+    missingDependentContext[Long]("ambiguous-dependent")
   val captured = capturedLocalFactory
 }
 )";
@@ -390,7 +435,6 @@ trait UnsupportedContextBound[A: Named]
 object InvalidContextBounds {
   def duplicate[A: {Named as evidence, Seed as evidence}](value: A): A = value
   def sourceCollision[A: Named as evidence](evidence: A): A = evidence
-  def dependent[A: Named as named](value: named.Member): A
   def localDuplicate: Int = {
     given local[
         A: {Named as localEvidence, Seed as localEvidence}]: Named[A] =
@@ -471,7 +515,9 @@ object Main {
               "context-int\ncontext-int\n"
               "generated:intermediate:seed-int\nsummoned-local\n"
               "context-int\ncontext-int\ncontext-int\n"
-              "generated:intermediate:seed-int\ncontext-int:seed-int\n" &&
+              "generated:intermediate:seed-int\ncontext-int:seed-int\n"
+              "dependent:method\ndependent:inferred\n"
+              "dependent:using:seed-int\ndependent:class\n" &&
       !invalid.ok &&
       contains(invalid.diagnosticsText,
                "constructor target is not a class: Event.Started") &&
@@ -501,9 +547,6 @@ object Main {
       contains(invalidContextBound.diagnosticsText, "duplicate parameter: evidence") &&
       contains(invalidContextBound.diagnosticsText,
                "duplicate parameter: localEvidence") &&
-      contains(invalidContextBound.diagnosticsText,
-               "named context bounds referenced by preceding parameter types are "
-               "not supported yet") &&
       !invalidContextBoundSyntax.ok &&
       contains(invalidContextBoundSyntax.diagnosticsText,
                "expected context-bound witness name after 'as'") &&
@@ -532,6 +575,14 @@ object Main {
                "$contextBound$0$0 of type "
                "demo.invalidqualifiedcase.Named [ Long ] required by "
                "RequiredContext: firstLongNamed, secondLongNamed") &&
+      contains(invalid.diagnosticsText,
+               "no given value found for context parameter evidence of type "
+               "demo.invalidqualifiedcase.DependentEvidence [ Boolean ] required by "
+               "missingDependentContext") &&
+      contains(invalid.diagnosticsText,
+               "ambiguous given values for context parameter evidence of type "
+               "demo.invalidqualifiedcase.DependentEvidence [ Long ] required by "
+               "missingDependentContext: firstLongDependent, secondLongDependent") &&
       contains(result.nirText, "module @demo.qualifiedcases.Event$.Started : "
                                "@demo.qualifiedcases.Event") &&
       contains(result.nirText, "class @demo.qualifiedcases.Event$.Stopped : "
@@ -652,7 +703,27 @@ object Main {
       contains(result.nirText,
                "new demo.qualifiedcases.AggregateContextBox(box[Int](13), call "
                "%demo.qualifiedcases.Main.intNamed(), call "
-               "%demo.qualifiedcases.Main.intSeed())");
+               "%demo.qualifiedcases.Main.intSeed())") &&
+      contains(result.nirText,
+               "define @demo.qualifiedcases.Main.dependentContextBound : "
+               "(demo.qualifiedcases.DependentEvidence,String)String") &&
+      contains(result.nirText,
+               "call %dependentContextBound(call "
+               "%demo.qualifiedcases.Main.intDependentEvidence(), \"method\")") &&
+      contains(result.nirText,
+               "define @demo.qualifiedcases.Main.dependentContextBoundAndUsing : "
+               "(demo.qualifiedcases.DependentEvidence,String,"
+               "demo.qualifiedcases.Seed)String") &&
+      contains(result.nirText,
+               "call %dependentContextBoundAndUsing(call "
+               "%demo.qualifiedcases.Main.intDependentEvidence(), \"using\", call "
+               "%demo.qualifiedcases.Main.intSeed())") &&
+      contains(result.nirText,
+               "field @demo.qualifiedcases.DependentContextBox.evidence : "
+               "demo.qualifiedcases.DependentEvidence") &&
+      contains(result.nirText,
+               "new demo.qualifiedcases.DependentContextBox(call "
+               "%demo.qualifiedcases.Main.intDependentEvidence(), \"class\")");
   return valid ? 0
                : fail("Scala 3 incremental smoke test failed (output='" + text +
                       "', invalid-diagnostics='" + invalid.diagnosticsText +

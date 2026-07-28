@@ -4343,22 +4343,25 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
       }
 
       if (classSymbol != nullptr && classSymbol->typeParameters.empty()) {
-        std::size_t firstContextParameter = classSymbol->parameterTypes.size();
-        for (std::size_t i = 0; i < classSymbol->contextualParameters.size(); ++i) {
-          if (classSymbol->contextualParameters[i]) {
-            firstContextParameter = i;
-            break;
-          }
-        }
-        if (firstContextParameter < classSymbol->parameterTypes.size() &&
-            argumentTypes.size() == firstContextParameter) {
+        const std::size_t contextualParameterCount =
+            static_cast<std::size_t>(std::count(
+                classSymbol->contextualParameters.begin(),
+                classSymbol->contextualParameters.end(), true));
+        const std::size_t ordinaryParameterCount =
+            classSymbol->parameterTypes.size() - contextualParameterCount;
+        bool materializedContextArguments = false;
+        if (contextualParameterCount != 0 &&
+            argumentTypes.size() == ordinaryParameterCount) {
           std::vector<TypedContextArgument> contextArguments =
-              resolveContextArguments(*classSymbol, firstContextParameter, scope,
-                                      expression.span);
+              resolveContextArguments(*classSymbol, 0, scope, expression.span);
           for (const TypedContextArgument& argument : contextArguments) {
-            argumentTypes.push_back(argument.type);
+            const std::size_t insertionIndex =
+                std::min(argument.parameterIndex, argumentTypes.size());
+            argumentTypes.insert(argumentTypes.begin() + insertionIndex,
+                                 argument.type);
           }
           recordContextApplication(expression.span, std::move(contextArguments));
+          materializedContextArguments = true;
         }
         if (argumentTypes.size() != classSymbol->parameterTypes.size()) {
           diagnostics_.error(expression.span,
@@ -4369,6 +4372,7 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
         }
         const std::size_t checkedArguments =
             std::min(argumentTypes.size(), classSymbol->parameterTypes.size());
+        std::size_t sourceArgumentIndex = 0;
         for (std::size_t i = 0; i < checkedArguments; ++i) {
           const bool targetsAny = isAnyArrayElementType(classSymbol->parameterTypes[i]);
           const bool argumentConforms =
@@ -4376,14 +4380,28 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
                   ? isSupportedAnyArrayValueType(argumentTypes[i])
                   : isAssignable(classSymbol->parameterTypes[i], argumentTypes[i]);
           if (!argumentConforms) {
-            const support::SourceSpan argumentSpan =
-                i + 1 < expression.children.size() ? expression.children[i + 1].span
-                                                   : expression.span;
+            support::SourceSpan argumentSpan = expression.span;
+            const bool synthesized =
+                materializedContextArguments &&
+                i < classSymbol->contextualParameters.size() &&
+                classSymbol->contextualParameters[i];
+            if (!synthesized) {
+              const std::size_t childIndex =
+                  materializedContextArguments ? sourceArgumentIndex : i;
+              if (childIndex + 1 < expression.children.size()) {
+                argumentSpan = expression.children[childIndex + 1].span;
+              }
+            }
             diagnostics_.error(argumentSpan,
                                "constructor argument " + std::to_string(i) +
                                    " of type " + argumentTypes[i].name +
                                    " does not conform to field type " +
                                    classSymbol->parameterTypes[i].name);
+          }
+          if (!materializedContextArguments ||
+              i >= classSymbol->contextualParameters.size() ||
+              !classSymbol->contextualParameters[i]) {
+            ++sourceArgumentIndex;
           }
         }
       }
@@ -4455,10 +4473,16 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
             break;
           }
         }
+        const std::size_t contextualParameterCount =
+            static_cast<std::size_t>(
+                std::count(inferenceTarget.contextualParameters.begin(),
+                           inferenceTarget.contextualParameters.end(), true));
+        const std::size_t ordinaryParameterCount =
+            inferenceTarget.parameterTypes.size() - contextualParameterCount;
         std::vector<SymbolInfo> contextualApplications;
         if (!inferenceConflict &&
             firstContextParameter < inferenceTarget.parameterTypes.size() &&
-            argumentTypes.size() == firstContextParameter) {
+            argumentTypes.size() == ordinaryParameterCount) {
           contextualApplications = inferContextualTypeApplications(
               inferenceTarget, inferredTypeArguments, firstContextParameter, scope,
               expression.span);
@@ -4485,21 +4509,24 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
     }
 
     if (calleeSymbol != nullptr && calleeSymbol->typeParameters.empty()) {
-      std::size_t firstContextParameter = calleeSymbol->parameterTypes.size();
-      for (std::size_t i = 0; i < calleeSymbol->contextualParameters.size(); ++i) {
-        if (calleeSymbol->contextualParameters[i]) {
-          firstContextParameter = i;
-          break;
-        }
-      }
-      if (firstContextParameter < calleeSymbol->parameterTypes.size() &&
-          argumentTypes.size() == firstContextParameter) {
+      const std::size_t contextualParameterCount =
+          static_cast<std::size_t>(std::count(
+              calleeSymbol->contextualParameters.begin(),
+              calleeSymbol->contextualParameters.end(), true));
+      const std::size_t ordinaryParameterCount =
+          calleeSymbol->parameterTypes.size() - contextualParameterCount;
+      bool materializedContextArguments = false;
+      if (contextualParameterCount != 0 &&
+          argumentTypes.size() == ordinaryParameterCount) {
         std::vector<TypedContextArgument> contextArguments = resolveContextArguments(
-            *calleeSymbol, firstContextParameter, scope, expression.span);
+            *calleeSymbol, 0, scope, expression.span);
         for (const TypedContextArgument& argument : contextArguments) {
-          argumentTypes.push_back(argument.type);
+          const std::size_t insertionIndex =
+              std::min(argument.parameterIndex, argumentTypes.size());
+          argumentTypes.insert(argumentTypes.begin() + insertionIndex, argument.type);
         }
         recordContextApplication(expression.span, std::move(contextArguments));
+        materializedContextArguments = true;
       }
       if (argumentTypes.size() != calleeSymbol->parameterTypes.size()) {
         diagnostics_.error(expression.span,
@@ -4510,6 +4537,7 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
       }
       const std::size_t checkedArguments =
           std::min(argumentTypes.size(), calleeSymbol->parameterTypes.size());
+      std::size_t sourceArgumentIndex = 0;
       for (std::size_t i = 0; i < checkedArguments; ++i) {
         const bool targetsAny = isAnyArrayElementType(calleeSymbol->parameterTypes[i]);
         const bool argumentConforms =
@@ -4517,11 +4545,28 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
                 ? isSupportedAnyArrayValueType(argumentTypes[i])
                 : isAssignable(calleeSymbol->parameterTypes[i], argumentTypes[i]);
         if (!argumentConforms) {
-          diagnostics_.error(expression.children[i + 1].span,
+          support::SourceSpan argumentSpan = expression.span;
+          const bool synthesized =
+              materializedContextArguments &&
+              i < calleeSymbol->contextualParameters.size() &&
+              calleeSymbol->contextualParameters[i];
+          if (!synthesized) {
+            const std::size_t childIndex =
+                materializedContextArguments ? sourceArgumentIndex : i;
+            if (childIndex + 1 < expression.children.size()) {
+              argumentSpan = expression.children[childIndex + 1].span;
+            }
+          }
+          diagnostics_.error(argumentSpan,
                              "argument " + std::to_string(i) + " of type " +
                                  argumentTypes[i].name +
                                  " does not conform to parameter type " +
                                  calleeSymbol->parameterTypes[i].name);
+        }
+        if (!materializedContextArguments ||
+            i >= calleeSymbol->contextualParameters.size() ||
+            !calleeSymbol->contextualParameters[i]) {
+          ++sourceArgumentIndex;
         }
       }
     }
@@ -7109,10 +7154,32 @@ SymbolInfo Typechecker::inferTypeApplication(
     }
   };
 
-  const std::size_t checkedArguments =
-      std::min(symbol.parameterTypes.size(), argumentTypes.size());
-  for (std::size_t i = 0; i < checkedArguments; ++i) {
-    collectInference(symbol.parameterTypes[i], argumentTypes[i], false);
+  const std::size_t contextualParameterCount =
+      static_cast<std::size_t>(std::count(symbol.contextualParameters.begin(),
+                                          symbol.contextualParameters.end(), true));
+  const bool contextsAreOmitted =
+      contextualParameterCount != 0 &&
+      argumentTypes.size() + contextualParameterCount == symbol.parameterTypes.size();
+  if (contextsAreOmitted) {
+    std::size_t argumentIndex = 0;
+    for (std::size_t parameterIndex = 0;
+         parameterIndex < symbol.parameterTypes.size() &&
+         argumentIndex < argumentTypes.size();
+         ++parameterIndex) {
+      if (parameterIndex < symbol.contextualParameters.size() &&
+          symbol.contextualParameters[parameterIndex]) {
+        continue;
+      }
+      collectInference(symbol.parameterTypes[parameterIndex],
+                       argumentTypes[argumentIndex], false);
+      ++argumentIndex;
+    }
+  } else {
+    const std::size_t checkedArguments =
+        std::min(symbol.parameterTypes.size(), argumentTypes.size());
+    for (std::size_t i = 0; i < checkedArguments; ++i) {
+      collectInference(symbol.parameterTypes[i], argumentTypes[i], false);
+    }
   }
 
   if (expectedResultType != nullptr &&
@@ -7332,7 +7399,7 @@ std::vector<SymbolInfo> Typechecker::inferContextualTypeApplications(
        parameterIndex < symbol.parameterTypes.size(); ++parameterIndex) {
     if (parameterIndex >= symbol.contextualParameters.size() ||
         !symbol.contextualParameters[parameterIndex]) {
-      return {};
+      continue;
     }
     const TypeInfo& pattern = symbol.parameterTypes[parameterIndex];
     if (!mentionsApplicationTypeParameter(pattern)) {
@@ -7398,7 +7465,13 @@ std::vector<SymbolInfo> Typechecker::inferContextualTypeApplications(
         specializeResolvedTypeApplication(symbol, arguments, span, false);
     const std::vector<TypedContextArgument> resolved = resolveContextArguments(
         specialized, firstContextParameter, scope, span, nullptr, false);
-    if (resolved.size() != specialized.parameterTypes.size() - firstContextParameter ||
+    const std::size_t expectedContextArguments =
+        static_cast<std::size_t>(std::count(
+            specialized.contextualParameters.begin() +
+                static_cast<std::ptrdiff_t>(std::min(
+                    firstContextParameter, specialized.contextualParameters.size())),
+            specialized.contextualParameters.end(), true));
+    if (resolved.size() != expectedContextArguments ||
         !std::all_of(resolved.begin(), resolved.end(), isMaterialized)) {
       continue;
     }
@@ -7997,14 +8070,19 @@ std::vector<TypedContextArgument> Typechecker::resolveContextArguments(
   if (resolving == nullptr) {
     resolving = &localResolving;
   }
-  const auto unknownArgument = [] {
+  const auto unknownArgument = [](std::size_t parameterIndex) {
     TypedContextArgument argument;
     argument.type = TypeInfo{SimpleTypeKind::Unknown, "Unknown"};
+    argument.parameterIndex = parameterIndex;
     return argument;
   };
 
   std::vector<TypedContextArgument> result;
   for (std::size_t i = firstContextParameter; i < callee.parameterTypes.size(); ++i) {
+    if (i >= callee.contextualParameters.size() ||
+        !callee.contextualParameters[i]) {
+      continue;
+    }
     const TypeInfo& expected = callee.parameterTypes[i];
     std::vector<ContextCandidate> parameterCandidates;
     std::vector<ContextCandidate> givenCandidates;
@@ -8235,6 +8313,7 @@ std::vector<TypedContextArgument> Typechecker::resolveContextArguments(
       argument.name = candidate.referenceName;
       argument.symbolName = selected.symbolName;
       argument.type = selected.type;
+      argument.parameterIndex = i;
       argument.requiresAccessor = selected.isModuleMember;
       argument.isCall = selected.kind == AstDeclarationKind::Def;
       argument.prerequisiteArgumentCount = selected.contextPrerequisiteCount;
@@ -8296,7 +8375,7 @@ std::vector<TypedContextArgument> Typechecker::resolveContextArguments(
           (void)materializeCandidate(allCandidates.front(), true);
         }
       }
-      result.push_back(unknownArgument());
+      result.push_back(unknownArgument(i));
       continue;
     }
     if (candidates.size() > 1) {
@@ -8314,7 +8393,7 @@ std::vector<TypedContextArgument> Typechecker::resolveContextArguments(
         }
         diagnostics_.error(span, std::move(message));
       }
-      result.push_back(unknownArgument());
+      result.push_back(unknownArgument(i));
       continue;
     }
     result.push_back(std::move(*candidates.front().materializedArgument));

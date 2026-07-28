@@ -100,6 +100,7 @@ struct TypedContextArgument {
   std::string name;
   std::string symbolName;
   TypeInfo type;
+  std::size_t parameterIndex = 0;
   bool requiresAccessor = false;
   bool isCall = false;
   std::size_t prerequisiteArgumentCount = 0;
