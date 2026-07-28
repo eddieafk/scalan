@@ -131,6 +131,21 @@ trait Named[A] {
 }
 class NamedValue[A](val name: String) extends Named[A]
 
+trait LegacyNamed[A] {
+  val name: String
+}
+class LegacyNamedValue[A](val name: String) extends LegacyNamed[A]
+
+trait LegacyGenerated[A] {
+  val label: String
+}
+class LegacyGeneratedValue[A](val label: String) extends LegacyGenerated[A]
+
+class LegacyContextBox[A](val value: A)(
+    implicit val named: LegacyNamed[A]) {
+  def contextName: String = named.name
+}
+
 trait PairNamed[A, B] {
   val name: String
   val value: B
@@ -195,6 +210,14 @@ class DependentContextBox[A: DependentEvidence as evidence](
 }
 
 object Main {
+  implicit val legacyIntNamed: LegacyNamed[Int] =
+    new LegacyNamedValue[Int]("legacy-member")
+  given legacyStringNamed: LegacyNamed[String] =
+    new LegacyNamedValue[String]("given-string")
+  implicit def legacyGenerated[A](
+      implicit named: LegacyNamed[A]): LegacyGenerated[A] =
+    new LegacyGeneratedValue[A]("legacy-generated:" + named.name)
+
   given intNamed: Named[Int] = new NamedValue[Int]("context-int")
   given intStringPairNamed: PairNamed[Int, String] =
     new PairNamedValue[Int, String]("context-int-string", "expected-context")
@@ -216,6 +239,26 @@ object Main {
 
   def rebuild[A](product: scala.Product)(using instance: Rebuild[A]): A =
     instance.rebuild(product)
+
+  def legacyContextName[A](implicit named: LegacyNamed[A]): String =
+    named.name
+
+  def legacyDescribe[A](
+      value: A)(implicit named: LegacyNamed[A]): String =
+    named.name + ":" + value.toString
+
+  def legacyGeneratedName[A](
+      using generated: LegacyGenerated[A]): String =
+    generated.label
+
+  def legacyImplicitlyName: String =
+    implicitly[LegacyNamed[Int]].name
+
+  def localLegacyContextName: String = {
+    implicit val localLegacy =
+      new LegacyNamedValue[Int]("legacy-local")
+    legacyContextName[Int]()
+  }
 
   def stopped(value: Event.Stopped): Event.Stopped = value
 
@@ -440,6 +483,14 @@ object Main {
     println(
       ordinal[StableDerivation.Status](
         new StableDerivation.Status.Failed(5)))
+    println(legacyContextName[Int]())
+    println(legacyContextName[String]())
+    println(legacyDescribe(15))
+    println(legacyDescribe[Int](16)(legacyIntNamed))
+    println(legacyGeneratedName[Int]())
+    println(legacyImplicitlyName)
+    println(localLegacyContextName)
+    println(new LegacyContextBox[Int](17).contextName)
     println(contextName())
     println(forwardedContextName[Int]())
     println(repeatedContextName())
@@ -590,6 +641,22 @@ object Main {
   val captured = capturedLocalFactory
 }
 )";
+  constexpr const char* invalidLegacyImplicitSource =
+      R"(package demo.invalidlegacyimplicit
+
+trait Marker[A]
+class MarkerValue[A] extends Marker[A]
+
+implicit val missingValueType = new MarkerValue[Int]
+implicit def missingMethodResult = new MarkerValue[Int]
+implicit def conversion(value: Int): Marker[Int] = new MarkerValue[Int]
+implicit var mutableImplicit: Marker[Int] = new MarkerValue[Int]
+implicit object SingletonMarker extends Marker[Int]
+
+object Main {
+  def malformedParameter(implicit missing): Int = 0
+}
+)";
   constexpr const char* invalidNestedDerivationSource =
       R"(package demo.invalidnestedderivation
 
@@ -664,6 +731,10 @@ object Main {
   scalanative::support::DiagnosticEngine invalidDiagnostics;
   const scalanative::tools::build::BuildResult invalid = driver.buildSource(
       "InvalidScala3Incremental.scala", invalidSource, {}, invalidDiagnostics);
+  scalanative::support::DiagnosticEngine invalidLegacyImplicitDiagnostics;
+  const scalanative::tools::build::BuildResult invalidLegacyImplicit =
+      driver.buildSource("InvalidLegacyImplicit.scala", invalidLegacyImplicitSource, {},
+                         invalidLegacyImplicitDiagnostics);
   scalanative::support::DiagnosticEngine invalidNestedDerivationDiagnostics;
   const scalanative::tools::build::BuildResult invalidNestedDerivation =
       driver.buildSource("InvalidNestedDerivation.scala", invalidNestedDerivationSource,
@@ -699,6 +770,9 @@ object Main {
       status == 0 &&
       text == "0\n1\n0\n1\n7\n0\n1\n2\n0\n1\n9\n"
               "21\nnested-product\n41\ntrue\nnested-generic\ntrue\n0\n1\n"
+              "legacy-member\ngiven-string\nlegacy-member:15\n"
+              "legacy-member:16\nlegacy-generated:legacy-member\n"
+              "legacy-member\nlegacy-local\nlegacy-member\n"
               "context-int\n"
               "context-int\ncontext-int:context-int\ncontext-int-string\n"
               "context-int-string\nexpected-context\ncontext-int-string\n"
@@ -752,6 +826,18 @@ object Main {
       contains(invalid.diagnosticsText,
                "capturing this or super in a local parameterized given is not "
                "supported yet") &&
+      !invalidLegacyImplicit.ok &&
+      contains(invalidLegacyImplicit.diagnosticsText,
+               "member implicit declaration requires an explicit type and "
+               "initializer") &&
+      contains(invalidLegacyImplicit.diagnosticsText,
+               "implicit conversion definitions with ordinary parameters are not "
+               "supported in this contextual milestone") &&
+      contains(invalidLegacyImplicit.diagnosticsText,
+               "implicit variables and objects are not supported in this contextual "
+               "milestone") &&
+      contains(invalidLegacyImplicit.diagnosticsText,
+               "using parameter requires an explicit type") &&
       !invalidNestedDerivation.ok &&
       contains(invalidNestedDerivation.diagnosticsText,
                "derives declarations nested in classes or traits are not "
@@ -866,6 +952,34 @@ object Main {
                "MirroredElemTypes : scala.Tuple2 [ "
                "demo.qualifiedcases.StableDerivation.Status$.Ready, "
                "demo.qualifiedcases.StableDerivation.Status$.Failed ]") &&
+      contains(result.nirText,
+               "define @demo.qualifiedcases.Main.legacyIntNamed : "
+               "()demo.qualifiedcases.LegacyNamed") &&
+      contains(result.nirText,
+               "define @demo.qualifiedcases.Main.legacyGenerated : "
+               "(demo.qualifiedcases.LegacyNamed)"
+               "demo.qualifiedcases.LegacyGenerated") &&
+      contains(result.nirText,
+               "call %legacyDescribe(box[Int](15), call "
+               "%demo.qualifiedcases.Main.legacyIntNamed())") &&
+      contains(result.nirText,
+               "call %legacyDescribe(box[Int](16), call "
+               "%demo.qualifiedcases.Main.legacyIntNamed())") &&
+      contains(result.nirText,
+               "call %legacyGeneratedName(call "
+               "%demo.qualifiedcases.Main.legacyGenerated(call "
+               "%demo.qualifiedcases.Main.legacyIntNamed()))") &&
+      contains(result.nirText,
+               "define @demo.qualifiedcases.Main.localLegacyContextName : "
+               "()String") &&
+      contains(result.nirText,
+               "ret String call %legacyContextName(%localLegacy)") &&
+      contains(result.nirText,
+               "field @demo.qualifiedcases.LegacyContextBox.named : "
+               "demo.qualifiedcases.LegacyNamed") &&
+      contains(result.nirText,
+               "new demo.qualifiedcases.LegacyContextBox(box[Int](17), call "
+               "%demo.qualifiedcases.Main.legacyIntNamed())") &&
       contains(result.nirText, "define @demo.qualifiedcases.Main.contextName : "
                                "(demo.qualifiedcases.Named)String") &&
       contains(result.nirText, "ret String call %contextName(%named)") &&
@@ -1036,6 +1150,8 @@ object Main {
   return valid ? 0
                : fail("Scala 3 incremental smoke test failed (output='" + text +
                       "', invalid-diagnostics='" + invalid.diagnosticsText +
+                      "', invalid-legacy-implicit-diagnostics='" +
+                      invalidLegacyImplicit.diagnosticsText +
                       "', invalid-nested-derivation-diagnostics='" +
                       invalidNestedDerivation.diagnosticsText +
                       "', invalid-context-bound-diagnostics='" +

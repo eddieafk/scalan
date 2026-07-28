@@ -1157,8 +1157,21 @@ Current scaffold status:
   singleton/class sum children, metadata, evidence identity, and qualified
   construction. A focused diagnostic rejects `derives` declarations owned by a
   class or trait because those paths are instance-dependent rather than stable.
-  Full inline call-site specialization and Scala 2 `implicit` syntax remain
-  later milestones.
+- Scala 3's supported legacy contextual syntax now feeds the same resolution
+  engine as `given` and `using`. Named `implicit val` declarations interoperate
+  with givens, contextual `implicit def` factories may recursively request
+  either legacy or `using` evidence, method and class `(implicit ...)` clauses
+  receive inferred arguments, old-style explicit argument clauses remain
+  callable, and `implicitly[T]` shares `summon[T]`'s typed lookup and NIR
+  lowering. Member implicit values and methods require explicit result types,
+  while a local implicit value may infer its type. Focused runtime and NIR
+  coverage verifies member and local selection, cross-syntax recursion,
+  contextual-only generic inference, constructor-field injection, explicit
+  application, and missing-type diagnostics. This compatibility slice
+  deliberately rejects implicit conversions, implicit variables, and implicit
+  objects; those constructs require separate language and initialization
+  semantics.
+- Full inline call-site specialization remains a later milestone.
 - Postfix type application now supports typed `value.isInstanceOf[Target]` and
   checked `value.asInstanceOf[Target]` for known classes, traits, and objects.
   NIR uses dedicated `is-instance-of[T]` and `as-instance-of[T]` values; verification

@@ -204,6 +204,7 @@ bool Parser::isDeclarationStart() const {
   case TokenKind::KeywordType:
   case TokenKind::KeywordDef:
   case TokenKind::KeywordGiven:
+  case TokenKind::KeywordImplicit:
   case TokenKind::KeywordVal:
   case TokenKind::KeywordVar:
   case TokenKind::KeywordImport:
@@ -301,6 +302,9 @@ AstDeclaration Parser::parseDeclaration() {
   if (match(TokenKind::KeywordGiven)) {
     return parseGiven(previous());
   }
+  if (match(TokenKind::KeywordImplicit)) {
+    return parseImplicit(previous());
+  }
   if (match(TokenKind::KeywordVal)) {
     return parseValOrVar(AstDeclarationKind::Val, previous());
   }
@@ -336,8 +340,27 @@ AstDeclaration Parser::parseObjectLike(AstDeclarationKind kind, const Token& key
     declaration.typeParameters = parseTypeParameterList();
   }
 
-  if (check(TokenKind::LeftParen)) {
-    declaration.parameters = parseParameterList(kind == AstDeclarationKind::Class);
+  bool sawParameterClause = false;
+  bool sawContextualClause = false;
+  while (check(TokenKind::LeftParen)) {
+    bool contextualClause = false;
+    std::vector<std::string> parameters =
+        parseParameterList(kind == AstDeclarationKind::Class, &contextualClause);
+    if (sawContextualClause && !contextualClause) {
+      diagnostics_.error(keyword.span,
+                         "ordinary parameter clauses cannot follow a contextual "
+                         "parameter clause");
+    } else if (sawParameterClause && !contextualClause) {
+      diagnostics_.error(keyword.span,
+                         "multiple ordinary class-like parameter clauses are not "
+                         "supported");
+    }
+    declaration.parameters.insert(declaration.parameters.end(), parameters.begin(),
+                                  parameters.end());
+    declaration.contextualParameters.insert(declaration.contextualParameters.end(),
+                                            parameters.size(), contextualClause);
+    sawParameterClause = true;
+    sawContextualClause = sawContextualClause || contextualClause;
   }
   if (kind == AstDeclarationKind::Class) {
     appendContextBoundParameters(declaration);
@@ -449,6 +472,12 @@ AstDeclaration Parser::parseImport(const Token& keyword) {
 }
 
 AstDeclaration Parser::parseOverride(const Token& keyword) {
+  if (match(TokenKind::KeywordImplicit)) {
+    AstDeclaration declaration = parseImplicit(previous());
+    declaration.isOverride = true;
+    declaration.span = keyword.span;
+    return declaration;
+  }
   if (match(TokenKind::KeywordDef)) {
     AstDeclaration declaration = parseDef(previous());
     declaration.isOverride = true;
@@ -673,6 +702,31 @@ AstDeclaration Parser::parseGiven(const Token& keyword) {
   return declaration;
 }
 
+AstDeclaration Parser::parseImplicit(const Token& keyword) {
+  const bool isOverride = match(TokenKind::KeywordOverride);
+  AstDeclaration declaration;
+  if (match(TokenKind::KeywordDef)) {
+    declaration = parseDef(previous());
+  } else if (match(TokenKind::KeywordVal)) {
+    declaration = parseValOrVar(AstDeclarationKind::Val, previous());
+  } else if (match(TokenKind::KeywordVar)) {
+    declaration = parseValOrVar(AstDeclarationKind::Var, previous());
+  } else if (match(TokenKind::KeywordObject)) {
+    declaration = parseObjectLike(AstDeclarationKind::Object, previous());
+  } else {
+    diagnostics_.error(
+        peek().span,
+        "'implicit' must modify a val or def in this contextual milestone");
+    synchronize();
+    return declaration;
+  }
+  declaration.isGiven = true;
+  declaration.isLegacyImplicit = true;
+  declaration.isOverride = isOverride;
+  declaration.span = keyword.span;
+  return declaration;
+}
+
 AstDeclaration Parser::parseValOrVar(AstDeclarationKind kind, const Token& keyword) {
   AstDeclaration declaration;
   declaration.kind = kind;
@@ -812,7 +866,8 @@ std::vector<std::string> Parser::parseParameterList(bool allowModifiers,
   }
 
   consumeSeparators();
-  const bool contextual = match(TokenKind::KeywordUsing);
+  const bool contextual =
+      match(TokenKind::KeywordUsing) || match(TokenKind::KeywordImplicit);
   if (contextualClause != nullptr) {
     *contextualClause = contextual;
   }
@@ -1287,6 +1342,7 @@ AstExpression Parser::parseBlockExpression() {
       localExpression.span = local.span;
       localExpression.mutableLocal = local.kind == AstDeclarationKind::Var;
       localExpression.isGiven = local.isGiven;
+      localExpression.isLegacyImplicit = local.isLegacyImplicit;
       localExpression.isAnonymousGiven = local.isAnonymousGiven;
       if (local.hasInitializer) {
         localExpression.children.push_back(std::move(local.initializer));

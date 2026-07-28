@@ -18,6 +18,7 @@ namespace scalanative::nscplugin {
 namespace {
 
 constexpr std::string_view SummonName = "summon";
+constexpr std::string_view ImplicitlyName = "implicitly";
 
 struct ValueContext {
   std::string packageName;
@@ -2382,7 +2383,8 @@ nir::Value valueFor(const frontend::AstExpression& expression,
       return nir::sizeOfValue(qualifyTypeName(expression.declaredType, context),
                               expression.span);
     }
-    if (callee.kind == AstExpressionKind::Identifier && callee.text == SummonName) {
+    if (callee.kind == AstExpressionKind::Identifier &&
+        (callee.text == SummonName || callee.text == ImplicitlyName)) {
       const frontend::TypedContextApplication* application =
           contextApplicationFor(expression, context);
       if (application == nullptr || application->arguments.size() != 1) {
@@ -2426,6 +2428,50 @@ nir::Value valueFor(const frontend::AstExpression& expression,
   case AstExpressionKind::Call: {
     if (expression.children.empty()) {
       return nir::unknownValue("call <empty>", expression.span);
+    }
+    const frontend::AstExpression& firstClause = expression.children.front();
+    if (firstClause.kind == AstExpressionKind::Call &&
+        !firstClause.children.empty()) {
+      const frontend::AstExpression* targetExpression =
+          &firstClause.children.front();
+      if (targetExpression->kind == AstExpressionKind::TypeApply &&
+          targetExpression->children.size() == 1) {
+        targetExpression = &targetExpression->children.front();
+      }
+
+      const frontend::TypedDeclaration* explicitContextTarget =
+          declarationForExpression(firstClause.children.front(), context);
+      if (explicitContextTarget == nullptr &&
+          targetExpression->kind == AstExpressionKind::New &&
+          context.declarations != nullptr) {
+        explicitContextTarget = findDeclarationBySymbol(
+            *context.declarations,
+            qualifyTypeName(targetExpression->text, context));
+      }
+      if (explicitContextTarget != nullptr) {
+        const auto firstContext =
+            std::find(explicitContextTarget->contextualParameters.begin(),
+                      explicitContextTarget->contextualParameters.end(), true);
+        const std::size_t firstContextIndex = static_cast<std::size_t>(
+            std::distance(explicitContextTarget->contextualParameters.begin(),
+                          firstContext));
+        const bool hasTrailingContextClause =
+            firstContext != explicitContextTarget->contextualParameters.end() &&
+            std::all_of(firstContext,
+                        explicitContextTarget->contextualParameters.end(),
+                        [](bool contextual) { return contextual; });
+        if (hasTrailingContextClause &&
+            firstClause.children.size() - 1 == firstContextIndex &&
+            expression.children.size() - 1 ==
+                explicitContextTarget->parameterTypes.size() - firstContextIndex) {
+          frontend::AstExpression flattened = firstClause;
+          flattened.span = expression.span;
+          flattened.children.insert(flattened.children.end(),
+                                    expression.children.begin() + 1,
+                                    expression.children.end());
+          return valueFor(flattened, context, preserveCallable);
+        }
+      }
     }
     if (expression.children.size() == 6 &&
         expression.children.front().kind == AstExpressionKind::Select &&

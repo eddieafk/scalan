@@ -15,6 +15,7 @@ namespace scalanative::frontend {
 namespace {
 
 constexpr std::string_view SummonName = "summon";
+constexpr std::string_view ImplicitlyName = "implicitly";
 
 bool isClassLikeDeclaration(AstDeclarationKind kind) {
   return kind == AstDeclarationKind::Object || kind == AstDeclarationKind::Class ||
@@ -3614,7 +3615,8 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
     const bool isSizeOf = callee.kind == AstExpressionKind::Identifier &&
                           callee.text == support::StdNames::SizeOf;
     const bool isSummon =
-        callee.kind == AstExpressionKind::Identifier && callee.text == SummonName;
+        callee.kind == AstExpressionKind::Identifier &&
+        (callee.text == SummonName || callee.text == ImplicitlyName);
     const bool isTypeTest = callee.kind == AstExpressionKind::Select &&
                             callee.children.size() == 1 &&
                             callee.text == support::StdNames::IsInstanceOf;
@@ -3648,15 +3650,15 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
     }
     if (isSummon) {
       if (typeArguments.size() != 1) {
-        diagnostics_.error(expression.span,
-                           "summon requires exactly one type argument");
+        diagnostics_.error(expression.span, callee.text +
+                                                " requires exactly one type argument");
         return TypeInfo{SimpleTypeKind::Unknown, "Unknown"};
       }
       const TypeInfo requested =
           typeFromDeclaredName(expression.declaredType, &scope, &expression.span);
       SymbolInfo request;
       request.kind = AstDeclarationKind::Def;
-      request.name = std::string(SummonName);
+      request.name = callee.text;
       request.type = requested;
       request.parameters = {"evidence: " + requested.name};
       request.parameterTypes = {requested};
@@ -3766,6 +3768,67 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
   case AstExpressionKind::Call: {
     if (expression.children.empty()) {
       return TypeInfo{SimpleTypeKind::Unknown, "Unknown"};
+    }
+    const AstExpression& firstClause = expression.children.front();
+    if (firstClause.kind == AstExpressionKind::Call &&
+        !firstClause.children.empty()) {
+      const AstExpression* targetExpression = &firstClause.children.front();
+      if (targetExpression->kind == AstExpressionKind::TypeApply &&
+          targetExpression->children.size() == 1) {
+        targetExpression = &targetExpression->children.front();
+      }
+
+      const SymbolInfo* explicitContextTarget = nullptr;
+      if (targetExpression->kind == AstExpressionKind::Identifier) {
+        if (auto found = scope.find(targetExpression->text); found != scope.end()) {
+          explicitContextTarget = &found->second;
+        }
+      } else if (targetExpression->kind == AstExpressionKind::Select &&
+                 targetExpression->children.size() == 1) {
+        const AstExpression& receiverExpression =
+            targetExpression->children.front();
+        if (receiverExpression.kind == AstExpressionKind::Identifier) {
+          if (auto found = scope.find(receiverExpression.text);
+              found != scope.end()) {
+            explicitContextTarget =
+                knownMemberForReceiverType(found->second.type,
+                                           targetExpression->text);
+          }
+        } else {
+          const TypeInfo receiver =
+              inferExpressionType(receiverExpression, scope);
+          explicitContextTarget =
+              knownMemberForReceiverType(receiver, targetExpression->text);
+        }
+      } else if (targetExpression->kind == AstExpressionKind::New) {
+        explicitContextTarget =
+            qualifiedPathSymbol(targetExpression->text, &scope);
+      }
+
+      if (explicitContextTarget != nullptr) {
+        const auto firstContext =
+            std::find(explicitContextTarget->contextualParameters.begin(),
+                      explicitContextTarget->contextualParameters.end(), true);
+        const std::size_t firstContextIndex = static_cast<std::size_t>(
+            std::distance(explicitContextTarget->contextualParameters.begin(),
+                          firstContext));
+        const bool hasTrailingContextClause =
+            firstContext != explicitContextTarget->contextualParameters.end() &&
+            std::all_of(firstContext,
+                        explicitContextTarget->contextualParameters.end(),
+                        [](bool contextual) { return contextual; });
+        if (hasTrailingContextClause &&
+            firstClause.children.size() - 1 == firstContextIndex &&
+            expression.children.size() - 1 ==
+                explicitContextTarget->parameterTypes.size() - firstContextIndex) {
+          AstExpression flattened = firstClause;
+          flattened.span = expression.span;
+          flattened.children.insert(flattened.children.end(),
+                                    expression.children.begin() + 1,
+                                    expression.children.end());
+          return inferExpressionType(flattened, scope, expectedType);
+        }
+      }
     }
     if (isZoneScopedCall(expression)) {
       if (expression.children.size() != 2) {

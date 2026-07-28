@@ -107,17 +107,31 @@ bool AstValidator::validateDeclaration(const AstDeclaration& declaration,
                       "sealed modifier is only supported on classes and traits");
     ok = false;
   }
+  if (declaration.isLegacyImplicit && !declaration.isGiven) {
+    diagnostics.error(declaration.span,
+                      "legacy-implicit metadata requires a contextual declaration");
+    ok = false;
+  }
   if (declaration.isGiven && declaration.kind != AstDeclarationKind::Val &&
       declaration.kind != AstDeclarationKind::Def) {
-    diagnostics.error(declaration.span, "given declaration must be a value or method");
+    diagnostics.error(
+        declaration.span,
+        declaration.isLegacyImplicit
+            ? "implicit variables and objects are not supported in this contextual "
+              "milestone"
+            : "given declaration must be a value or method");
     ok = false;
   }
   if (declaration.isGiven && declaration.kind == AstDeclarationKind::Def &&
       std::any_of(declaration.contextualParameters.begin(),
                   declaration.contextualParameters.end(),
                   [](bool contextual) { return !contextual; })) {
-    diagnostics.error(declaration.span,
-                      "parameterized given must accept only using parameters");
+    diagnostics.error(
+        declaration.span,
+        declaration.isLegacyImplicit
+            ? "implicit conversion definitions with ordinary parameters are not "
+              "supported in this contextual milestone"
+            : "parameterized given must accept only using parameters");
     ok = false;
   }
   if (declaration.isAnonymousGiven && !declaration.isGiven) {
@@ -127,8 +141,11 @@ bool AstValidator::validateDeclaration(const AstDeclaration& declaration,
   }
   if (declaration.isGiven &&
       (declaration.declaredType.empty() || !declaration.hasInitializer)) {
-    diagnostics.error(declaration.span,
-                      "given declaration requires an explicit type and initializer");
+    diagnostics.error(
+        declaration.span,
+        declaration.isLegacyImplicit
+            ? "member implicit declaration requires an explicit type and initializer"
+            : "given declaration requires an explicit type and initializer");
     ok = false;
   }
   if (!declaration.typeParameters.empty() &&
@@ -437,7 +454,7 @@ bool AstValidator::validateExpression(const AstExpression& expression,
       ok = false;
     }
     break;
-  case AstExpressionKind::LocalDeclaration:
+  case AstExpressionKind::LocalDeclaration: {
     if (expression.text.empty()) {
       diagnostics.error(expression.span, "local declaration has no name");
       ok = false;
@@ -447,11 +464,23 @@ bool AstValidator::validateExpression(const AstExpression& expression,
                         "local declaration must have at most one initializer");
       ok = false;
     }
+    const bool inferredLegacyImplicitValue =
+        expression.isLegacyImplicit && expression.localMethod == nullptr;
     if (expression.isGiven &&
-        (expression.mutableLocal || expression.declaredType.empty() ||
+        (expression.mutableLocal ||
+         (!inferredLegacyImplicitValue && expression.declaredType.empty()) ||
          expression.children.size() != 1)) {
+      diagnostics.error(
+          expression.span,
+          expression.isLegacyImplicit
+              ? "local implicit declaration requires a valid initializer"
+              : "local given requires an explicit type and initializer");
+      ok = false;
+    }
+    if (expression.isLegacyImplicit && !expression.isGiven) {
       diagnostics.error(expression.span,
-                        "local given requires an explicit type and initializer");
+                        "legacy-implicit metadata requires a local contextual "
+                        "declaration");
       ok = false;
     }
     if (expression.isAnonymousGiven && !expression.isGiven) {
@@ -471,12 +500,16 @@ bool AstValidator::validateExpression(const AstExpression& expression,
       if (std::any_of(expression.localMethod->contextualParameters.begin(),
                       expression.localMethod->contextualParameters.end(),
                       [](bool contextual) { return !contextual; })) {
-        diagnostics.error(expression.span,
-                          "parameterized given must accept only using parameters");
+        diagnostics.error(
+            expression.span,
+            expression.isLegacyImplicit
+                ? "implicit conversion definitions with ordinary parameters are not "
+                  "supported in this contextual milestone"
+                : "parameterized given must accept only using parameters");
         ok = false;
       }
     }
-    break;
+  } break;
   default:
     break;
   }

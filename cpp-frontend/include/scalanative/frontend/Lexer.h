@@ -37,6 +37,7 @@ enum class TokenKind {
   KeywordGiven,
   KeywordIf,
   KeywordImport,
+  KeywordImplicit,
   KeywordMatch,
   KeywordNew,
   KeywordNull,

@@ -854,6 +854,9 @@ TokenKind Lexer::keywordKind(std::string_view text) const {
   if (text == "import") {
     return TokenKind::KeywordImport;
   }
+  if (text == "implicit") {
+    return TokenKind::KeywordImplicit;
+  }
   if (text == "match") {
     return TokenKind::KeywordMatch;
   }
@@ -986,6 +989,7 @@ bool Lexer::canStartStatement(TokenKind kind) {
   case TokenKind::KeywordGiven:
   case TokenKind::KeywordIf:
   case TokenKind::KeywordImport:
+  case TokenKind::KeywordImplicit:
   case TokenKind::KeywordNew:
   case TokenKind::KeywordNull:
   case TokenKind::KeywordObject:
@@ -1062,6 +1066,8 @@ const char* tokenKindName(TokenKind kind) {
     return "if";
   case TokenKind::KeywordImport:
     return "import";
+  case TokenKind::KeywordImplicit:
+    return "implicit";
   case TokenKind::KeywordMatch:
     return "match";
   case TokenKind::KeywordNew:

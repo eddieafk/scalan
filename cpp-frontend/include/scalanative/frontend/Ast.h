@@ -89,6 +89,7 @@ struct AstExpression {
   std::vector<AstExpression> children;
   bool mutableLocal = false;
   bool isGiven = false;
+  bool isLegacyImplicit = false;
   bool isAnonymousGiven = false;
 };
 
@@ -121,6 +122,7 @@ struct AstDeclaration {
   bool isOverride = false;
   bool isSealed = false;
   bool isGiven = false;
+  bool isLegacyImplicit = false;
   bool isAnonymousGiven = false;
   bool hasInitializer = false;
   AstExpression initializer;

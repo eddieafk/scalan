@@ -195,13 +195,15 @@ import Show.{catShow => selectedCatShow}
 
 object ContextualAbstractions {
   given dogShow: Show[Dog] = new DogShow("dog:")
-  given dogTypeName: TypeName[Dog] = new TypeName[Dog]("context-dog")
+  implicit val dogTypeName: TypeName[Dog] =
+    new TypeName[Dog]("context-dog")
   given dogDependentInput: DependentInput[Dog] = new DogDependentInput
   given dogStringContext: ContextPair[Dog, String] =
     new ContextPair[Dog, String]("mixed-dog-string", "expected-dog-string")
   given dogContextSeed: ContextSeed[Dog] =
     new ContextSeed[Dog]("seed-dog")
-  given contextIntermediate[A: ContextSeed as seed]: ContextIntermediate[A] =
+  implicit def contextIntermediate[A](
+      implicit seed: ContextSeed[A]): ContextIntermediate[A] =
     new ContextIntermediate[A]("intermediate:" + seed.label)
   given contextGenerated[A](
       using intermediate: ContextIntermediate[A]): ContextGenerated[A] =
@@ -219,7 +221,7 @@ object ContextualAbstractions {
   def evidence[A]()(using show: Show[A]): Show[A] =
     show
 
-  def inferredContextType[A]()(using typeName: TypeName[A]): String =
+  def inferredContextType[A]()(implicit typeName: TypeName[A]): String =
     typeName.name
 
   def forwardedContextType[A]()(using typeName: TypeName[A]): String =

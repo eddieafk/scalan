@@ -35,6 +35,7 @@ private:
   [[nodiscard]] AstDeclaration parseType(const Token& keyword);
   [[nodiscard]] AstDeclaration parseDef(const Token& keyword);
   [[nodiscard]] AstDeclaration parseGiven(const Token& keyword);
+  [[nodiscard]] AstDeclaration parseImplicit(const Token& keyword);
   [[nodiscard]] AstDeclaration parseValOrVar(AstDeclarationKind kind,
                                              const Token& keyword);
   [[nodiscard]] std::vector<AstTypeParameter> parseTypeParameterList();
