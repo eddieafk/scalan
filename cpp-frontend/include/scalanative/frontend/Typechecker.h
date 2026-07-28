@@ -79,6 +79,7 @@ struct TypedDeclaration {
   std::vector<AstExpression> parentArguments;
   std::string importPath;
   std::vector<AstImportSelector> importSelectors;
+  std::vector<std::string> importGivenTypes;
   bool importsGivens = false;
   bool importsWildcard = false;
   TypeInfo inferredType;
@@ -193,6 +194,12 @@ private:
                                                   const std::string& owner) const;
   [[nodiscard]] std::string importSymbolName(const AstDeclaration& declaration,
                                              const Scope& scope) const;
+  [[nodiscard]] bool givenImportMatches(const AstDeclaration& declaration,
+                                        const SymbolInfo& symbol,
+                                        const Scope& scope) const;
+  [[nodiscard]] bool givenImportTypeMatches(const std::string& filter,
+                                            const TypeInfo& candidate,
+                                            const Scope& scope) const;
   void applyImport(const AstDeclaration& declaration, Scope& scope);
   void mergeScope(Scope& destination, const Scope& source) const;
   [[nodiscard]] TypeInfo inferExpressionType(const AstExpression& expression,

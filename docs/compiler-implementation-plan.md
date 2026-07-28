@@ -1180,9 +1180,17 @@ Current scaffold status:
   recursive search and NIR accessor lowering, while ordinary wildcard members
   continue through import aliases. Runtime coverage verifies standalone and
   combined selectors, cross-syntax evidence, modern wildcard access, and the
-  absence of leakage in both directions. Type-filtered selectors such as
-  `given Ordering[?]` receive a focused unsupported diagnostic and remain the
-  next contextual-import slice.
+  absence of leakage in both directions.
+- Type-filtered given selectors now accept concrete applied types such as
+  `import Owner.given Context[Int]`, multiple braced filters, and bare wildcard
+  arguments such as `Context[?]`. Filters compare the declared result type of
+  stored or parameterized evidence, follow specialized parent types, and add
+  only matching contextual symbols to lexical search and NIR import metadata.
+  A braced selector may still combine filtered givens with `*`, which imports
+  ordinary members independently. Runtime and NIR coverage verifies concrete
+  inclusion, non-selected exclusion, multiple filters, wildcard matching, and
+  imported legacy implicits. Bounded wildcard filters and general infix type
+  patterns remain later import slices.
 - Full inline call-site specialization remains a later milestone.
 - Postfix type application now supports typed `value.isInstanceOf[Target]` and
   checked `value.asInstanceOf[Target]` for known classes, traits, and objects.

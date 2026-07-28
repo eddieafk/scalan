@@ -485,6 +485,17 @@ AppliedTypeSyntax parseAppliedTypeSyntax(std::string_view typeName) {
   return parsed;
 }
 
+bool hasSupportedGivenImportWildcards(std::string_view typeName) {
+  const std::string compact = compactTypeName(typeName);
+  if (compact.find('?') == std::string::npos || compact == "?") {
+    return true;
+  }
+  const AppliedTypeSyntax applied = parseAppliedTypeSyntax(compact);
+  return applied.applied && !applied.malformed &&
+         std::all_of(applied.arguments.begin(), applied.arguments.end(),
+                     hasSupportedGivenImportWildcards);
+}
+
 std::vector<std::string> typeArgumentsFor(const AstExpression& expression) {
   if (!expression.typeArguments.empty()) {
     return expression.typeArguments;
@@ -1327,6 +1338,7 @@ TypedDeclaration Typechecker::typecheckDeclaration(const AstDeclaration& declara
   typed.span = declaration.span;
   typed.importPath = declaration.importPath;
   typed.importSelectors = declaration.importSelectors;
+  typed.importGivenTypes = declaration.importGivenTypes;
   typed.importsGivens = declaration.importsGivens;
   typed.importsWildcard = declaration.importsWildcard;
   typed.parentArguments = declaration.parentArguments;
@@ -1458,7 +1470,7 @@ TypedDeclaration Typechecker::typecheckDeclaration(const AstDeclaration& declara
   }
   if (declaration.kind == AstDeclarationKind::Import &&
       (declaration.name == "_" || declaration.importsWildcard ||
-       declaration.importsGivens)) {
+       declaration.importsGivens || !declaration.importGivenTypes.empty())) {
     const std::string& importOwner = typed.symbolName;
     for (const auto& [symbolName, symbol] : globalSymbols_) {
       if (!isDirectMemberOf(symbolName, importOwner)) {
@@ -1467,7 +1479,8 @@ TypedDeclaration Typechecker::typecheckDeclaration(const AstDeclaration& declara
       const bool wildcardMatch =
           (declaration.name == "_" || declaration.importsWildcard) &&
           !symbol.isGiven;
-      const bool givenMatch = declaration.importsGivens && symbol.isGiven;
+      const bool givenMatch =
+          givenImportMatches(declaration, symbol, signatureScope);
       if (!wildcardMatch && !givenMatch) {
         continue;
       }
@@ -2287,7 +2300,8 @@ std::string Typechecker::importSymbolName(const AstDeclaration& declaration,
   };
 
   if (!declaration.importSelectors.empty() || declaration.name == "_" ||
-      declaration.importsWildcard || declaration.importsGivens) {
+      declaration.importsWildcard || declaration.importsGivens ||
+      !declaration.importGivenTypes.empty()) {
     return resolveOwner(path);
   }
   if (globalSymbols_.contains(path)) {
@@ -3356,6 +3370,89 @@ void Typechecker::attachDerivedInstances(std::vector<TypedDeclaration>& declarat
   }
 }
 
+bool Typechecker::givenImportTypeMatches(const std::string& filter,
+                                         const TypeInfo& candidate,
+                                         const Scope& scope) const {
+  std::unordered_set<std::string> visiting;
+  std::function<bool(const std::string&, const TypeInfo&)> matches;
+  matches = [&](const std::string& patternName, const TypeInfo& value) {
+    const std::string pattern = compactTypeName(patternName);
+    if (pattern == "?") {
+      return true;
+    }
+
+    const AppliedTypeSyntax applied = parseAppliedTypeSyntax(pattern);
+    if (!applied.applied || applied.malformed ||
+        pattern.find('?') == std::string::npos) {
+      const TypeInfo expected = typeFromDeclaredName(pattern, &scope);
+      return expected.kind != SimpleTypeKind::Unknown &&
+             isAssignable(expected, value);
+    }
+
+    const SymbolInfo* constructor =
+        typeSymbolForDeclaredName(applied.constructor, &scope);
+    if (constructor == nullptr ||
+        (constructor->kind != AstDeclarationKind::Class &&
+         constructor->kind != AstDeclarationKind::Trait) ||
+        constructor->typeParameters.size() != applied.arguments.size()) {
+      return false;
+    }
+
+    std::function<bool(const TypeInfo&)> matchesConstructor;
+    matchesConstructor = [&](const TypeInfo& current) {
+      if (current.typeConstructorName == constructor->symbolName &&
+          current.typeArguments.size() == applied.arguments.size()) {
+        for (std::size_t i = 0; i < applied.arguments.size(); ++i) {
+          if (!matches(applied.arguments[i], current.typeArguments[i])) {
+            return false;
+          }
+        }
+        return true;
+      }
+
+      const std::string currentName =
+          current.typeConstructorName.empty()
+              ? (current.runtimeName.empty() ? current.name : current.runtimeName)
+              : current.typeConstructorName;
+      const std::string visitKey = pattern + " <- " + currentName;
+      if (!visiting.insert(visitKey).second) {
+        return false;
+      }
+      auto currentSymbol = globalSymbols_.find(currentName);
+      if (currentSymbol != globalSymbols_.end()) {
+        for (const TypeInfo& parentPattern : currentSymbol->second.parentTypes) {
+          const TypeInfo parent =
+              specializeTypeForReceiver(parentPattern, current);
+          if (matchesConstructor(parent)) {
+            visiting.erase(visitKey);
+            return true;
+          }
+        }
+      }
+      visiting.erase(visitKey);
+      return false;
+    };
+    return matchesConstructor(value);
+  };
+  return matches(filter, candidate);
+}
+
+bool Typechecker::givenImportMatches(const AstDeclaration& declaration,
+                                     const SymbolInfo& symbol,
+                                     const Scope& scope) const {
+  if (!symbol.isGiven) {
+    return false;
+  }
+  if (declaration.importsGivens) {
+    return true;
+  }
+  return std::any_of(
+      declaration.importGivenTypes.begin(), declaration.importGivenTypes.end(),
+      [&](const std::string& filter) {
+        return givenImportTypeMatches(filter, symbol.type, scope);
+      });
+}
+
 void Typechecker::applyImport(const AstDeclaration& declaration, Scope& scope) {
   if (declaration.kind != AstDeclarationKind::Import) {
     return;
@@ -3366,13 +3463,22 @@ void Typechecker::applyImport(const AstDeclaration& declaration, Scope& scope) {
 
   const bool wildcardImport =
       declaration.name == "_" || declaration.importsWildcard;
-  const bool bulkImport = wildcardImport || declaration.importsGivens;
+  const bool bulkImport = wildcardImport || declaration.importsGivens ||
+                          !declaration.importGivenTypes.empty();
   if (!declaration.importSelectors.empty() || bulkImport) {
     const std::string importOwner = importSymbolName(declaration, scope);
     if (!globalSymbols_.contains(importOwner)) {
       diagnostics_.error(declaration.span,
                          "unresolved import owner: " + declaration.importPath);
       return;
+    }
+    for (const std::string& filter : declaration.importGivenTypes) {
+      if (!hasSupportedGivenImportWildcards(filter)) {
+        diagnostics_.error(
+            declaration.span,
+            "given import filters currently support only bare '?' "
+            "wildcard arguments");
+      }
     }
     for (const AstImportSelector& selector : declaration.importSelectors) {
       const std::string importedName = importOwner + "." + selector.name;
@@ -3394,7 +3500,7 @@ void Typechecker::applyImport(const AstDeclaration& declaration, Scope& scope) {
         continue;
       }
       const bool wildcardMatch = wildcardImport && !symbol.isGiven;
-      const bool givenMatch = declaration.importsGivens && symbol.isGiven;
+      const bool givenMatch = givenImportMatches(declaration, symbol, scope);
       if (!wildcardMatch && !givenMatch) {
         continue;
       }

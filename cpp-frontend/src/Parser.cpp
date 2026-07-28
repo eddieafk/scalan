@@ -442,14 +442,17 @@ AstDeclaration Parser::parseImport(const Token& keyword) {
 
   if (match(TokenKind::Dot)) {
     if (match(TokenKind::KeywordGiven)) {
-      declaration.importsGivens = true;
-      if (!isAtEnd() && !check(TokenKind::Semicolon) &&
-          !hasLeadingNewline(peek())) {
-        diagnostics_.error(
-            peek().span,
-            "type-filtered given imports are not supported yet; "
-            "use an unfiltered '.given' selector");
-        (void)parseTypeName();
+      if (isAtEnd() || check(TokenKind::Semicolon) ||
+          hasLeadingNewline(peek())) {
+        declaration.importsGivens = true;
+      } else {
+        const std::string filter = parseTypeName();
+        if (filter.empty()) {
+          diagnostics_.error(previous().span,
+                             "expected type after given import selector");
+        } else {
+          declaration.importGivenTypes.push_back(filter);
+        }
       }
     } else if (isStar(peek())) {
       advance();
@@ -461,13 +464,16 @@ AstDeclaration Parser::parseImport(const Token& keyword) {
     } else {
       while (!isAtEnd() && !check(TokenKind::RightBrace)) {
         if (match(TokenKind::KeywordGiven)) {
-          declaration.importsGivens = true;
-          if (!check(TokenKind::Comma) && !check(TokenKind::RightBrace)) {
-            diagnostics_.error(
-                peek().span,
-                "type-filtered given imports are not supported yet; "
-                "use an unfiltered 'given' selector");
-            (void)parseTypeName();
+          if (check(TokenKind::Comma) || check(TokenKind::RightBrace)) {
+            declaration.importsGivens = true;
+          } else {
+            const std::string filter = parseTypeName();
+            if (filter.empty()) {
+              diagnostics_.error(previous().span,
+                                 "expected type after given import selector");
+            } else {
+              declaration.importGivenTypes.push_back(filter);
+            }
           }
         } else if (isStar(peek())) {
           advance();
@@ -497,7 +503,8 @@ AstDeclaration Parser::parseImport(const Token& keyword) {
     }
   }
 
-  if (declaration.importSelectors.empty() && !declaration.importsGivens &&
+  if (declaration.importSelectors.empty() &&
+      declaration.importGivenTypes.empty() && !declaration.importsGivens &&
       !declaration.importsWildcard) {
     const std::size_t dot = declaration.importPath.rfind('.');
     declaration.name = dot == std::string::npos

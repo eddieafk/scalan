@@ -827,7 +827,7 @@ importAliasesFor(const std::vector<frontend::TypedDeclaration>& declarations) {
       }
     }
     if (declaration.name == "_" || declaration.importsWildcard ||
-        declaration.importsGivens) {
+        declaration.importsGivens || !declaration.importGivenTypes.empty()) {
       for (const frontend::TypedDeclaration& imported : declaration.members) {
         if (!imported.name.empty() && !imported.symbolName.empty()) {
           aliases[imported.name] = imported.symbolName;

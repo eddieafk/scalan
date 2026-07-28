@@ -196,10 +196,12 @@ import Show.{catShow => selectedCatShow}
 object LegacyContextualImports {
   implicit val dogTypeName: TypeName[Dog] =
     new TypeName[Dog]("context-dog")
+  implicit val catTypeName: TypeName[Cat] =
+    new TypeName[Cat]("must-not-import")
   val ordinaryLabel: String = "not-contextual"
 }
 
-import LegacyContextualImports.given
+import LegacyContextualImports.given TypeName[Dog]
 
 object ContextualAbstractions {
   given dogShow: Show[Dog] = new DogShow("dog:")

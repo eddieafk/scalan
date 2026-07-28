@@ -151,6 +151,17 @@ trait ImportedContext[A] {
 }
 class ImportedContextValue[A](val label: String) extends ImportedContext[A]
 
+trait FilteredContext[A] {
+  val label: String
+}
+class FilteredContextValue[A](val label: String) extends FilteredContext[A]
+
+trait WildcardImportedContext[A] {
+  val label: String
+}
+class WildcardImportedContextValue[A](val label: String)
+    extends WildcardImportedContext[A]
+
 trait PairNamed[A, B] {
   val name: String
   val value: B
@@ -232,9 +243,32 @@ object CombinedImportProviders {
   val combinedLabel: String = "combined-star"
 }
 
+object FilteredImportProviders {
+  given filteredInt: FilteredContext[Int] =
+    new FilteredContextValue[Int]("filtered-int")
+  given filteredString: FilteredContext[String] =
+    new FilteredContextValue[String]("filtered-string")
+  given filteredLong: FilteredContext[Long] =
+    new FilteredContextValue[Long]("must-not-import")
+  val filteredLabel: String = "filtered-star"
+}
+
+object WildcardGivenImportProviders {
+  given wildcardInt: WildcardImportedContext[Int] =
+    new WildcardImportedContextValue[Int]("wildcard-int")
+  given wildcardString: WildcardImportedContext[String] =
+    new WildcardImportedContextValue[String]("wildcard-string")
+}
+
 import GivenImportProviders.given
 import StarImportProviders.*
 import CombinedImportProviders.{given, *}
+import FilteredImportProviders.{
+  given FilteredContext[Int],
+  given FilteredContext[String],
+  *
+}
+import WildcardGivenImportProviders.given WildcardImportedContext[?]
 
 object Main {
   implicit val legacyIntNamed: LegacyNamed[Int] =
@@ -283,6 +317,14 @@ object Main {
 
   def importedContextName[A](
       using imported: ImportedContext[A]): String =
+    imported.label
+
+  def filteredContextName[A](
+      using imported: FilteredContext[A]): String =
+    imported.label
+
+  def wildcardImportedContextName[A](
+      using imported: WildcardImportedContext[A]): String =
     imported.label
 
   def localLegacyContextName: String = {
@@ -526,6 +568,11 @@ object Main {
     println(starLabel)
     println(importedContextName[Boolean]())
     println(combinedLabel)
+    println(filteredContextName[Int]())
+    println(filteredContextName[String]())
+    println(filteredLabel)
+    println(wildcardImportedContextName[Int]())
+    println(wildcardImportedContextName[String]())
     println(contextName())
     println(forwardedContextName[Int]())
     println(repeatedContextName())
@@ -723,12 +770,18 @@ object Main {
 
 trait Marker[A]
 object Providers {
-  given marker: Marker[Int] = null
+  given intMarker: Marker[Int] = null
+  given longMarker: Marker[Long] = null
 }
 
 import Providers.given Marker[Int]
+import Providers.given Marker[? <: Long]
 
-object Main
+object Main {
+  def requireMarker[A]()(using marker: Marker[A]): String = "marker"
+  val included = requireMarker[Int]()
+  val excluded = requireMarker[Long]()
+}
 )";
   constexpr const char* invalidNestedDerivationSource =
       R"(package demo.invalidnestedderivation
@@ -856,6 +909,8 @@ object Main {
               "legacy-member:16\nlegacy-generated:legacy-member\n"
               "legacy-member\nlegacy-local\nlegacy-member\n"
               "given-import\nstar-import\ncombined-given\ncombined-star\n"
+              "filtered-int\nfiltered-string\nfiltered-star\n"
+              "wildcard-int\nwildcard-string\n"
               "context-int\n"
               "context-int\ncontext-int:context-int\ncontext-int-string\n"
               "context-int-string\nexpected-context\ncontext-int-string\n"
@@ -930,8 +985,12 @@ object Main {
                "requireMarker") &&
       !invalidFilteredGivenImport.ok &&
       contains(invalidFilteredGivenImport.diagnosticsText,
-               "type-filtered given imports are not supported yet; "
-               "use an unfiltered '.given' selector") &&
+               "no given value found for context parameter marker of type "
+               "demo.invalidfilteredgivenimport.Marker [ Long ] required by "
+               "requireMarker") &&
+      contains(invalidFilteredGivenImport.diagnosticsText,
+               "given import filters currently support only bare '?' "
+               "wildcard arguments") &&
       !invalidNestedDerivation.ok &&
       contains(invalidNestedDerivation.diagnosticsText,
                "derives declarations nested in classes or traits are not "
@@ -1086,6 +1145,22 @@ object Main {
                "%demo.qualifiedcases.CombinedImportProviders.importedBoolean())") &&
       contains(result.nirText,
                "println(%demo.qualifiedcases.CombinedImportProviders.combinedLabel)") &&
+      contains(result.nirText,
+               "call %filteredContextName(call "
+               "%demo.qualifiedcases.FilteredImportProviders.filteredInt())") &&
+      contains(result.nirText,
+               "call %filteredContextName(call "
+               "%demo.qualifiedcases.FilteredImportProviders.filteredString())") &&
+      !contains(result.nirText,
+                "call %demo.qualifiedcases.FilteredImportProviders.filteredLong()") &&
+      contains(result.nirText,
+               "println(%demo.qualifiedcases.FilteredImportProviders.filteredLabel)") &&
+      contains(result.nirText,
+               "call %wildcardImportedContextName(call "
+               "%demo.qualifiedcases.WildcardGivenImportProviders.wildcardInt())") &&
+      contains(result.nirText,
+               "call %wildcardImportedContextName(call "
+               "%demo.qualifiedcases.WildcardGivenImportProviders.wildcardString())") &&
       contains(result.nirText, "define @demo.qualifiedcases.Main.contextName : "
                                "(demo.qualifiedcases.Named)String") &&
       contains(result.nirText, "ret String call %contextName(%named)") &&
