@@ -204,6 +204,11 @@ class GroupedLeftTaggedValue(val label: String)
 class GroupedRightTaggedValue(val label: String)
     extends GroupedRight with GroupedTagged
 
+infix trait Relates[A, B] {
+  val label: String
+}
+class RelatesValue[A, B](val label: String) extends Relates[A, B]
+
 trait PairNamed[A, B] {
   val name: String
   val value: B
@@ -341,6 +346,25 @@ object GroupedGivenImportProviders {
     new GroupedRightTaggedValue("grouped-right-tagged")
 }
 
+object UserInfixGivenImportProviders {
+  given dogAnimal: Relates[ImportDog, ImportAnimal] =
+    new RelatesValue[ImportDog, ImportAnimal]("user-infix")
+  given animalDog: Relates[ImportAnimal, ImportDog] =
+    new RelatesValue[ImportAnimal, ImportDog]("must-not-import")
+  given catRock: Relates[ImportCat, ImportRock] =
+    new RelatesValue[ImportCat, ImportRock]("user-infix-wildcard")
+  given leftChain:
+      Relates[Relates[ImportDog, ImportCat], ImportAnimal] =
+    new RelatesValue[
+      Relates[ImportDog, ImportCat],
+      ImportAnimal]("user-infix-left-chain")
+  given rightChain:
+      Relates[ImportDog, Relates[ImportCat, ImportAnimal]] =
+    new RelatesValue[
+      ImportDog,
+      Relates[ImportCat, ImportAnimal]]("user-infix-right-chain")
+}
+
 import GivenImportProviders.given
 import StarImportProviders.*
 import CombinedImportProviders.{given, *}
@@ -357,6 +381,12 @@ import BoundedGivenImportProviders.{
 }
 import PrecedenceGivenImportProviders.given PrecedenceLeft | PrecedenceRight & PrecedenceTagged
 import GroupedGivenImportProviders.given (GroupedLeft | GroupedRight) & GroupedTagged
+import UserInfixGivenImportProviders.{
+  given ImportDog Relates ImportAnimal,
+  given ? Relates ImportRock,
+  given ImportDog Relates ImportCat Relates ImportAnimal,
+  given ImportDog Relates (ImportCat Relates ImportAnimal)
+}
 
 object Main {
   implicit val legacyIntNamed: LegacyNamed[Int] =
@@ -440,6 +470,9 @@ object Main {
 
   def groupedRightTaggedName()(
       using imported: GroupedRightTaggedValue): String =
+    imported.label
+
+  def userInfixName[A, B]()(using imported: Relates[A, B]): String =
     imported.label
 
   def localLegacyContextName: String = {
@@ -697,6 +730,12 @@ object Main {
     println(precedenceRightTaggedName())
     println(groupedLeftTaggedName())
     println(groupedRightTaggedName())
+    println(userInfixName[ImportDog, ImportAnimal]())
+    println(userInfixName[ImportCat, ImportRock]())
+    println(
+      userInfixName[Relates[ImportDog, ImportCat], ImportAnimal]())
+    println(
+      userInfixName[ImportDog, Relates[ImportCat, ImportAnimal]]())
     println(contextName())
     println(forwardedContextName[Int]())
     println(repeatedContextName())
@@ -897,6 +936,8 @@ class Child extends Parent
 class Sibling extends Parent
 
 trait Marker[A]
+infix trait Relation[A, B]
+infix trait UnaryRelation[A]
 object Providers {
   given childMarker: Marker[Child] = null
   given parentMarker: Marker[Parent] = null
@@ -906,6 +947,7 @@ object Providers {
 import Providers.given Marker[? >: Child <: Parent]
 import Providers.given Marker[? >: Parent <: Child]
 import Providers.{given Parent |, *}
+import Providers.{given Child Relation, *}
 
 object Main {
   def requireMarker[A]()(using marker: Marker[A]): String = "marker"
@@ -1046,6 +1088,8 @@ object Main {
               "bounded-factory\n"
               "infix-left\ninfix-right-tagged\n"
               "grouped-left-tagged\ngrouped-right-tagged\n"
+              "user-infix\nuser-infix-wildcard\n"
+              "user-infix-left-chain\nuser-infix-right-chain\n"
               "context-int\n"
               "context-int\ncontext-int:context-int\ncontext-int-string\n"
               "context-int-string\nexpected-context\ncontext-int-string\n"
@@ -1131,6 +1175,11 @@ object Main {
       contains(invalidFilteredGivenImport.diagnosticsText,
                "malformed intersection or union type in given import filter: "
                "Parent |") &&
+      contains(invalidFilteredGivenImport.diagnosticsText,
+               "malformed user-defined infix type in given import filter: "
+               "Child Relation") &&
+      contains(invalidFilteredGivenImport.diagnosticsText,
+               "infix class or trait requires exactly two type parameters") &&
       !invalidNestedDerivation.ok &&
       contains(invalidNestedDerivation.diagnosticsText,
                "derives declarations nested in classes or traits are not "
@@ -1348,6 +1397,25 @@ object Main {
       !contains(result.nirText,
                 "call %demo.qualifiedcases.GroupedGivenImportProviders."
                 "groupedRight()") &&
+      contains(result.nirText,
+               "call %userInfixName(call "
+               "%demo.qualifiedcases.UserInfixGivenImportProviders."
+               "dogAnimal())") &&
+      contains(result.nirText,
+               "call %userInfixName(call "
+               "%demo.qualifiedcases.UserInfixGivenImportProviders."
+               "catRock())") &&
+      contains(result.nirText,
+               "call %userInfixName(call "
+               "%demo.qualifiedcases.UserInfixGivenImportProviders."
+               "leftChain())") &&
+      contains(result.nirText,
+               "call %userInfixName(call "
+               "%demo.qualifiedcases.UserInfixGivenImportProviders."
+               "rightChain())") &&
+      !contains(result.nirText,
+                "call %demo.qualifiedcases.UserInfixGivenImportProviders."
+                "animalDog()") &&
       contains(result.nirText, "define @demo.qualifiedcases.Main.contextName : "
                                "(demo.qualifiedcases.Named)String") &&
       contains(result.nirText, "ret String call %contextName(%named)") &&

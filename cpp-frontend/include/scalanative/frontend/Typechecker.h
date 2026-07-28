@@ -200,6 +200,8 @@ private:
   [[nodiscard]] bool givenImportTypeMatches(const std::string& filter,
                                             const SymbolInfo& candidate,
                                             const Scope& scope) const;
+  [[nodiscard]] std::string desugarGivenImportUserInfix(
+      const std::string& filter, const Scope& scope, bool* malformed) const;
   [[nodiscard]] bool validateGivenImportFilter(
       const std::string& filter, const Scope& scope,
       const support::SourceSpan& span) const;

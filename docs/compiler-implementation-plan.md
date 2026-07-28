@@ -1199,8 +1199,16 @@ Current scaffold status:
   These filters compose with applied and wildcard operands, so selectors such as
   `given Context[?] & Tagged` remain import-only type tests without changing
   runtime erasure. Runtime and NIR coverage verifies both branches, precedence,
-  grouping, non-selected exclusion, and malformed infix diagnostics. General
-  user-defined infix type constructors and whole-program intersection/union type
+  grouping, non-selected exclusion, and malformed infix diagnostics.
+- User-defined alphanumeric infix type constructors in given import filters now
+  desugar from `Left Relation Right` to `Relation[Left, Right]`. Two-parameter
+  classes and traits may use Scala 3's soft `infix` modifier, repeated operators
+  associate to the left, parentheses override grouping, and wildcard operands
+  reuse applied-filter matching. The desugaring also composes beneath built-in
+  intersection/union filters and nested applied arguments. Runtime and NIR
+  coverage verifies exact, wildcard, left-chain, right-grouped, malformed, and
+  non-selected cases. Symbolic user operators, right-associative `:` operators,
+  generic infix type aliases, and whole-program intersection/union type
   representation remain later type-system slices.
 - Full inline call-site specialization remains a later milestone.
 - Postfix type application now supports typed `value.isInstanceOf[Target]` and

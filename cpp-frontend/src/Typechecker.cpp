@@ -3546,9 +3546,251 @@ void Typechecker::attachDerivedInstances(std::vector<TypedDeclaration>& declarat
   }
 }
 
+std::string Typechecker::desugarGivenImportUserInfix(
+    const std::string& filter, const Scope& scope, bool* malformed) const {
+  struct OperatorToken {
+    std::size_t start = 0;
+    std::size_t end = 0;
+    std::string name;
+  };
+
+  const auto isIdentifierStart = [](char ch) {
+    return (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') ||
+           ch == '_' || ch == '$';
+  };
+  const auto isIdentifierPart = [&](char ch) {
+    return isIdentifierStart(ch) || (ch >= '0' && ch <= '9');
+  };
+  const auto nextNonSpace = [](std::string_view text, std::size_t start) {
+    while (start < text.size() &&
+           (text[start] == ' ' || text[start] == '\t' ||
+            text[start] == '\n' || text[start] == '\r')) {
+      ++start;
+    }
+    return start;
+  };
+
+  std::function<std::string(std::string)> desugar;
+  desugar = [&](std::string source) -> std::string {
+    source = trim(source);
+    if (source.empty()) {
+      *malformed = true;
+      return source;
+    }
+
+    std::vector<char> delimiters;
+    for (char ch : source) {
+      if (ch == '[' || ch == '(') {
+        delimiters.push_back(ch);
+      } else if (ch == ']' || ch == ')') {
+        const char expected = ch == ']' ? '[' : '(';
+        if (delimiters.empty() || delimiters.back() != expected) {
+          *malformed = true;
+          return source;
+        }
+        delimiters.pop_back();
+      }
+    }
+    if (!delimiters.empty()) {
+      *malformed = true;
+      return source;
+    }
+
+    if (source.front() == '(') {
+      std::size_t depth = 0;
+      std::size_t closing = std::string::npos;
+      for (std::size_t i = 0; i < source.size(); ++i) {
+        if (source[i] == '(') {
+          ++depth;
+        } else if (source[i] == ')') {
+          --depth;
+          if (depth == 0) {
+            closing = i;
+            break;
+          }
+        }
+      }
+      if (closing + 1 == source.size()) {
+        return "(" + desugar(source.substr(1, source.size() - 2)) + ")";
+      }
+    }
+
+    std::vector<OperatorToken> operators;
+    std::size_t bracketDepth = 0;
+    std::size_t parenthesisDepth = 0;
+    for (std::size_t i = 0; i < source.size();) {
+      if (source[i] == '[') {
+        ++bracketDepth;
+        ++i;
+        continue;
+      }
+      if (source[i] == ']') {
+        --bracketDepth;
+        ++i;
+        continue;
+      }
+      if (source[i] == '(') {
+        ++parenthesisDepth;
+        ++i;
+        continue;
+      }
+      if (source[i] == ')') {
+        --parenthesisDepth;
+        ++i;
+        continue;
+      }
+      if (bracketDepth != 0 || parenthesisDepth != 0 ||
+          !isIdentifierStart(source[i])) {
+        ++i;
+        continue;
+      }
+
+      const std::size_t start = i++;
+      while (i < source.size() && isIdentifierPart(source[i])) {
+        ++i;
+      }
+      const std::string name = source.substr(start, i - start);
+      if ((start != 0 && source[start - 1] == '.') ||
+          (i < source.size() && source[i] == '.')) {
+        continue;
+      }
+      const SymbolInfo* symbol = typeSymbolForDeclaredName(name, &scope);
+      if (symbol == nullptr ||
+          (symbol->kind != AstDeclarationKind::Class &&
+           symbol->kind != AstDeclarationKind::Trait) ||
+          symbol->typeParameters.size() != 2) {
+        continue;
+      }
+      const std::size_t after = nextNonSpace(source, i);
+      if (start == 0 && after < source.size() && source[after] == '[') {
+        continue;
+      }
+      operators.push_back(OperatorToken{start, i, name});
+    }
+
+    if (!operators.empty()) {
+      const OperatorToken& operation = operators.back();
+      const std::string left = trim(source.substr(0, operation.start));
+      const std::string right = trim(source.substr(operation.end));
+      if (left.empty() || right.empty()) {
+        *malformed = true;
+        return source;
+      }
+      return operation.name + "[" + desugar(left) + "," + desugar(right) + "]";
+    }
+
+    const auto rewriteBuiltIn = [&](char operation) -> std::optional<std::string> {
+      std::size_t squareDepth = 0;
+      std::size_t roundDepth = 0;
+      std::vector<std::string> operands;
+      std::size_t operandStart = 0;
+      for (std::size_t i = 0; i <= source.size(); ++i) {
+        if (i != source.size()) {
+          if (source[i] == '[') {
+            ++squareDepth;
+          } else if (source[i] == ']') {
+            --squareDepth;
+          } else if (source[i] == '(') {
+            ++roundDepth;
+          } else if (source[i] == ')') {
+            --roundDepth;
+          }
+        }
+        if (i != source.size() &&
+            (source[i] != operation || squareDepth != 0 || roundDepth != 0)) {
+          continue;
+        }
+        if (i != source.size() || !operands.empty()) {
+          operands.push_back(source.substr(operandStart, i - operandStart));
+          operandStart = i + 1;
+        }
+      }
+      if (operands.empty()) {
+        return std::nullopt;
+      }
+      if (std::any_of(operands.begin(), operands.end(),
+                      [](const std::string& operand) {
+                        return trim(operand).empty();
+                      })) {
+        return source;
+      }
+      std::string rewritten;
+      for (std::size_t i = 0; i < operands.size(); ++i) {
+        if (i != 0) {
+          rewritten += operation;
+        }
+        rewritten += desugar(operands[i]);
+      }
+      return rewritten;
+    };
+    if (const auto unionType = rewriteBuiltIn('|'); unionType.has_value()) {
+      return *unionType;
+    }
+    if (const auto intersectionType = rewriteBuiltIn('&');
+        intersectionType.has_value()) {
+      return *intersectionType;
+    }
+
+    std::size_t open = std::string::npos;
+    std::size_t roundDepth = 0;
+    for (std::size_t i = 0; i < source.size(); ++i) {
+      if (source[i] == '(') {
+        ++roundDepth;
+      } else if (source[i] == ')') {
+        --roundDepth;
+      } else if (source[i] == '[' && roundDepth == 0) {
+        open = i;
+        break;
+      }
+    }
+    if (open == std::string::npos || source.back() != ']') {
+      return source;
+    }
+
+    std::vector<std::string> arguments;
+    std::size_t squareDepth = 0;
+    std::size_t nestedRoundDepth = 0;
+    std::size_t argumentStart = open + 1;
+    for (std::size_t i = open + 1; i + 1 < source.size(); ++i) {
+      if (source[i] == '[') {
+        ++squareDepth;
+      } else if (source[i] == ']') {
+        --squareDepth;
+      } else if (source[i] == '(') {
+        ++nestedRoundDepth;
+      } else if (source[i] == ')') {
+        --nestedRoundDepth;
+      } else if (source[i] == ',' && squareDepth == 0 &&
+                 nestedRoundDepth == 0) {
+        arguments.push_back(source.substr(argumentStart, i - argumentStart));
+        argumentStart = i + 1;
+      }
+    }
+    arguments.push_back(
+        source.substr(argumentStart, source.size() - argumentStart - 1));
+    std::string rewritten = trim(source.substr(0, open)) + "[";
+    for (std::size_t i = 0; i < arguments.size(); ++i) {
+      if (i != 0) {
+        rewritten += ",";
+      }
+      rewritten += desugar(arguments[i]);
+    }
+    rewritten += "]";
+    return rewritten;
+  };
+
+  return desugar(filter);
+}
+
 bool Typechecker::givenImportTypeMatches(const std::string& filter,
                                          const SymbolInfo& candidate,
                                          const Scope& scope) const {
+  bool malformedUserInfix = false;
+  const std::string desugaredFilter =
+      desugarGivenImportUserInfix(filter, scope, &malformedUserInfix);
+  if (malformedUserInfix) {
+    return false;
+  }
   std::unordered_set<std::string> visiting;
   std::function<bool(const std::string&, const TypeInfo&)> matches;
   std::function<bool(const std::string&, const TypeInfo&)> patternConformsTo;
@@ -3636,8 +3878,7 @@ bool Typechecker::givenImportTypeMatches(const std::string& filter,
     }
 
     const AppliedTypeSyntax applied = parseAppliedTypeSyntax(pattern);
-    if (!applied.applied || applied.malformed ||
-        pattern.find('?') == std::string::npos) {
+    if (!applied.applied || applied.malformed) {
       const TypeInfo expected = typeFromDeclaredName(pattern, &scope);
       return expected.kind != SimpleTypeKind::Unknown &&
              isAssignable(expected, value);
@@ -3657,7 +3898,23 @@ bool Typechecker::givenImportTypeMatches(const std::string& filter,
       if (current.typeConstructorName == constructor->symbolName &&
           current.typeArguments.size() == applied.arguments.size()) {
         for (std::size_t i = 0; i < applied.arguments.size(); ++i) {
-          if (!matches(applied.arguments[i], current.typeArguments[i])) {
+          const TypeVariance variance =
+              constructor->typeParameters[i].variance;
+          const bool covariantMatch =
+              matches(applied.arguments[i], current.typeArguments[i]);
+          const bool contravariantMatch =
+              patternConformsTo(applied.arguments[i],
+                                current.typeArguments[i]);
+          const bool argumentMatches =
+              variance == TypeVariance::Covariant
+                  ? covariantMatch
+                  : variance == TypeVariance::Contravariant
+                        ? contravariantMatch
+                        : covariantMatch &&
+                              (applied.arguments[i].find('?') !=
+                                   std::string::npos ||
+                               contravariantMatch);
+          if (!argumentMatches) {
             return false;
           }
         }
@@ -3688,7 +3945,7 @@ bool Typechecker::givenImportTypeMatches(const std::string& filter,
     };
     return matchesConstructor(value);
   };
-  return matches(filter, candidate.type);
+  return matches(desugaredFilter, candidate.type);
 }
 
 bool Typechecker::givenImportMatches(const AstDeclaration& declaration,
@@ -3710,6 +3967,15 @@ bool Typechecker::givenImportMatches(const AstDeclaration& declaration,
 bool Typechecker::validateGivenImportFilter(
     const std::string& filter, const Scope& scope,
     const support::SourceSpan& span) const {
+  bool malformedUserInfix = false;
+  const std::string desugaredFilter =
+      desugarGivenImportUserInfix(filter, scope, &malformedUserInfix);
+  if (malformedUserInfix) {
+    diagnostics_.error(span, "malformed user-defined infix type in given import "
+                             "filter: " +
+                                 filter);
+    return false;
+  }
   std::function<bool(const std::string&)> validate;
   validate = [&](const std::string& patternName) {
     bool malformed = false;
@@ -3817,7 +4083,7 @@ bool Typechecker::validateGivenImportFilter(
     return typeFromDeclaredName(pattern, &scope, &span).kind !=
            SimpleTypeKind::Unknown;
   };
-  return validate(filter);
+  return validate(desugaredFilter);
 }
 
 void Typechecker::applyImport(const AstDeclaration& declaration, Scope& scope) {

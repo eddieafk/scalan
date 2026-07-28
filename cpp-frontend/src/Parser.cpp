@@ -197,6 +197,12 @@ bool Parser::match(TokenKind kind) {
 }
 
 bool Parser::isDeclarationStart() const {
+  if (peek().kind == TokenKind::Identifier && peek().text == "infix" &&
+      current_ + 1 < tokens_.size() &&
+      (tokens_[current_ + 1].kind == TokenKind::KeywordClass ||
+       tokens_[current_ + 1].kind == TokenKind::KeywordTrait)) {
+    return true;
+  }
   switch (peek().kind) {
   case TokenKind::KeywordObject:
   case TokenKind::KeywordClass:
@@ -264,6 +270,27 @@ void Parser::parsePackage(AstModule& module) {
 
 AstDeclaration Parser::parseDeclaration() {
   consumeSeparators();
+  if (check(TokenKind::Identifier) && peek().text == "infix") {
+    const Token modifier = advance();
+    AstDeclaration declaration;
+    if (match(TokenKind::KeywordClass)) {
+      declaration = parseObjectLike(AstDeclarationKind::Class, previous());
+    } else if (match(TokenKind::KeywordTrait)) {
+      declaration = parseObjectLike(AstDeclarationKind::Trait, previous());
+    } else {
+      diagnostics_.error(peek().span,
+                         "'infix' must modify a class or trait in this milestone");
+      synchronize();
+      return {};
+    }
+    declaration.span = modifier.span;
+    if (declaration.typeParameters.size() != 2) {
+      diagnostics_.error(
+          modifier.span,
+          "infix class or trait requires exactly two type parameters");
+    }
+    return declaration;
+  }
   if (match(TokenKind::KeywordSealed)) {
     const Token modifier = previous();
     if (match(TokenKind::KeywordClass)) {
