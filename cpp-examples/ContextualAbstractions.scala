@@ -235,6 +235,17 @@ object ContextualAbstractions {
       A: {Show as show, TypeName as typeName}](value: A): String =
     show.show(value) + ":" + typeName.name
 
+  def summonedRender[A: Show](value: A): String =
+    summon[Show[A]].show(value)
+
+  def summonedGenericEvidence[A: ContextSeed](): String =
+    summon[ContextGenerated[A]].label
+
+  def summonedLocal(value: Dog): String = {
+    given summonedShow: Show[Dog] = new DogShow("summoned-local:")
+    summon[Show[Dog]].show(value)
+  }
+
   def localParameterizedContextType: String = {
     given localIntermediate[A](
         using seed: ContextSeed[A]): ContextIntermediate[A] =
@@ -421,5 +432,8 @@ object ContextualAbstractions {
     println(localParameterizedContextType)
     println(contextBoundRender(new Dog("bounded")))
     println(combinedContextBounds(new Dog("combined")))
+    println(summonedRender(new Dog("summoned")))
+    println(summonedGenericEvidence[Dog]())
+    println(summonedLocal(new Dog("dog")))
   }
 }

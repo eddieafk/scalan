@@ -17,6 +17,8 @@ namespace scalanative::nscplugin {
 
 namespace {
 
+constexpr std::string_view SummonName = "summon";
+
 struct ValueContext {
   std::string packageName;
   std::unordered_map<std::string, std::string> importAliases;
@@ -1663,6 +1665,36 @@ nir::Value expressionValueFor(const frontend::AstExpression& expression,
                               const ValueContext& context,
                               bool preserveCallable = false);
 
+nir::Value materializeContextArgument(const frontend::TypedContextArgument& contextual,
+                                      const frontend::AstExpression& expression,
+                                      const ValueContext& context) {
+  if (contextual.name.empty()) {
+    return nir::unknownValue("<missing-given>", expression.span);
+  }
+  if (contextual.isCall) {
+    std::vector<nir::Value> nestedArguments;
+    const std::size_t firstCallArgument =
+        std::min(contextual.prerequisiteArgumentCount, contextual.arguments.size());
+    nestedArguments.reserve(contextual.arguments.size() - firstCallArgument);
+    for (std::size_t index = firstCallArgument; index < contextual.arguments.size();
+         ++index) {
+      nestedArguments.push_back(
+          materializeContextArgument(contextual.arguments[index], expression, context));
+    }
+    return nir::callValue(nir::localValue(contextual.symbolName, expression.span),
+                          std::move(nestedArguments), expression.span);
+  }
+  if (contextual.requiresAccessor) {
+    return nir::callValue(nir::localValue(contextual.symbolName, expression.span), {},
+                          expression.span);
+  }
+  frontend::AstExpression argumentExpression;
+  argumentExpression.kind = frontend::AstExpressionKind::Identifier;
+  argumentExpression.text = contextual.name;
+  argumentExpression.span = expression.span;
+  return expressionValueFor(argumentExpression, context);
+}
+
 nir::Value promoteNarrowIntegral(const frontend::AstExpression& expression,
                                  const ValueContext& context) {
   nir::Value value = expressionValueFor(expression, context);
@@ -2284,6 +2316,15 @@ nir::Value valueFor(const frontend::AstExpression& expression,
       return nir::sizeOfValue(qualifyTypeName(expression.declaredType, context),
                               expression.span);
     }
+    if (callee.kind == AstExpressionKind::Identifier && callee.text == SummonName) {
+      const frontend::TypedContextApplication* application =
+          contextApplicationFor(expression, context);
+      if (application == nullptr || application->arguments.size() != 1) {
+        return nir::unknownValue("<missing-summon>", expression.span);
+      }
+      return materializeContextArgument(application->arguments.front(), expression,
+                                        context);
+    }
     if (callee.kind != AstExpressionKind::Select || callee.children.size() != 1) {
       return expressionValueFor(callee, context, preserveCallable);
     }
@@ -2750,40 +2791,10 @@ nir::Value valueFor(const frontend::AstExpression& expression,
     }
     if (const frontend::TypedContextApplication* application =
             contextApplicationFor(expression, context)) {
-      std::function<nir::Value(const frontend::TypedContextArgument&)>
-          materializeContextArgument;
-      materializeContextArgument =
-          [&](const frontend::TypedContextArgument& contextual) -> nir::Value {
-        if (contextual.name.empty()) {
-          return nir::unknownValue("<missing-given>", expression.span);
-        }
-        if (contextual.isCall) {
-          std::vector<nir::Value> nestedArguments;
-          const std::size_t firstCallArgument =
-              std::min(contextual.prerequisiteArgumentCount,
-                       contextual.arguments.size());
-          nestedArguments.reserve(contextual.arguments.size() - firstCallArgument);
-          for (std::size_t index = firstCallArgument;
-               index < contextual.arguments.size(); ++index) {
-            nestedArguments.push_back(
-                materializeContextArgument(contextual.arguments[index]));
-          }
-          return nir::callValue(nir::localValue(contextual.symbolName, expression.span),
-                                std::move(nestedArguments), expression.span);
-        }
-        if (contextual.requiresAccessor) {
-          return nir::callValue(nir::localValue(contextual.symbolName, expression.span),
-                                {}, expression.span);
-        }
-        frontend::AstExpression argumentExpression;
-        argumentExpression.kind = AstExpressionKind::Identifier;
-        argumentExpression.text = contextual.name;
-        argumentExpression.span = expression.span;
-        return expressionValueFor(argumentExpression, context);
-      };
       for (const frontend::TypedContextArgument& contextual : application->arguments) {
         const std::size_t parameterIndex = arguments.size();
-        nir::Value argument = materializeContextArgument(contextual);
+        nir::Value argument =
+            materializeContextArgument(contextual, expression, context);
         if (target != nullptr && parameterIndex < target->parameterTypes.size()) {
           const std::string targetType =
               runtimeTypeName(target->parameterTypes[parameterIndex]);

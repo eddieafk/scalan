@@ -14,6 +14,8 @@ namespace scalanative::frontend {
 
 namespace {
 
+constexpr std::string_view SummonName = "summon";
+
 bool isClassLikeDeclaration(AstDeclarationKind kind) {
   return kind == AstDeclarationKind::Object || kind == AstDeclarationKind::Class ||
          kind == AstDeclarationKind::Trait;
@@ -3517,6 +3519,8 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
     const AstExpression& callee = expression.children.front();
     const bool isSizeOf = callee.kind == AstExpressionKind::Identifier &&
                           callee.text == support::StdNames::SizeOf;
+    const bool isSummon =
+        callee.kind == AstExpressionKind::Identifier && callee.text == SummonName;
     const bool isTypeTest = callee.kind == AstExpressionKind::Select &&
                             callee.children.size() == 1 &&
                             callee.text == support::StdNames::IsInstanceOf;
@@ -3547,6 +3551,26 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
                                expression.declaredType);
       }
       return TypeInfo{SimpleTypeKind::Int, "Int"};
+    }
+    if (isSummon) {
+      if (typeArguments.size() != 1) {
+        diagnostics_.error(expression.span,
+                           "summon requires exactly one type argument");
+        return TypeInfo{SimpleTypeKind::Unknown, "Unknown"};
+      }
+      const TypeInfo requested =
+          typeFromDeclaredName(expression.declaredType, &scope, &expression.span);
+      SymbolInfo request;
+      request.kind = AstDeclarationKind::Def;
+      request.name = std::string(SummonName);
+      request.type = requested;
+      request.parameters = {"evidence: " + requested.name};
+      request.parameterTypes = {requested};
+      request.contextualParameters = {true};
+      std::vector<TypedContextArgument> arguments =
+          resolveContextArguments(request, 0, scope, expression.span);
+      recordContextApplication(expression.span, std::move(arguments));
+      return requested;
     }
     if (isArrayEmpty) {
       if (typeArguments.size() != 1) {

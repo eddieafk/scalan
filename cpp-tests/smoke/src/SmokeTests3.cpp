@@ -198,6 +198,21 @@ object Main {
       value: A)(using seed: Seed[A]): String =
     named.name + ":" + seed.label
 
+  def summonedContextName[A: Named as named](value: A): String =
+    summon[Named[A]].name
+
+  def summonedMemberName: String =
+    summon[Named[Int]].name
+
+  def summonedGeneratedName: String =
+    summon[Generated[Int]].label
+
+  def summonedLocalName: String = {
+    given localSummoned: Named[Int] =
+      new NamedValue[Int]("summoned-local")
+    summon[Named[Int]].name
+  }
+
   def localNamedGeneratedName: String = {
     given localIntermediate[A](using seed: Seed[A]): Intermediate[A] =
       new IntermediateValue[A]("local-intermediate:" + seed.label)
@@ -269,6 +284,10 @@ object Main {
     println(namedContextBoundName(5))
     println(namedAggregateContextBounds(6))
     println(namedContextBoundAndUsing(7))
+    println(summonedContextName(8))
+    println(summonedMemberName)
+    println(summonedGeneratedName)
+    println(summonedLocalName)
   }
 }
 )";
@@ -294,6 +313,8 @@ trait LoopEvidence[A]
 object Main {
   given intNamed: Named[Int] = new NamedValue[Int]
   given stringNamed: Named[String] = new NamedValue[String]
+  given firstLongNamed: Named[Long] = new NamedValue[Long]
+  given secondLongNamed: Named[Long] = new NamedValue[Long]
   given intStringPairNamed: PairNamed[Int, String] =
     new PairNamedValue[Int, String]
   given intLongPairNamed: PairNamed[Int, Long] =
@@ -330,6 +351,10 @@ object Main {
   val generatedAmbiguous = chooseGenerated()
   val unresolvedLoop = chooseLoop()
   val missingBound = missingContextBound(true)
+  val missingSummon = summon[Named[Boolean]]
+  val ambiguousSummon = summon[Named[Long]]
+  val divergingSummon = summon[LoopEvidence[Int]]
+  val malformedSummon = summon[Named[Int], Seed[Int]]
   val captured = capturedLocalFactory
 }
 )";
@@ -420,7 +445,9 @@ object Main {
               "context-int:seed-int\n"
               "named-context-bound-factory:seed-int\n"
               "local-named-context-bound:seed-int\n"
-              "context-int\ncontext-int:seed-int\ncontext-int:seed-int\n" &&
+              "context-int\ncontext-int:seed-int\ncontext-int:seed-int\n"
+              "context-int\ncontext-int\n"
+              "generated:intermediate:seed-int\nsummoned-local\n" &&
       !invalid.ok &&
       contains(invalid.diagnosticsText,
                "constructor target is not a class: Event.Started") &&
@@ -463,6 +490,16 @@ object Main {
       contains(invalid.diagnosticsText,
                "demo.invalidqualifiedcase.Named [ Boolean ] required by "
                "missingContextBound") &&
+      contains(invalid.diagnosticsText,
+               "demo.invalidqualifiedcase.Named [ Boolean ] required by summon") &&
+      contains(invalid.diagnosticsText,
+               "ambiguous given values for context parameter evidence of type "
+               "demo.invalidqualifiedcase.Named [ Long ] required by summon: "
+               "firstLongNamed, secondLongNamed") &&
+      contains(invalid.diagnosticsText,
+               "diverging given expansion for type "
+               "demo.invalidqualifiedcase.LoopEvidence [ Int ] via loop") &&
+      contains(invalid.diagnosticsText, "summon requires exactly one type argument") &&
       contains(result.nirText, "module @demo.qualifiedcases.Event$.Started : "
                                "@demo.qualifiedcases.Event") &&
       contains(result.nirText, "class @demo.qualifiedcases.Event$.Stopped : "
@@ -546,7 +583,21 @@ object Main {
                "(Object,demo.qualifiedcases.Named,demo.qualifiedcases.Seed)String") &&
       contains(result.nirText,
                "define @demo.qualifiedcases.Main.namedContextBoundAndUsing : "
-               "(Object,demo.qualifiedcases.Named,demo.qualifiedcases.Seed)String");
+               "(Object,demo.qualifiedcases.Named,demo.qualifiedcases.Seed)String") &&
+      contains(result.nirText, "define @demo.qualifiedcases.Main.summonedContextName : "
+                               "(Object,demo.qualifiedcases.Named)String") &&
+      contains(result.nirText, "define @demo.qualifiedcases.Main.summonedMemberName : "
+                               "()String") &&
+      contains(result.nirText,
+               "define @demo.qualifiedcases.Main.summonedGeneratedName : "
+               "()String") &&
+      contains(result.nirText, "call "
+                               "%demo.qualifiedcases.Main.generatedFromIntermediate("
+                               "call %demo.qualifiedcases.Main.intermediateFromSeed("
+                               "call %demo.qualifiedcases.Main.intSeed()))") &&
+      contains(result.nirText,
+               "define @demo.qualifiedcases.Main.summonedLocalName : ()String") &&
+      contains(result.nirText, "%localSummoned.name");
   return valid ? 0
                : fail("Scala 3 incremental smoke test failed (output='" + text +
                       "', invalid-diagnostics='" + invalid.diagnosticsText +

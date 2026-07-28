@@ -954,6 +954,16 @@ Current scaffold status:
   and named witnesses needed by preceding ordinary parameter types, receive
   focused diagnostics until constructor-context and pre-parameter witness
   placement are implemented.
+- Compiler-owned Scala 3 `summon[T]` resolves one requested evidence type
+  through the same contextual-parameter preference, lexical depth, companion
+  search, candidate ranking, and recursive given-factory materialization used
+  for omitted `using` arguments. The selected typed argument tree is recorded at
+  the type-application expression and lowered directly as a local witness,
+  stored-given accessor, or nested erased factory call. Focused native coverage
+  exercises context-bound witnesses, member and local givens, a recursive
+  two-level factory chain, runtime selection, and NIR lowering; missing,
+  ambiguous, diverging, and malformed multi-type requests retain the ordinary
+  contextual diagnostics.
 - Anonymous givens and block-local named or anonymous givens now use the same
   typed evidence model. Lexical depth is retained during search, so the
   innermost matching local given wins while equally nested matches remain
@@ -1102,8 +1112,8 @@ Current scaffold status:
   milestones.
   Capturing local parameterized givens, class/trait context bounds,
   pre-parameter placement for dependent named witnesses, general derivation
-  from nested declarations, and Scala 2 `implicit` syntax also remain later
-  milestones.
+  from nested declarations, compile-time `summonFrom`, and Scala 2 `implicit`
+  syntax also remain later milestones.
 - Postfix type application now supports typed `value.isInstanceOf[Target]` and
   checked `value.asInstanceOf[Target]` for known classes, traits, and objects.
   NIR uses dedicated `is-instance-of[T]` and `as-instance-of[T]` values; verification
