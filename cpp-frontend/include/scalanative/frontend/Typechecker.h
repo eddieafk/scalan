@@ -198,8 +198,11 @@ private:
                                         const SymbolInfo& symbol,
                                         const Scope& scope) const;
   [[nodiscard]] bool givenImportTypeMatches(const std::string& filter,
-                                            const TypeInfo& candidate,
+                                            const SymbolInfo& candidate,
                                             const Scope& scope) const;
+  [[nodiscard]] bool validateGivenImportFilter(
+      const std::string& filter, const Scope& scope,
+      const support::SourceSpan& span) const;
   void applyImport(const AstDeclaration& declaration, Scope& scope);
   void mergeScope(Scope& destination, const Scope& source) const;
   [[nodiscard]] TypeInfo inferExpressionType(const AstExpression& expression,

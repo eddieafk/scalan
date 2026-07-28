@@ -495,9 +495,14 @@ AstDeclaration Parser::parseImport(const Token& keyword) {
           diagnostics_.error(peek().span, "expected import selector");
           break;
         }
+        consumeSeparators();
+        if (check(TokenKind::RightBrace)) {
+          break;
+        }
         if (!match(TokenKind::Comma)) {
           break;
         }
+        consumeSeparators();
       }
       consume(TokenKind::RightBrace, "expected '}' after import selectors");
     }

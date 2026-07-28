@@ -1,6 +1,7 @@
 package demo.contextual
 
-class Dog(val name: String)
+trait ContextualImportTarget
+class Dog(val name: String) extends ContextualImportTarget
 class Cat(val name: String)
 class Bird(val name: String)
 class Fox(val name: String)
@@ -201,7 +202,7 @@ object LegacyContextualImports {
   val ordinaryLabel: String = "not-contextual"
 }
 
-import LegacyContextualImports.given TypeName[Dog]
+import LegacyContextualImports.given TypeName[? <: ContextualImportTarget]
 
 object ContextualAbstractions {
   given dogShow: Show[Dog] = new DogShow("dog:")

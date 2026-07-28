@@ -162,6 +162,29 @@ trait WildcardImportedContext[A] {
 class WildcardImportedContextValue[A](val label: String)
     extends WildcardImportedContext[A]
 
+trait ImportAnimal
+class ImportDog extends ImportAnimal
+class ImportCat extends ImportAnimal
+class ImportRock
+
+trait UpperBoundedContext[A] {
+  val label: String
+}
+class UpperBoundedContextValue[A](val label: String)
+    extends UpperBoundedContext[A]
+
+trait RangeBoundedContext[A] {
+  val label: String
+}
+class RangeBoundedContextValue[A](val label: String)
+    extends RangeBoundedContext[A]
+
+trait FactoryBoundedContext[A] {
+  val label: String
+}
+class FactoryBoundedContextValue[A](val label: String)
+    extends FactoryBoundedContext[A]
+
 trait PairNamed[A, B] {
   val name: String
   val value: B
@@ -260,6 +283,23 @@ object WildcardGivenImportProviders {
     new WildcardImportedContextValue[String]("wildcard-string")
 }
 
+object BoundedGivenImportProviders {
+  given upperDog: UpperBoundedContext[ImportDog] =
+    new UpperBoundedContextValue[ImportDog]("upper-dog")
+  given upperCat: UpperBoundedContext[ImportCat] =
+    new UpperBoundedContextValue[ImportCat]("upper-cat")
+  given upperRock: UpperBoundedContext[ImportRock] =
+    new UpperBoundedContextValue[ImportRock]("must-not-import")
+  given rangeDog: RangeBoundedContext[ImportDog] =
+    new RangeBoundedContextValue[ImportDog]("range-dog")
+  given rangeAnimal: RangeBoundedContext[ImportAnimal] =
+    new RangeBoundedContextValue[ImportAnimal]("range-animal")
+  given rangeCat: RangeBoundedContext[ImportCat] =
+    new RangeBoundedContextValue[ImportCat]("must-not-import")
+  given boundedFactory[A <: ImportAnimal]: FactoryBoundedContext[A] =
+    new FactoryBoundedContextValue[A]("bounded-factory")
+}
+
 import GivenImportProviders.given
 import StarImportProviders.*
 import CombinedImportProviders.{given, *}
@@ -269,6 +309,11 @@ import FilteredImportProviders.{
   *
 }
 import WildcardGivenImportProviders.given WildcardImportedContext[?]
+import BoundedGivenImportProviders.{
+  given UpperBoundedContext[? <: ImportAnimal],
+  given RangeBoundedContext[? >: ImportDog <: ImportAnimal],
+  given FactoryBoundedContext[? <: ImportAnimal]
+}
 
 object Main {
   implicit val legacyIntNamed: LegacyNamed[Int] =
@@ -325,6 +370,18 @@ object Main {
 
   def wildcardImportedContextName[A](
       using imported: WildcardImportedContext[A]): String =
+    imported.label
+
+  def upperBoundedContextName[A](
+      using imported: UpperBoundedContext[A]): String =
+    imported.label
+
+  def rangeBoundedContextName[A](
+      using imported: RangeBoundedContext[A]): String =
+    imported.label
+
+  def factoryBoundedContextName[A](
+      using imported: FactoryBoundedContext[A]): String =
     imported.label
 
   def localLegacyContextName: String = {
@@ -573,6 +630,11 @@ object Main {
     println(filteredLabel)
     println(wildcardImportedContextName[Int]())
     println(wildcardImportedContextName[String]())
+    println(upperBoundedContextName[ImportDog]())
+    println(upperBoundedContextName[ImportCat]())
+    println(rangeBoundedContextName[ImportDog]())
+    println(rangeBoundedContextName[ImportAnimal]())
+    println(factoryBoundedContextName[ImportDog]())
     println(contextName())
     println(forwardedContextName[Int]())
     println(repeatedContextName())
@@ -768,19 +830,25 @@ object Main {
   constexpr const char* invalidFilteredGivenImportSource =
       R"(package demo.invalidfilteredgivenimport
 
+trait Parent
+class Child extends Parent
+class Sibling extends Parent
+
 trait Marker[A]
 object Providers {
-  given intMarker: Marker[Int] = null
-  given longMarker: Marker[Long] = null
+  given childMarker: Marker[Child] = null
+  given parentMarker: Marker[Parent] = null
+  given siblingMarker: Marker[Sibling] = null
 }
 
-import Providers.given Marker[Int]
-import Providers.given Marker[? <: Long]
+import Providers.given Marker[? >: Child <: Parent]
+import Providers.given Marker[? >: Parent <: Child]
 
 object Main {
   def requireMarker[A]()(using marker: Marker[A]): String = "marker"
-  val included = requireMarker[Int]()
-  val excluded = requireMarker[Long]()
+  val includedChild = requireMarker[Child]()
+  val includedParent = requireMarker[Parent]()
+  val excludedSibling = requireMarker[Sibling]()
 }
 )";
   constexpr const char* invalidNestedDerivationSource =
@@ -911,6 +979,8 @@ object Main {
               "given-import\nstar-import\ncombined-given\ncombined-star\n"
               "filtered-int\nfiltered-string\nfiltered-star\n"
               "wildcard-int\nwildcard-string\n"
+              "upper-dog\nupper-cat\nrange-dog\nrange-animal\n"
+              "bounded-factory\n"
               "context-int\n"
               "context-int\ncontext-int:context-int\ncontext-int-string\n"
               "context-int-string\nexpected-context\ncontext-int-string\n"
@@ -986,11 +1056,13 @@ object Main {
       !invalidFilteredGivenImport.ok &&
       contains(invalidFilteredGivenImport.diagnosticsText,
                "no given value found for context parameter marker of type "
-               "demo.invalidfilteredgivenimport.Marker [ Long ] required by "
+               "demo.invalidfilteredgivenimport.Marker [ "
+               "demo.invalidfilteredgivenimport.Sibling ] required by "
                "requireMarker") &&
       contains(invalidFilteredGivenImport.diagnosticsText,
-               "given import filters currently support only bare '?' "
-               "wildcard arguments") &&
+               "wildcard lower bound demo.invalidfilteredgivenimport.Parent "
+               "does not conform to upper bound "
+               "demo.invalidfilteredgivenimport.Child in given import filter") &&
       !invalidNestedDerivation.ok &&
       contains(invalidNestedDerivation.diagnosticsText,
                "derives declarations nested in classes or traits are not "
@@ -1161,6 +1233,25 @@ object Main {
       contains(result.nirText,
                "call %wildcardImportedContextName(call "
                "%demo.qualifiedcases.WildcardGivenImportProviders.wildcardString())") &&
+      contains(result.nirText,
+               "call %upperBoundedContextName(call "
+               "%demo.qualifiedcases.BoundedGivenImportProviders.upperDog())") &&
+      contains(result.nirText,
+               "call %upperBoundedContextName(call "
+               "%demo.qualifiedcases.BoundedGivenImportProviders.upperCat())") &&
+      !contains(result.nirText,
+                "call %demo.qualifiedcases.BoundedGivenImportProviders.upperRock()") &&
+      contains(result.nirText,
+               "call %rangeBoundedContextName(call "
+               "%demo.qualifiedcases.BoundedGivenImportProviders.rangeDog())") &&
+      contains(result.nirText,
+               "call %rangeBoundedContextName(call "
+               "%demo.qualifiedcases.BoundedGivenImportProviders.rangeAnimal())") &&
+      !contains(result.nirText,
+                "call %demo.qualifiedcases.BoundedGivenImportProviders.rangeCat()") &&
+      contains(result.nirText,
+               "call %factoryBoundedContextName(call "
+               "%demo.qualifiedcases.BoundedGivenImportProviders.boundedFactory())") &&
       contains(result.nirText, "define @demo.qualifiedcases.Main.contextName : "
                                "(demo.qualifiedcases.Named)String") &&
       contains(result.nirText, "ret String call %contextName(%named)") &&
