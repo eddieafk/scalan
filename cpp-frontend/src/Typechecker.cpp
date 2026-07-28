@@ -1327,6 +1327,8 @@ TypedDeclaration Typechecker::typecheckDeclaration(const AstDeclaration& declara
   typed.span = declaration.span;
   typed.importPath = declaration.importPath;
   typed.importSelectors = declaration.importSelectors;
+  typed.importsGivens = declaration.importsGivens;
+  typed.importsWildcard = declaration.importsWildcard;
   typed.parentArguments = declaration.parentArguments;
   typed.derivedTypes = declaration.derivedTypes;
   typed.isOverride = declaration.isOverride;
@@ -1454,10 +1456,19 @@ TypedDeclaration Typechecker::typecheckDeclaration(const AstDeclaration& declara
   } else {
     typed.inferredType = inferred;
   }
-  if (declaration.kind == AstDeclarationKind::Import && declaration.name == "_") {
+  if (declaration.kind == AstDeclarationKind::Import &&
+      (declaration.name == "_" || declaration.importsWildcard ||
+       declaration.importsGivens)) {
     const std::string& importOwner = typed.symbolName;
     for (const auto& [symbolName, symbol] : globalSymbols_) {
       if (!isDirectMemberOf(symbolName, importOwner)) {
+        continue;
+      }
+      const bool wildcardMatch =
+          (declaration.name == "_" || declaration.importsWildcard) &&
+          !symbol.isGiven;
+      const bool givenMatch = declaration.importsGivens && symbol.isGiven;
+      if (!wildcardMatch && !givenMatch) {
         continue;
       }
       TypedDeclaration imported;
@@ -2275,7 +2286,8 @@ std::string Typechecker::importSymbolName(const AstDeclaration& declaration,
     return owner;
   };
 
-  if (!declaration.importSelectors.empty() || declaration.name == "_") {
+  if (!declaration.importSelectors.empty() || declaration.name == "_" ||
+      declaration.importsWildcard || declaration.importsGivens) {
     return resolveOwner(path);
   }
   if (globalSymbols_.contains(path)) {
@@ -3352,7 +3364,10 @@ void Typechecker::applyImport(const AstDeclaration& declaration, Scope& scope) {
     return;
   }
 
-  if (!declaration.importSelectors.empty()) {
+  const bool wildcardImport =
+      declaration.name == "_" || declaration.importsWildcard;
+  const bool bulkImport = wildcardImport || declaration.importsGivens;
+  if (!declaration.importSelectors.empty() || bulkImport) {
     const std::string importOwner = importSymbolName(declaration, scope);
     if (!globalSymbols_.contains(importOwner)) {
       diagnostics_.error(declaration.span,
@@ -3371,28 +3386,26 @@ void Typechecker::applyImport(const AstDeclaration& declaration, Scope& scope) {
       alias.name = selector.alias;
       scope[alias.name] = std::move(alias);
     }
-    return;
-  }
-
-  if (declaration.name.empty()) {
-    return;
-  }
-
-  if (declaration.name == "_") {
-    const std::string owner = importSymbolName(declaration, scope);
-    if (owner.empty() || !globalSymbols_.contains(owner)) {
-      diagnostics_.error(declaration.span,
-                         "unresolved wildcard import: " + declaration.importPath);
+    if (!bulkImport) {
       return;
     }
     for (const auto& [symbolName, symbol] : globalSymbols_) {
-      if (!isDirectMemberOf(symbolName, owner)) {
+      if (!isDirectMemberOf(symbolName, importOwner)) {
+        continue;
+      }
+      const bool wildcardMatch = wildcardImport && !symbol.isGiven;
+      const bool givenMatch = declaration.importsGivens && symbol.isGiven;
+      if (!wildcardMatch && !givenMatch) {
         continue;
       }
       SymbolInfo alias = symbol;
       alias.name = memberNameOf(symbolName);
       scope[alias.name] = std::move(alias);
     }
+    return;
+  }
+
+  if (declaration.name.empty()) {
     return;
   }
 

@@ -119,6 +119,8 @@ struct AstDeclaration {
   std::vector<AstExpression> parentArguments;
   std::string importPath;
   std::vector<AstImportSelector> importSelectors;
+  bool importsGivens = false;
+  bool importsWildcard = false;
   bool isOverride = false;
   bool isSealed = false;
   bool isGiven = false;

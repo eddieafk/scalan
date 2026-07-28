@@ -416,6 +416,15 @@ AstDeclaration Parser::parseImport(const Token& keyword) {
   AstDeclaration declaration;
   declaration.kind = AstDeclarationKind::Import;
   declaration.span = keyword.span;
+  const auto hasLeadingNewline = [](const Token& token) {
+    return std::any_of(token.leadingTrivia.begin(), token.leadingTrivia.end(),
+                       [](const Trivia& trivia) {
+                         return trivia.containsNewline;
+                       });
+  };
+  const auto isStar = [](const Token& token) {
+    return token.kind == TokenKind::Operator && token.text == "*";
+  };
 
   if (!match(TokenKind::Identifier)) {
     diagnostics_.error(peek().span, "expected import owner");
@@ -432,35 +441,64 @@ AstDeclaration Parser::parseImport(const Token& keyword) {
   }
 
   if (match(TokenKind::Dot)) {
-    if (!consume(TokenKind::LeftBrace, "expected '{' after import owner")) {
+    if (match(TokenKind::KeywordGiven)) {
+      declaration.importsGivens = true;
+      if (!isAtEnd() && !check(TokenKind::Semicolon) &&
+          !hasLeadingNewline(peek())) {
+        diagnostics_.error(
+            peek().span,
+            "type-filtered given imports are not supported yet; "
+            "use an unfiltered '.given' selector");
+        (void)parseTypeName();
+      }
+    } else if (isStar(peek())) {
+      advance();
+      declaration.importsWildcard = true;
+    } else if (!consume(TokenKind::LeftBrace,
+                        "expected 'given', '*', or '{' after import owner")) {
       consumeSeparators();
       return declaration;
-    }
-    while (!isAtEnd() && !check(TokenKind::RightBrace)) {
-      if (!match(TokenKind::Identifier)) {
-        diagnostics_.error(peek().span, "expected import selector");
-        break;
-      }
-      AstImportSelector selector;
-      selector.name = previous().text;
-      selector.alias = selector.name;
-      selector.span = previous().span;
-      if (match(TokenKind::Arrow)) {
-        if (!match(TokenKind::Identifier)) {
-          diagnostics_.error(peek().span, "expected alias after '=>'");
+    } else {
+      while (!isAtEnd() && !check(TokenKind::RightBrace)) {
+        if (match(TokenKind::KeywordGiven)) {
+          declaration.importsGivens = true;
+          if (!check(TokenKind::Comma) && !check(TokenKind::RightBrace)) {
+            diagnostics_.error(
+                peek().span,
+                "type-filtered given imports are not supported yet; "
+                "use an unfiltered 'given' selector");
+            (void)parseTypeName();
+          }
+        } else if (isStar(peek())) {
+          advance();
+          declaration.importsWildcard = true;
+        } else if (match(TokenKind::Identifier)) {
+          AstImportSelector selector;
+          selector.name = previous().text;
+          selector.alias = selector.name;
+          selector.span = previous().span;
+          if (match(TokenKind::Arrow)) {
+            if (!match(TokenKind::Identifier)) {
+              diagnostics_.error(peek().span, "expected alias after '=>'");
+              break;
+            }
+            selector.alias = previous().text;
+          }
+          declaration.importSelectors.push_back(std::move(selector));
+        } else {
+          diagnostics_.error(peek().span, "expected import selector");
           break;
         }
-        selector.alias = previous().text;
+        if (!match(TokenKind::Comma)) {
+          break;
+        }
       }
-      declaration.importSelectors.push_back(std::move(selector));
-      if (!match(TokenKind::Comma)) {
-        break;
-      }
+      consume(TokenKind::RightBrace, "expected '}' after import selectors");
     }
-    consume(TokenKind::RightBrace, "expected '}' after import selectors");
   }
 
-  if (declaration.importSelectors.empty()) {
+  if (declaration.importSelectors.empty() && !declaration.importsGivens &&
+      !declaration.importsWildcard) {
     const std::size_t dot = declaration.importPath.rfind('.');
     declaration.name = dot == std::string::npos
                            ? declaration.importPath

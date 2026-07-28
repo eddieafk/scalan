@@ -825,13 +825,16 @@ importAliasesFor(const std::vector<frontend::TypedDeclaration>& declarations) {
           aliases[selector.alias] = importOwner + "." + selector.name;
         }
       }
-    } else if (declaration.name == "_") {
+    }
+    if (declaration.name == "_" || declaration.importsWildcard ||
+        declaration.importsGivens) {
       for (const frontend::TypedDeclaration& imported : declaration.members) {
         if (!imported.name.empty() && !imported.symbolName.empty()) {
           aliases[imported.name] = imported.symbolName;
         }
       }
-    } else if (!declaration.name.empty() && !declaration.symbolName.empty()) {
+    } else if (declaration.importSelectors.empty() && !declaration.name.empty() &&
+               !declaration.symbolName.empty()) {
       aliases[declaration.name] = declaration.symbolName;
     }
   }

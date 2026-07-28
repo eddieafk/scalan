@@ -146,6 +146,11 @@ class LegacyContextBox[A](val value: A)(
   def contextName: String = named.name
 }
 
+trait ImportedContext[A] {
+  val label: String
+}
+class ImportedContextValue[A](val label: String) extends ImportedContext[A]
+
 trait PairNamed[A, B] {
   val name: String
   val value: B
@@ -209,6 +214,28 @@ class DependentContextBox[A: DependentEvidence as evidence](
   def description: String = evidence.describe(value)
 }
 
+object GivenImportProviders {
+  given importedInt: ImportedContext[Int] =
+    new ImportedContextValue[Int]("given-import")
+  val givenOnlyOrdinary: String = "must-not-import"
+}
+
+object StarImportProviders {
+  given starHidden: ImportedContext[String] =
+    new ImportedContextValue[String]("must-not-import")
+  val starLabel: String = "star-import"
+}
+
+object CombinedImportProviders {
+  given importedBoolean: ImportedContext[Boolean] =
+    new ImportedContextValue[Boolean]("combined-given")
+  val combinedLabel: String = "combined-star"
+}
+
+import GivenImportProviders.given
+import StarImportProviders.*
+import CombinedImportProviders.{given, *}
+
 object Main {
   implicit val legacyIntNamed: LegacyNamed[Int] =
     new LegacyNamedValue[Int]("legacy-member")
@@ -253,6 +280,10 @@ object Main {
 
   def legacyImplicitlyName: String =
     implicitly[LegacyNamed[Int]].name
+
+  def importedContextName[A](
+      using imported: ImportedContext[A]): String =
+    imported.label
 
   def localLegacyContextName: String = {
     implicit val localLegacy =
@@ -491,6 +522,10 @@ object Main {
     println(legacyImplicitlyName)
     println(localLegacyContextName)
     println(new LegacyContextBox[Int](17).contextName)
+    println(importedContextName[Int]())
+    println(starLabel)
+    println(importedContextName[Boolean]())
+    println(combinedLabel)
     println(contextName())
     println(forwardedContextName[Int]())
     println(repeatedContextName())
@@ -657,6 +692,44 @@ object Main {
   def malformedParameter(implicit missing): Int = 0
 }
 )";
+  constexpr const char* invalidGivenImportSource =
+      R"(package demo.invalidgivenimports
+
+trait Marker[A]
+class MarkerValue[A] extends Marker[A]
+
+object GivenProviders {
+  given importedInt: Marker[Int] = new MarkerValue[Int]
+  val hiddenOrdinary: String = "hidden"
+}
+
+object StarProviders {
+  given hiddenLong: Marker[Long] = new MarkerValue[Long]
+  val importedOrdinary: String = "visible"
+}
+
+import GivenProviders.given
+import StarProviders.*
+
+object Main {
+  def requireMarker[A]()(using marker: Marker[A]): String = "marker"
+  val missingOrdinary = hiddenOrdinary
+  val visibleOrdinary = importedOrdinary
+  val missingStarGiven = requireMarker[Long]()
+}
+)";
+  constexpr const char* invalidFilteredGivenImportSource =
+      R"(package demo.invalidfilteredgivenimport
+
+trait Marker[A]
+object Providers {
+  given marker: Marker[Int] = null
+}
+
+import Providers.given Marker[Int]
+
+object Main
+)";
   constexpr const char* invalidNestedDerivationSource =
       R"(package demo.invalidnestedderivation
 
@@ -735,6 +808,15 @@ object Main {
   const scalanative::tools::build::BuildResult invalidLegacyImplicit =
       driver.buildSource("InvalidLegacyImplicit.scala", invalidLegacyImplicitSource, {},
                          invalidLegacyImplicitDiagnostics);
+  scalanative::support::DiagnosticEngine invalidGivenImportDiagnostics;
+  const scalanative::tools::build::BuildResult invalidGivenImport =
+      driver.buildSource("InvalidGivenImport.scala", invalidGivenImportSource, {},
+                         invalidGivenImportDiagnostics);
+  scalanative::support::DiagnosticEngine invalidFilteredGivenImportDiagnostics;
+  const scalanative::tools::build::BuildResult invalidFilteredGivenImport =
+      driver.buildSource("InvalidFilteredGivenImport.scala",
+                         invalidFilteredGivenImportSource, {},
+                         invalidFilteredGivenImportDiagnostics);
   scalanative::support::DiagnosticEngine invalidNestedDerivationDiagnostics;
   const scalanative::tools::build::BuildResult invalidNestedDerivation =
       driver.buildSource("InvalidNestedDerivation.scala", invalidNestedDerivationSource,
@@ -773,6 +855,7 @@ object Main {
               "legacy-member\ngiven-string\nlegacy-member:15\n"
               "legacy-member:16\nlegacy-generated:legacy-member\n"
               "legacy-member\nlegacy-local\nlegacy-member\n"
+              "given-import\nstar-import\ncombined-given\ncombined-star\n"
               "context-int\n"
               "context-int\ncontext-int:context-int\ncontext-int-string\n"
               "context-int-string\nexpected-context\ncontext-int-string\n"
@@ -838,6 +921,17 @@ object Main {
                "milestone") &&
       contains(invalidLegacyImplicit.diagnosticsText,
                "using parameter requires an explicit type") &&
+      !invalidGivenImport.ok &&
+      contains(invalidGivenImport.diagnosticsText,
+               "unresolved identifier: hiddenOrdinary") &&
+      contains(invalidGivenImport.diagnosticsText,
+               "no given value found for context parameter marker of type "
+               "demo.invalidgivenimports.Marker [ Long ] required by "
+               "requireMarker") &&
+      !invalidFilteredGivenImport.ok &&
+      contains(invalidFilteredGivenImport.diagnosticsText,
+               "type-filtered given imports are not supported yet; "
+               "use an unfiltered '.given' selector") &&
       !invalidNestedDerivation.ok &&
       contains(invalidNestedDerivation.diagnosticsText,
                "derives declarations nested in classes or traits are not "
@@ -980,6 +1074,18 @@ object Main {
       contains(result.nirText,
                "new demo.qualifiedcases.LegacyContextBox(box[Int](17), call "
                "%demo.qualifiedcases.Main.legacyIntNamed())") &&
+      contains(result.nirText,
+               "call %importedContextName(call "
+               "%demo.qualifiedcases.GivenImportProviders.importedInt())") &&
+      contains(result.nirText,
+               "println(%demo.qualifiedcases.StarImportProviders.starLabel)") &&
+      !contains(result.nirText,
+                "call %demo.qualifiedcases.StarImportProviders.starHidden()") &&
+      contains(result.nirText,
+               "call %importedContextName(call "
+               "%demo.qualifiedcases.CombinedImportProviders.importedBoolean())") &&
+      contains(result.nirText,
+               "println(%demo.qualifiedcases.CombinedImportProviders.combinedLabel)") &&
       contains(result.nirText, "define @demo.qualifiedcases.Main.contextName : "
                                "(demo.qualifiedcases.Named)String") &&
       contains(result.nirText, "ret String call %contextName(%named)") &&
@@ -1152,6 +1258,10 @@ object Main {
                       "', invalid-diagnostics='" + invalid.diagnosticsText +
                       "', invalid-legacy-implicit-diagnostics='" +
                       invalidLegacyImplicit.diagnosticsText +
+                      "', invalid-given-import-diagnostics='" +
+                      invalidGivenImport.diagnosticsText +
+                      "', invalid-filtered-given-import-diagnostics='" +
+                      invalidFilteredGivenImport.diagnosticsText +
                       "', invalid-nested-derivation-diagnostics='" +
                       invalidNestedDerivation.diagnosticsText +
                       "', invalid-context-bound-diagnostics='" +

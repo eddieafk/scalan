@@ -193,10 +193,16 @@ object Bird {
 
 import Show.{catShow => selectedCatShow}
 
-object ContextualAbstractions {
-  given dogShow: Show[Dog] = new DogShow("dog:")
+object LegacyContextualImports {
   implicit val dogTypeName: TypeName[Dog] =
     new TypeName[Dog]("context-dog")
+  val ordinaryLabel: String = "not-contextual"
+}
+
+import LegacyContextualImports.given
+
+object ContextualAbstractions {
+  given dogShow: Show[Dog] = new DogShow("dog:")
   given dogDependentInput: DependentInput[Dog] = new DogDependentInput
   given dogStringContext: ContextPair[Dog, String] =
     new ContextPair[Dog, String]("mixed-dog-string", "expected-dog-string")

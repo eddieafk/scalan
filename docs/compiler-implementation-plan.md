@@ -1171,6 +1171,18 @@ Current scaffold status:
   deliberately rejects implicit conversions, implicit variables, and implicit
   objects; those constructs require separate language and initialization
   semantics.
+- Scala 3 contextual imports distinguish `import Owner.given` from
+  `import Owner.*`. A given selector imports only contextual definitions,
+  including legacy declarations normalized to the same metadata, while a
+  modern star selector imports only ordinary members. Braced
+  `import Owner.{given, *}` combines both sets without weakening that
+  separation. Imported evidence retains its authoritative owner symbol for
+  recursive search and NIR accessor lowering, while ordinary wildcard members
+  continue through import aliases. Runtime coverage verifies standalone and
+  combined selectors, cross-syntax evidence, modern wildcard access, and the
+  absence of leakage in both directions. Type-filtered selectors such as
+  `given Ordering[?]` receive a focused unsupported diagnostic and remain the
+  next contextual-import slice.
 - Full inline call-site specialization remains a later milestone.
 - Postfix type application now supports typed `value.isInstanceOf[Target]` and
   checked `value.asInstanceOf[Target]` for known classes, traits, and objects.
