@@ -277,6 +277,14 @@ object ContextualAbstractions {
     summon[Show[Dog]].show(value)
   }
 
+  def selectivelySummonedGenerated: String =
+    summonFrom {
+      case missing: ContextSeed[Cat] => "summon-from-missing:" + missing.label
+      case generated: ContextGenerated[Dog] =>
+        "summon-from:" + generated.label
+      case _ => "summon-from-fallback"
+    }
+
   def localParameterizedContextType: String = {
     given localIntermediate[A](
         using seed: ContextSeed[A]): ContextIntermediate[A] =
@@ -475,6 +483,7 @@ object ContextualAbstractions {
     println(summonedRender(new Dog("summoned")))
     println(summonedGenericEvidence[Dog]())
     println(summonedLocal(new Dog("dog")))
+    println(selectivelySummonedGenerated)
     println(new ContextBoundRenderer[Dog](new Dog("class-bound")).render)
     println(new ContextBoundRenderer(new Dog("class-inferred")).summoned)
     println(new GeneratedContextBound[Dog](new Dog("class-generated")).label)

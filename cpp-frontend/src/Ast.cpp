@@ -224,6 +224,10 @@ const char* expressionKindName(AstExpressionKind kind) {
     return "catch";
   case AstExpressionKind::Finally:
     return "finally";
+  case AstExpressionKind::SummonFrom:
+    return "summon-from";
+  case AstExpressionKind::SummonFromCase:
+    return "summon-from-case";
   case AstExpressionKind::If:
     return "if";
   case AstExpressionKind::While:

@@ -2090,6 +2090,45 @@ nir::Value valueFor(const frontend::AstExpression& expression,
     return nir::unknownValue("<catch-outside-try>", expression.span);
   case AstExpressionKind::Finally:
     return nir::unknownValue("<finally-outside-try>", expression.span);
+  case AstExpressionKind::SummonFrom: {
+    const frontend::TypedContextApplication* application =
+        contextApplicationFor(expression, context);
+    if (application == nullptr || !application->hasSelectedBranch ||
+        application->selectedBranch >= expression.children.size()) {
+      return nir::unknownValue("<unresolved-summon-from>", expression.span);
+    }
+    const frontend::AstExpression& branch =
+        expression.children[application->selectedBranch];
+    if (branch.kind != AstExpressionKind::SummonFromCase ||
+        branch.children.size() != 1) {
+      return nir::unknownValue("<malformed-summon-from-case>", branch.span);
+    }
+
+    ValueContext branchContext = context;
+    if (branch.text == "_" && branch.declaredType.empty()) {
+      return scopedBodyValueFor(branch.children.front(), branchContext);
+    }
+    if (application->arguments.size() != 1) {
+      return nir::unknownValue("<missing-summon-from-evidence>", branch.span);
+    }
+    if (branch.text == "_") {
+      return scopedBodyValueFor(branch.children.front(), branchContext);
+    }
+
+    const frontend::TypedContextArgument& contextual =
+        application->arguments.front();
+    std::vector<nir::Value> values;
+    values.push_back(nir::localLetValue(
+        branch.text, runtimeTypeName(contextual.type),
+        materializeContextArgument(contextual, expression, context), branch.span));
+    branchContext.localNames.insert(branch.text);
+    values.push_back(
+        scopedBodyValueFor(branch.children.front(), branchContext));
+    return nir::blockValue(std::move(values), expression.span);
+  }
+  case AstExpressionKind::SummonFromCase:
+    return nir::unknownValue("<summon-from-case-outside-summon-from>",
+                             expression.span);
   case AstExpressionKind::Block:
     if (expression.children.empty()) {
       return nir::unitValue(expression.span);

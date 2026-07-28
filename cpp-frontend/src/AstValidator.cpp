@@ -344,6 +344,25 @@ bool AstValidator::validateExpression(const AstExpression& expression,
       ok = false;
     }
     break;
+  case AstExpressionKind::SummonFrom:
+    if (expression.children.empty() ||
+        std::any_of(expression.children.begin(), expression.children.end(),
+                    [](const AstExpression& child) {
+                      return child.kind != AstExpressionKind::SummonFromCase;
+                    })) {
+      diagnostics.error(expression.span,
+                        "summonFrom expression must contain case children");
+      ok = false;
+    }
+    break;
+  case AstExpressionKind::SummonFromCase:
+    if (expression.children.size() != 1 ||
+        (expression.text != "_" && expression.declaredType.empty())) {
+      diagnostics.error(expression.span,
+                        "summonFrom case must contain one typed or wildcard body");
+      ok = false;
+    }
+    break;
   case AstExpressionKind::If:
     if (expression.children.size() < 2 || expression.children.size() > 3) {
       diagnostics.error(expression.span,

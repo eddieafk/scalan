@@ -1161,6 +1161,9 @@ AstExpression Parser::parsePostfixExpression() {
 
 AstExpression Parser::parsePrimaryExpression() {
   if (match(TokenKind::Identifier)) {
+    if (previous().text == "summonFrom" && check(TokenKind::LeftBrace)) {
+      return parseSummonFromExpression(previous());
+    }
     if (previous().text == "super") {
       return makeExpression(AstExpressionKind::Super, previous().text, previous().span);
     }
@@ -1555,6 +1558,87 @@ AstExpression Parser::parseStableModuleReference(const Token& first) {
       break;
     }
     expression.text += "." + previous().text;
+  }
+  return expression;
+}
+
+AstExpression Parser::parseSummonFromExpression(const Token& identifier) {
+  AstExpression expression;
+  expression.kind = AstExpressionKind::SummonFrom;
+  expression.span = identifier.span;
+
+  if (!consume(TokenKind::LeftBrace, "expected '{' after summonFrom")) {
+    return expression;
+  }
+
+  bool sawCatchAll = false;
+  consumeSeparators();
+  while (!isAtEnd() && !check(TokenKind::RightBrace)) {
+    if (!match(TokenKind::KeywordCase)) {
+      diagnostics_.error(peek().span, "expected case in summonFrom expression");
+      break;
+    }
+    const Token& caseKeyword = previous();
+    if (sawCatchAll) {
+      diagnostics_.error(caseKeyword.span,
+                         "catch-all summonFrom case must be the final case");
+    }
+
+    AstExpression branch;
+    branch.kind = AstExpressionKind::SummonFromCase;
+    branch.span = caseKeyword.span;
+    if (match(TokenKind::KeywordGiven)) {
+      branch.isGiven = true;
+      branch.text = "$summonFrom$" + std::to_string(nextSyntheticLocal_++);
+      if (check(TokenKind::Identifier) && peek().text == "_") {
+        advance();
+        consume(TokenKind::Colon,
+                "expected ':' after anonymous summonFrom given pattern");
+      }
+      branch.declaredType = parseTypeName();
+      if (branch.declaredType.empty()) {
+        diagnostics_.error(caseKeyword.span,
+                           "summonFrom given case requires an evidence type");
+      }
+    } else if (match(TokenKind::Identifier)) {
+      branch.text = previous().text;
+      if (branch.text == "_") {
+        if (match(TokenKind::Colon)) {
+          branch.declaredType = parseTypeName();
+          if (branch.declaredType.empty()) {
+            diagnostics_.error(caseKeyword.span,
+                               "summonFrom case requires a type after ':'");
+          }
+        } else {
+          sawCatchAll = true;
+        }
+      } else if (match(TokenKind::Colon)) {
+        branch.declaredType = parseTypeName();
+        if (branch.declaredType.empty()) {
+          diagnostics_.error(caseKeyword.span,
+                             "summonFrom case requires a type after ':'");
+        }
+      } else {
+        diagnostics_.error(
+            caseKeyword.span,
+            "summonFrom patterns must be type ascriptions or a final wildcard");
+      }
+    } else {
+      diagnostics_.error(
+          peek().span,
+          "summonFrom patterns must be type ascriptions or a final wildcard");
+    }
+
+    consume(TokenKind::Arrow, "expected '=>' after summonFrom pattern");
+    branch.children.push_back(match(TokenKind::LeftBrace) ? parseBlockExpression()
+                                                          : parseExpression());
+    expression.children.push_back(std::move(branch));
+    consumeSeparators();
+  }
+  consume(TokenKind::RightBrace, "expected '}' after summonFrom cases");
+  if (expression.children.empty()) {
+    diagnostics_.error(identifier.span,
+                       "summonFrom expression requires at least one case");
   }
   return expression;
 }

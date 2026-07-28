@@ -253,6 +253,45 @@ object Main {
     summon[Named[Int]].name
   }
 
+  def summonFromFirstAvailable: String =
+    summonFrom {
+      case missing: Named[Boolean] => "summon-from-missing-branch"
+      case named: Named[Int] => "summon-from-selected:" + named.name
+      case _ => "summon-from-selected-fallback"
+    }
+
+  def summonFromFallback: String =
+    summonFrom {
+      case missing: Named[Boolean] => "summon-from-missing-fallback-branch"
+      case _ => "summon-from-fallback"
+    }
+
+  def summonFromGivenBinding: String =
+    summonFrom {
+      case given _: Named[Int] =>
+        "summon-from-given:" + summon[Named[Int]].name
+      case _ => "summon-from-given-fallback"
+    }
+
+  def summonFromTypedWildcard: String =
+    summonFrom {
+      case _: Named[Int] => "summon-from-typed-wildcard"
+      case _ => "summon-from-typed-wildcard-fallback"
+    }
+
+  def summonFromContextParameter[A]()(using named: Named[A]): String =
+    summonFrom {
+      case found: Named[A] => "summon-from-context:" + found.name
+      case _ => "summon-from-context-fallback"
+    }
+
+  def summonFromGenerated: String =
+    summonFrom {
+      case generated: Generated[Int] =>
+        "summon-from-generated:" + generated.label
+      case _ => "summon-from-generated-fallback"
+    }
+
   def localNamedGeneratedName: String = {
     given localIntermediate[A](using seed: Seed[A]): Intermediate[A] =
       new IntermediateValue[A]("local-intermediate:" + seed.label)
@@ -365,6 +404,12 @@ object Main {
     println(summonedMemberName)
     println(summonedGeneratedName)
     println(summonedLocalName)
+    println(summonFromFirstAvailable)
+    println(summonFromFallback)
+    println(summonFromGivenBinding)
+    println(summonFromTypedWildcard)
+    println(summonFromContextParameter[Int]())
+    println(summonFromGenerated)
     println(new NamedContextBox[Int](9).witnessName)
     println(new NamedContextBox[Int](10).summonedName)
     println(new NamedContextBox(11).witnessName)
@@ -460,6 +505,13 @@ object Main {
   val ambiguousSummon = summon[Named[Long]]
   val divergingSummon = summon[LoopEvidence[Int]]
   val malformedSummon = summon[Named[Int], Seed[Int]]
+  val ambiguousSummonFrom = summonFrom {
+    case named: Named[Long] => "ambiguous"
+    case _ => "must-not-fallback"
+  }
+  val unmatchedSummonFrom = summonFrom {
+    case missing: Named[Boolean] => "missing"
+  }
   val missingClassContext = new RequiredContext[Boolean](true)
   val ambiguousClassContext = new RequiredContext[Long](1L)
   val missingDependent =
@@ -467,6 +519,19 @@ object Main {
   val ambiguousDependent =
     missingDependentContext[Long]("ambiguous-dependent")
   val captured = capturedLocalFactory
+}
+)";
+  constexpr const char* invalidSummonFromSyntaxSource =
+      R"(package demo.invalidsummonfromsyntax
+
+trait Named[A]
+
+object Main {
+  val emptySummonFrom = summonFrom {}
+  val misplacedFallback = summonFrom {
+    case _ => "fallback"
+    case named: Named[Int] => "unreachable"
+  }
 }
 )";
   constexpr const char* invalidContextBoundSource =
@@ -523,6 +588,11 @@ object Main {
   const scalanative::tools::build::BuildResult invalidContextBound =
       driver.buildSource("InvalidContextBounds.scala", invalidContextBoundSource, {},
                          invalidContextBoundDiagnostics);
+  scalanative::support::DiagnosticEngine invalidSummonFromSyntaxDiagnostics;
+  const scalanative::tools::build::BuildResult invalidSummonFromSyntax =
+      driver.buildSource("InvalidSummonFromSyntax.scala",
+                         invalidSummonFromSyntaxSource, {},
+                         invalidSummonFromSyntaxDiagnostics);
   scalanative::support::DiagnosticEngine invalidContextBoundSyntaxDiagnostics;
   const scalanative::tools::build::BuildResult invalidContextBoundSyntax =
       driver.buildSource("InvalidContextBoundSyntax.scala",
@@ -562,6 +632,12 @@ object Main {
               "context-int\ncontext-int:seed-int\ncontext-int:seed-int\n"
               "context-int\ncontext-int\n"
               "generated:intermediate:seed-int\nsummoned-local\n"
+              "summon-from-selected:context-int\n"
+              "summon-from-fallback\n"
+              "summon-from-given:context-int\n"
+              "summon-from-typed-wildcard\n"
+              "summon-from-context:context-int\n"
+              "summon-from-generated:generated:intermediate:seed-int\n"
               "context-int\ncontext-int\ncontext-int\n"
               "generated:intermediate:seed-int\ncontext-int:seed-int\n"
               "dependent:method\ndependent:inferred\n"
@@ -617,6 +693,17 @@ object Main {
                "diverging given expansion for type "
                "demo.invalidqualifiedcase.LoopEvidence [ Int ] via loop") &&
       contains(invalid.diagnosticsText, "summon requires exactly one type argument") &&
+      contains(invalid.diagnosticsText,
+               "ambiguous given values for context parameter evidence of type "
+               "demo.invalidqualifiedcase.Named [ Long ] required by summonFrom: "
+               "firstLongNamed, secondLongNamed") &&
+      contains(invalid.diagnosticsText,
+               "no summonFrom case matched a contextual value") &&
+      !invalidSummonFromSyntax.ok &&
+      contains(invalidSummonFromSyntax.diagnosticsText,
+               "summonFrom expression requires at least one case") &&
+      contains(invalidSummonFromSyntax.diagnosticsText,
+               "catch-all summonFrom case must be the final case") &&
       contains(invalid.diagnosticsText,
                "demo.invalidqualifiedcase.Named [ Boolean ] required by "
                "RequiredContext") &&
@@ -758,6 +845,41 @@ object Main {
                "define @demo.qualifiedcases.Main.summonedLocalName : ()String") &&
       contains(result.nirText, "%localSummoned.name") &&
       contains(result.nirText,
+               "define @demo.qualifiedcases.Main.summonFromFirstAvailable : "
+               "()String") &&
+      contains(result.nirText, "\"summon-from-selected:\"") &&
+      !contains(result.nirText, "\"summon-from-missing-branch\"") &&
+      !contains(result.nirText, "\"summon-from-selected-fallback\"") &&
+      contains(result.nirText,
+               "define @demo.qualifiedcases.Main.summonFromFallback : ()String") &&
+      contains(result.nirText, "\"summon-from-fallback\"") &&
+      !contains(result.nirText, "\"summon-from-missing-fallback-branch\"") &&
+      contains(result.nirText,
+               "define @demo.qualifiedcases.Main.summonFromGivenBinding : "
+               "()String") &&
+      contains(result.nirText, "block(let %$summonFrom$") &&
+      !contains(result.nirText, "\"summon-from-given-fallback\"") &&
+      contains(result.nirText,
+               "define @demo.qualifiedcases.Main.summonFromTypedWildcard : "
+               "()String") &&
+      contains(result.nirText, "\"summon-from-typed-wildcard\"") &&
+      !contains(result.nirText, "\"summon-from-typed-wildcard-fallback\"") &&
+      contains(result.nirText,
+               "define @demo.qualifiedcases.Main.summonFromContextParameter : "
+               "(demo.qualifiedcases.Named)String") &&
+      contains(result.nirText,
+               "block(let %found : demo.qualifiedcases.Named = %named; "
+               "(\"summon-from-context:\" + %found.name))") &&
+      !contains(result.nirText, "\"summon-from-context-fallback\"") &&
+      contains(result.nirText,
+               "define @demo.qualifiedcases.Main.summonFromGenerated : ()String") &&
+      contains(result.nirText,
+               "block(let %generated : demo.qualifiedcases.Generated = call "
+               "%demo.qualifiedcases.Main.generatedFromIntermediate(call "
+               "%demo.qualifiedcases.Main.intermediateFromSeed(call "
+               "%demo.qualifiedcases.Main.intSeed()))") &&
+      !contains(result.nirText, "\"summon-from-generated-fallback\"") &&
+      contains(result.nirText,
                "class @demo.qualifiedcases.NamedContextBox : @java.lang.Object") &&
       contains(result.nirText,
                "field @demo.qualifiedcases.NamedContextBox.named : "
@@ -805,6 +927,8 @@ object Main {
                       "', invalid-diagnostics='" + invalid.diagnosticsText +
                       "', invalid-context-bound-diagnostics='" +
                       invalidContextBound.diagnosticsText +
+                      "', invalid-summon-from-syntax-diagnostics='" +
+                      invalidSummonFromSyntax.diagnosticsText +
                       "', invalid-context-bound-syntax-diagnostics='" +
                       invalidContextBoundSyntax.diagnosticsText + "')");
 }

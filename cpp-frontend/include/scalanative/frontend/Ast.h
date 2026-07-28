@@ -72,6 +72,8 @@ enum class AstExpressionKind {
   Try,
   Catch,
   Finally,
+  SummonFrom,
+  SummonFromCase,
   If,
   While,
   New

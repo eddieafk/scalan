@@ -111,6 +111,8 @@ struct TypedContextArgument {
 struct TypedContextApplication {
   support::SourceSpan span;
   std::vector<TypedContextArgument> arguments;
+  bool hasSelectedBranch = false;
+  std::size_t selectedBranch = 0;
 };
 
 struct TypedModule {
@@ -154,6 +156,13 @@ public:
 
 private:
   using Scope = std::unordered_map<std::string, SymbolInfo>;
+  enum class ContextResolutionFailure {
+    None,
+    Missing,
+    Ambiguous,
+    Diverging,
+    Unsupported
+  };
 
   struct DerivedInstanceInfo {
     std::string ownerSymbolName;
@@ -294,9 +303,12 @@ private:
   resolveContextArguments(const SymbolInfo& callee, std::size_t firstContextParameter,
                           Scope& scope, const support::SourceSpan& span,
                           std::unordered_set<std::string>* resolving = nullptr,
-                          bool reportDiagnostics = true) const;
+                          bool reportDiagnostics = true,
+                          ContextResolutionFailure* failure = nullptr) const;
   void recordContextApplication(const support::SourceSpan& span,
-                                std::vector<TypedContextArgument> arguments);
+                                std::vector<TypedContextArgument> arguments,
+                                bool hasSelectedBranch = false,
+                                std::size_t selectedBranch = 0);
   [[nodiscard]] bool isSubtypeOf(const std::string& actual,
                                  const std::string& expected) const;
   void addParametersToScope(const AstDeclaration& declaration, Scope& scope) const;

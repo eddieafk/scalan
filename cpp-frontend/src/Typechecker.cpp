@@ -4667,6 +4667,16 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
               }
               return;
             }
+            if (candidate.kind == AstExpressionKind::SummonFromCase) {
+              std::unordered_set<std::string> caseBindings = locallyBoundNames;
+              if (!candidate.text.empty() && candidate.text != "_") {
+                caseBindings.insert(candidate.text);
+              }
+              for (const AstExpression& child : candidate.children) {
+                collectCaptures(child, caseBindings);
+              }
+              return;
+            }
             if (candidate.kind == AstExpressionKind::LocalDeclaration &&
                 candidate.localMethod != nullptr) {
               std::unordered_set<std::string> methodBindings = locallyBoundNames;
@@ -4902,6 +4912,68 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
       (void)inferExpressionType(expression.children.front(), scope);
     }
     return TypeInfo{SimpleTypeKind::Unit, "Unit"};
+  case AstExpressionKind::SummonFrom: {
+    for (std::size_t branchIndex = 0; branchIndex < expression.children.size();
+         ++branchIndex) {
+      const AstExpression& branch = expression.children[branchIndex];
+      if (branch.kind != AstExpressionKind::SummonFromCase ||
+          branch.children.size() != 1) {
+        continue;
+      }
+
+      Scope branchScope = scope;
+      std::vector<TypedContextArgument> arguments;
+      const bool catchAll = branch.text == "_" && branch.declaredType.empty();
+      if (!catchAll) {
+        const TypeInfo requested =
+            typeFromDeclaredName(branch.declaredType, &scope, &branch.span);
+        SymbolInfo request;
+        request.kind = AstDeclarationKind::Def;
+        request.name = "summonFrom";
+        request.type = requested;
+        request.parameters = {"evidence: " + requested.name};
+        request.parameterTypes = {requested};
+        request.contextualParameters = {true};
+
+        ContextResolutionFailure failure = ContextResolutionFailure::None;
+        arguments = resolveContextArguments(request, 0, scope, branch.span, nullptr,
+                                            false, &failure);
+        const bool matched =
+            arguments.size() == 1 &&
+            arguments.front().type.kind != SimpleTypeKind::Unknown;
+        if (!matched && (failure == ContextResolutionFailure::None ||
+                         failure == ContextResolutionFailure::Missing)) {
+          continue;
+        }
+        if (!matched) {
+          (void)resolveContextArguments(request, 0, scope, branch.span);
+        }
+
+        if (branch.text != "_") {
+          SymbolInfo binding;
+          binding.kind = AstDeclarationKind::Val;
+          binding.name = branch.text;
+          binding.symbolName = branch.text;
+          binding.type = requested;
+          binding.isGiven = branch.isGiven;
+          binding.isContextParameter = branch.isGiven;
+          binding.isLexicalValue = true;
+          branchScope[branch.text] = std::move(binding);
+        }
+      }
+
+      recordContextApplication(expression.span, std::move(arguments), true,
+                               branchIndex);
+      return inferExpressionType(branch.children.front(), branchScope, expectedType);
+    }
+    diagnostics_.error(expression.span,
+                       "no summonFrom case matched a contextual value");
+    return TypeInfo{SimpleTypeKind::Unknown, "Unknown"};
+  }
+  case AstExpressionKind::SummonFromCase:
+    return expression.children.size() == 1
+               ? inferExpressionType(expression.children.front(), scope, expectedType)
+               : TypeInfo{SimpleTypeKind::Unknown, "Unknown"};
   case AstExpressionKind::If:
     if (expression.children.size() < 2) {
       return TypeInfo{SimpleTypeKind::Unknown, "Unknown"};
@@ -5290,6 +5362,30 @@ bool Typechecker::expressionDirectlyEscapesReceiver(
                                               receiverMethodCallSites);
     }
     return false;
+  case AstExpressionKind::SummonFrom: {
+    bool result = false;
+    for (const AstExpression& child : expression.children) {
+      result = expressionDirectlyEscapesReceiver(
+                   child, receiverAliases, localNames, receiverMethodCallSites) ||
+               result;
+    }
+    return result;
+  }
+  case AstExpressionKind::SummonFromCase: {
+    const auto savedAliases = receiverAliases;
+    const auto savedLocals = localNames;
+    if (!expression.text.empty() && expression.text != "_") {
+      receiverAliases[expression.text] = false;
+      localNames.insert(expression.text);
+    }
+    const bool result =
+        !expression.children.empty() &&
+        expressionDirectlyEscapesReceiver(expression.children.front(), receiverAliases,
+                                          localNames, receiverMethodCallSites);
+    receiverAliases = savedAliases;
+    localNames = savedLocals;
+    return result;
+  }
   case AstExpressionKind::If:
   case AstExpressionKind::While:
   case AstExpressionKind::Unary:
@@ -5360,6 +5456,18 @@ void Typechecker::collectImplicitReceiverMethodNames(
     }
     for (const std::string& name : introduced) {
       localNames.erase(name);
+    }
+    return;
+  }
+  if (expression.kind == AstExpressionKind::SummonFromCase) {
+    const bool introduced =
+        !expression.text.empty() && expression.text != "_" &&
+        localNames.insert(expression.text).second;
+    for (const AstExpression& child : expression.children) {
+      collectImplicitReceiverMethodNames(child, localNames, methodNames);
+    }
+    if (introduced) {
+      localNames.erase(expression.text);
     }
     return;
   }
@@ -5718,6 +5826,29 @@ bool Typechecker::analyzeZoneExpression(
       (void)analyzeZoneExpression(child, arenaReferences, zoneLocals);
     }
     return false;
+  case AstExpressionKind::SummonFrom: {
+    bool resultIsArenaReference = false;
+    for (const AstExpression& child : expression.children) {
+      resultIsArenaReference =
+          analyzeZoneExpression(child, arenaReferences, zoneLocals) ||
+          resultIsArenaReference;
+    }
+    return resultIsArenaReference;
+  }
+  case AstExpressionKind::SummonFromCase: {
+    const auto savedReferences = arenaReferences;
+    const auto savedZoneLocals = zoneLocals;
+    if (!expression.text.empty() && expression.text != "_") {
+      arenaReferences[expression.text] = false;
+      zoneLocals.insert(expression.text);
+    }
+    const bool result =
+        !expression.children.empty() &&
+        analyzeZoneExpression(expression.children.front(), arenaReferences, zoneLocals);
+    arenaReferences = savedReferences;
+    zoneLocals = savedZoneLocals;
+    return result;
+  }
   case AstExpressionKind::If: {
     if (expression.children.empty()) {
       return false;
@@ -8132,11 +8263,12 @@ bool Typechecker::isAssignable(const TypeInfo& expected, const TypeInfo& actual)
 std::vector<TypedContextArgument> Typechecker::resolveContextArguments(
     const SymbolInfo& callee, std::size_t firstContextParameter, Scope& scope,
     const support::SourceSpan& span, std::unordered_set<std::string>* resolving,
-    bool reportDiagnostics) const {
+    bool reportDiagnostics, ContextResolutionFailure* failure) const {
   struct ContextCandidate {
     std::string referenceName;
     SymbolInfo symbol;
     std::optional<TypedContextArgument> materializedArgument;
+    ContextResolutionFailure failure = ContextResolutionFailure::None;
   };
   const auto sortCandidates = [](std::vector<ContextCandidate>& candidates) {
     std::sort(candidates.begin(), candidates.end(),
@@ -8153,6 +8285,29 @@ std::vector<TypedContextArgument> Typechecker::resolveContextArguments(
     argument.type = TypeInfo{SimpleTypeKind::Unknown, "Unknown"};
     argument.parameterIndex = parameterIndex;
     return argument;
+  };
+  const auto mergeFailure = [&](ContextResolutionFailure candidate) {
+    if (failure == nullptr) {
+      return;
+    }
+    const auto priority = [](ContextResolutionFailure value) {
+      switch (value) {
+      case ContextResolutionFailure::None:
+        return 0;
+      case ContextResolutionFailure::Missing:
+        return 1;
+      case ContextResolutionFailure::Unsupported:
+        return 2;
+      case ContextResolutionFailure::Diverging:
+        return 3;
+      case ContextResolutionFailure::Ambiguous:
+        return 4;
+      }
+      return 0;
+    };
+    if (priority(candidate) > priority(*failure)) {
+      *failure = candidate;
+    }
   };
 
   std::vector<TypedContextArgument> result;
@@ -8179,7 +8334,8 @@ std::vector<TypedContextArgument> Typechecker::resolveContextArguments(
         return;
       }
       candidates.push_back(
-          ContextCandidate{referenceName, std::move(candidate), std::nullopt});
+          ContextCandidate{referenceName, std::move(candidate), std::nullopt,
+                           ContextResolutionFailure::None});
     };
     for (const auto& [name, candidate] : scope) {
       if (!candidate.isGiven && !candidate.isContextParameter) {
@@ -8384,7 +8540,8 @@ std::vector<TypedContextArgument> Typechecker::resolveContextArguments(
                          isMaterialized);
     };
     const auto materializeCandidate = [&](const ContextCandidate& candidate,
-                                          bool emitDiagnostics)
+                                          bool emitDiagnostics,
+                                          ContextResolutionFailure* candidateFailure)
         -> std::optional<TypedContextArgument> {
       const SymbolInfo& selected = candidate.symbol;
       TypedContextArgument argument;
@@ -8410,6 +8567,9 @@ std::vector<TypedContextArgument> Typechecker::resolveContextArguments(
             (index >= selected.captureParameterCount);
       }
       if (!materializableParameters) {
+        if (candidateFailure != nullptr) {
+          *candidateFailure = ContextResolutionFailure::Unsupported;
+        }
         if (emitDiagnostics) {
           diagnostics_.error(span, "given method " + selected.name +
                                        " cannot be materialized because it has "
@@ -8428,6 +8588,9 @@ std::vector<TypedContextArgument> Typechecker::resolveContextArguments(
       const std::string expansionKey =
           selected.symbolName + " as " + selected.type.name;
       if (!resolving->insert(expansionKey).second) {
+        if (candidateFailure != nullptr) {
+          *candidateFailure = ContextResolutionFailure::Diverging;
+        }
         if (emitDiagnostics) {
           diagnostics_.error(span, "diverging given expansion for type " +
                                        selected.type.name + " via " + selected.name);
@@ -8435,17 +8598,18 @@ std::vector<TypedContextArgument> Typechecker::resolveContextArguments(
         return std::nullopt;
       }
       argument.arguments = resolveContextArguments(selected, 0, scope, span, resolving,
-                                                    emitDiagnostics);
+                                                    emitDiagnostics, candidateFailure);
       resolving->erase(expansionKey);
       return isMaterialized(argument)
                  ? std::optional<TypedContextArgument>{std::move(argument)}
                  : std::nullopt;
     };
 
-    std::vector<ContextCandidate> allCandidates = candidates;
     for (ContextCandidate& candidate : candidates) {
-      candidate.materializedArgument = materializeCandidate(candidate, false);
+      candidate.materializedArgument =
+          materializeCandidate(candidate, false, &candidate.failure);
     }
+    std::vector<ContextCandidate> allCandidates = candidates;
     std::erase_if(candidates, [](const ContextCandidate& candidate) {
       return !candidate.materializedArgument.has_value();
     });
@@ -8455,20 +8619,29 @@ std::vector<TypedContextArgument> Typechecker::resolveContextArguments(
         i < callee.parameters.size() ? parameterName(callee.parameters[i])
                                      : std::to_string(i - firstContextParameter);
     if (candidates.empty()) {
+      if (allCandidates.empty()) {
+        mergeFailure(ContextResolutionFailure::Missing);
+      } else {
+        rankCandidates(allCandidates);
+        mergeFailure(allCandidates.front().failure ==
+                             ContextResolutionFailure::None
+                         ? ContextResolutionFailure::Unsupported
+                         : allCandidates.front().failure);
+      }
       if (reportDiagnostics) {
         if (allCandidates.empty()) {
           diagnostics_.error(span, "no given value found for context parameter " +
                                        parameterNameText + " of type " + expected.name +
                                        " required by " + callee.name);
         } else {
-          rankCandidates(allCandidates);
-          (void)materializeCandidate(allCandidates.front(), true);
+          (void)materializeCandidate(allCandidates.front(), true, nullptr);
         }
       }
       result.push_back(unknownArgument(i));
       continue;
     }
     if (candidates.size() > 1) {
+      mergeFailure(ContextResolutionFailure::Ambiguous);
       if (reportDiagnostics) {
         std::string message = "ambiguous given values for context parameter " +
                               parameterNameText + " of type " + expected.name +
@@ -8492,7 +8665,8 @@ std::vector<TypedContextArgument> Typechecker::resolveContextArguments(
 }
 
 void Typechecker::recordContextApplication(
-    const support::SourceSpan& span, std::vector<TypedContextArgument> arguments) {
+    const support::SourceSpan& span, std::vector<TypedContextArgument> arguments,
+    bool hasSelectedBranch, std::size_t selectedBranch) {
   auto sameSpan = [&](const TypedContextApplication& application) {
     return application.span.source == span.source &&
            application.span.start == span.start &&
@@ -8501,9 +8675,12 @@ void Typechecker::recordContextApplication(
   auto existing =
       std::find_if(contextApplications_.begin(), contextApplications_.end(), sameSpan);
   if (existing == contextApplications_.end()) {
-    contextApplications_.push_back(TypedContextApplication{span, std::move(arguments)});
+    contextApplications_.push_back(TypedContextApplication{
+        span, std::move(arguments), hasSelectedBranch, selectedBranch});
   } else {
     existing->arguments = std::move(arguments);
+    existing->hasSelectedBranch = hasSelectedBranch;
+    existing->selectedBranch = selectedBranch;
   }
 }
 

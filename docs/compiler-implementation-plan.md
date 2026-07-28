@@ -983,6 +983,20 @@ Current scaffold status:
   two-level factory chain, runtime selection, and NIR lowering; missing,
   ambiguous, diverging, and malformed multi-type requests retain the ordinary
   contextual diagnostics.
+- Compiler-owned Scala 3 `summonFrom` accepts braced, ordered type-ascription
+  cases, typed wildcards, `case given T` and `case given _: T` contextual
+  bindings, and an optional final wildcard fallback.
+  Each typed case probes ordinary contextual search without reporting missing
+  evidence, while ambiguity and diverging or unsupported materialization retain
+  focused diagnostics instead of falling through. The selected branch and its
+  typed evidence tree are recorded on the typed module; NIR binds that evidence
+  as a local value and emits only the selected body, with no runtime conditional
+  or dead fallback. The current reduction uses evidence visible at the
+  definition's lexical typechecking site; full inline call-site specialization
+  remains a later milestone. Focused native coverage exercises ordered search,
+  wildcard fallback, pattern-bound contextual evidence, recursive generic
+  factories, dead-branch elimination, malformed cases, unmatched search, and
+  ambiguity propagation.
 - Anonymous givens and block-local named or anonymous givens now use the same
   typed evidence model. Lexical depth is retained during search, so the
   innermost matching local given wins while equally nested matches remain
@@ -1129,8 +1143,8 @@ Current scaffold status:
   non-invertible generic parent mappings, tuple-value operations, compile-time
   tuple recursion, and higher-kinded derivation remain later derivation
   milestones.
-  General derivation from nested declarations, compile-time `summonFrom`, and
-  Scala 2 `implicit` syntax also remain later milestones.
+  General derivation from nested declarations, full inline call-site
+  specialization, and Scala 2 `implicit` syntax also remain later milestones.
 - Postfix type application now supports typed `value.isInstanceOf[Target]` and
   checked `value.asInstanceOf[Target]` for known classes, traits, and objects.
   NIR uses dedicated `is-instance-of[T]` and `as-instance-of[T]` values; verification

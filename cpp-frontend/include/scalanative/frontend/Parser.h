@@ -63,6 +63,7 @@ private:
   [[nodiscard]] AstExpression parseIfExpression(const Token& keyword);
   [[nodiscard]] AstExpression parseWhileExpression(const Token& keyword);
   [[nodiscard]] AstExpression parseStableModuleReference(const Token& first);
+  [[nodiscard]] AstExpression parseSummonFromExpression(const Token& identifier);
   [[nodiscard]] AstExpression parseMatchExpression(AstExpression selector,
                                                    const Token& keyword);
   [[nodiscard]] int precedence(const Token& token) const;
