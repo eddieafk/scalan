@@ -141,11 +141,57 @@ class TraitInstanceSelectorsValue(val value: String) extends TraitInstanceSelect
   def traitPrefix(): String = value
 }
 
+class GenericInstanceSelectors[Owner](val ownerPrefix: String) {
+  inline def selected[A](): String =
+    summonFrom {
+      case ownerNamed: Named[Owner] =>
+        summonFrom {
+          case methodNamed: Named[A] =>
+            ownerPrefix + ownerNamed.label() + ":" + methodNamed.label()
+          case _ => ownerPrefix + "method-fallback"
+        }
+      case _ => ownerPrefix + "owner-fallback"
+    }
+
+  inline def contextual[A](value: A)(
+      using ownerNamed: Named[Owner], methodNamed: Named[A]): String =
+    ownerPrefix + ownerNamed.label() + ":" + methodNamed.label()
+
+  inline def ownerPassed[A](ownerValue: Owner, methodValue: A): Owner =
+    ownerValue
+}
+
+trait GenericTraitInstanceSelectors[Owner] {
+  def genericTraitPrefix(): String
+
+  inline def selected[A](): String =
+    summonFrom {
+      case ownerNamed: Named[Owner] =>
+        summonFrom {
+          case methodNamed: Named[A] =>
+            genericTraitPrefix() + ownerNamed.label() + ":" + methodNamed.label()
+          case _ => genericTraitPrefix() + "method-fallback"
+        }
+      case _ => genericTraitPrefix() + "owner-fallback"
+    }
+}
+
+class GenericTraitInstanceSelectorsValue(val value: String)
+    extends GenericTraitInstanceSelectors[String] {
+  def genericTraitPrefix(): String = value
+}
+
 object Main {
   given intNamed: Named[Int] = new NamedValue[Int]("member-int")
   val instances: InstanceSelectors = new InstanceSelectors("instance:")
   val traitInstances: TraitInstanceSelectors =
     new TraitInstanceSelectorsValue("trait-instance:")
+  val genericInstances: GenericInstanceSelectors[String] =
+    new GenericInstanceSelectors[String]("generic:")
+  val genericTraitInstances: GenericTraitInstanceSelectors[String] =
+    new GenericTraitInstanceSelectorsValue("generic-trait:")
+  val inheritedGenericTraitInstances: GenericTraitInstanceSelectorsValue =
+    new GenericTraitInstanceSelectorsValue("inherited-trait:")
 
   def nextValue(): String = {
     println("effect")
@@ -219,6 +265,28 @@ object Main {
     localInstances.selected[Int]()
   }
   def traitInstanceSelected: String = traitInstances.traitSelected[Int]()
+  def genericInstanceSelected: String = {
+    given ownerString: Named[String] =
+      new NamedValue[String]("owner-string")
+    genericInstances.selected[Int]()
+  }
+  def genericInstanceContextual: String = {
+    given ownerString: Named[String] =
+      new NamedValue[String]("owner-string")
+    genericInstances.contextual(11)
+  }
+  def genericOwnerPassed: String =
+    genericInstances.ownerPassed("owner-value", 12)
+  def genericTraitInstanceSelected: String = {
+    given traitOwnerString: Named[String] =
+      new NamedValue[String]("trait-owner")
+    genericTraitInstances.selected[Int]()
+  }
+  def inheritedGenericTraitSelected: String = {
+    given inheritedOwnerString: Named[String] =
+      new NamedValue[String]("inherited-owner")
+    inheritedGenericTraitInstances.selected[Int]()
+  }
 
   def main(args: Array[String]): Unit = {
     println(intSelected)
@@ -252,6 +320,11 @@ object Main {
     println(instanceThisPrefix)
     println(localInstanceSelected)
     println(traitInstanceSelected)
+    println(genericInstanceSelected)
+    println(genericInstanceContextual)
+    println(genericOwnerPassed)
+    println(genericTraitInstanceSelected)
+    println(inheritedGenericTraitSelected)
   }
 }
 )";
@@ -272,10 +345,6 @@ object Main {
   inline def missingBody[A]: String
   inline def recursive[A]: String = recursive[A]
   inline val unsupported: String = "value"
-}
-
-class GenericInstance[T] {
-  inline def unsupportedInstance[A]: String = "instance"
 }
 
 class EffectfulInstance {
@@ -380,6 +449,16 @@ class EffectfulInstance {
       functionText(result.nirText, "demo.inlinecalls.Main.localInstanceSelected");
   const std::string_view traitInstanceSelected =
       functionText(result.nirText, "demo.inlinecalls.Main.traitInstanceSelected");
+  const std::string_view genericInstanceSelected =
+      functionText(result.nirText, "demo.inlinecalls.Main.genericInstanceSelected");
+  const std::string_view genericInstanceContextual =
+      functionText(result.nirText, "demo.inlinecalls.Main.genericInstanceContextual");
+  const std::string_view genericOwnerPassed =
+      functionText(result.nirText, "demo.inlinecalls.Main.genericOwnerPassed");
+  const std::string_view genericTraitInstanceSelected = functionText(
+      result.nirText, "demo.inlinecalls.Main.genericTraitInstanceSelected");
+  const std::string_view inheritedGenericTraitSelected = functionText(
+      result.nirText, "demo.inlinecalls.Main.inheritedGenericTraitSelected");
 
   const bool valid =
       status == 0 &&
@@ -403,7 +482,11 @@ class EffectfulInstance {
               "instance:explicit-instance:explicit-instance:explicit:explicit\n"
               "instance-nested:instance:member-int:member-int:nested:nested\n"
               "instance:inferred\ninstance:\nlocal-instance:member-int\n"
-              "trait-instance:member-int\n" &&
+              "trait-instance:member-int\n"
+              "generic:owner-string:member-int\n"
+              "generic:owner-string:member-int\nowner-value\n"
+              "generic-trait:trait-owner:member-int\n"
+              "inherited-trait:inherited-owner:member-int\n" &&
       !invalid.ok &&
       contains(invalid.diagnosticsText,
                "inline call-site specialization currently requires a generic "
@@ -416,9 +499,6 @@ class EffectfulInstance {
       contains(invalid.diagnosticsText, "inline method requires an implementation") &&
       contains(invalid.diagnosticsText,
                "recursive inline call-site specialization is not supported yet") &&
-      contains(invalid.diagnosticsText,
-               "inline instance method specialization does not support generic "
-               "owner classes or traits yet") &&
       contains(invalid.diagnosticsText,
                "inline instance method specialization requires a stable identifier "
                "or this receiver") &&
@@ -533,7 +613,37 @@ class EffectfulInstance {
       countOccurrences(traitInstanceSelected, "Main.traitInstances") == 1 &&
       countOccurrences(traitInstanceSelected, "Main.intNamed") == 1 &&
       !contains(traitInstanceSelected,
-                "%demo.inlinecalls.TraitInstanceSelectors.traitSelected");
+                "%demo.inlinecalls.TraitInstanceSelectors.traitSelected") &&
+      contains(genericInstanceSelected,
+               "let %this : demo.inlinecalls.GenericInstanceSelectors") &&
+      contains(genericInstanceSelected, "owner-string") &&
+      countOccurrences(genericInstanceSelected, "Main.genericInstances") == 1 &&
+      countOccurrences(genericInstanceSelected, "Main.intNamed") == 1 &&
+      !contains(genericInstanceSelected,
+                "%demo.inlinecalls.GenericInstanceSelectors.selected") &&
+      contains(genericInstanceContextual, "let %value : Int = 11") &&
+      contains(genericInstanceContextual, "owner-string") &&
+      countOccurrences(genericInstanceContextual, "Main.genericInstances") == 1 &&
+      countOccurrences(genericInstanceContextual, "Main.intNamed") == 1 &&
+      !contains(genericInstanceContextual,
+                "%demo.inlinecalls.GenericInstanceSelectors.contextual") &&
+      contains(genericOwnerPassed, "let %ownerValue : String = \"owner-value\"") &&
+      contains(genericOwnerPassed, "let %methodValue : Int = 12") &&
+      countOccurrences(genericOwnerPassed, "Main.genericInstances") == 1 &&
+      !contains(genericOwnerPassed,
+                "%demo.inlinecalls.GenericInstanceSelectors.ownerPassed") &&
+      contains(genericTraitInstanceSelected, "trait-owner") &&
+      countOccurrences(genericTraitInstanceSelected, "Main.genericTraitInstances") ==
+          1 &&
+      countOccurrences(genericTraitInstanceSelected, "Main.intNamed") == 1 &&
+      !contains(genericTraitInstanceSelected,
+                "%demo.inlinecalls.GenericTraitInstanceSelectors.selected") &&
+      contains(inheritedGenericTraitSelected, "inherited-owner") &&
+      countOccurrences(inheritedGenericTraitSelected,
+                       "Main.inheritedGenericTraitInstances") == 1 &&
+      countOccurrences(inheritedGenericTraitSelected, "Main.intNamed") == 1 &&
+      !contains(inheritedGenericTraitSelected,
+                "%demo.inlinecalls.GenericTraitInstanceSelectors.selected");
   return valid
              ? 0
              : fail("inline summonFrom smoke test failed (output='" + text +
@@ -573,7 +683,16 @@ class EffectfulInstance {
                     std::string(instanceThisPrefix) + "', local-instance-selected='" +
                     std::string(localInstanceSelected) +
                     "', trait-instance-selected='" +
-                    std::string(traitInstanceSelected) + "')");
+                    std::string(traitInstanceSelected) +
+                    "', generic-instance-selected='" +
+                    std::string(genericInstanceSelected) +
+                    "', generic-instance-contextual='" +
+                    std::string(genericInstanceContextual) +
+                    "', generic-owner-passed='" + std::string(genericOwnerPassed) +
+                    "', generic-trait-instance-selected='" +
+                    std::string(genericTraitInstanceSelected) +
+                    "', inherited-generic-trait-selected='" +
+                    std::string(inheritedGenericTraitSelected) + "')");
 }
 
 } // namespace

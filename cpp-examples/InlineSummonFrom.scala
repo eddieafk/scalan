@@ -90,11 +90,57 @@ class TraitInstanceSelectorsValue(val value: String) extends TraitInstanceSelect
   def traitPrefix(): String = value
 }
 
+class GenericInstanceSelectors[Owner](val ownerPrefix: String) {
+  inline def selected[A](): String =
+    summonFrom {
+      case ownerNamed: Named[Owner] =>
+        summonFrom {
+          case methodNamed: Named[A] =>
+            ownerPrefix + ownerNamed.label() + ":" + methodNamed.label()
+          case _ => ownerPrefix + "method-fallback"
+        }
+      case _ => ownerPrefix + "owner-fallback"
+    }
+
+  inline def contextual[A](value: A)(
+      using ownerNamed: Named[Owner], methodNamed: Named[A]): String =
+    ownerPrefix + ownerNamed.label() + ":" + methodNamed.label()
+
+  inline def ownerPassed[A](ownerValue: Owner, methodValue: A): Owner =
+    ownerValue
+}
+
+trait GenericTraitInstanceSelectors[Owner] {
+  def genericTraitPrefix(): String
+
+  inline def selected[A](): String =
+    summonFrom {
+      case ownerNamed: Named[Owner] =>
+        summonFrom {
+          case methodNamed: Named[A] =>
+            genericTraitPrefix() + ownerNamed.label() + ":" + methodNamed.label()
+          case _ => genericTraitPrefix() + "method-fallback"
+        }
+      case _ => genericTraitPrefix() + "owner-fallback"
+    }
+}
+
+class GenericTraitInstanceSelectorsValue(val value: String)
+    extends GenericTraitInstanceSelectors[String] {
+  def genericTraitPrefix(): String = value
+}
+
 object Main {
   given intNamed: Named[Int] = new NamedValue[Int]("member-int")
   val instances: InstanceSelectors = new InstanceSelectors("instance:")
   val traitInstances: TraitInstanceSelectors =
     new TraitInstanceSelectorsValue("trait-instance:")
+  val genericInstances: GenericInstanceSelectors[String] =
+    new GenericInstanceSelectors[String]("generic:")
+  val genericTraitInstances: GenericTraitInstanceSelectors[String] =
+    new GenericTraitInstanceSelectorsValue("generic-trait:")
+  val inheritedGenericTraitInstances: GenericTraitInstanceSelectorsValue =
+    new GenericTraitInstanceSelectorsValue("inherited-trait:")
 
   def nextValue(): String = {
     println("effect")
@@ -169,5 +215,25 @@ object Main {
       println(localInstances.selected[Int]())
     }
     println(traitInstances.traitSelected[Int]())
+
+    {
+      given ownerString: Named[String] =
+        new NamedValue[String]("owner-string")
+      println(genericInstances.selected[Int]())
+      println(genericInstances.contextual(11))
+    }
+    println(genericInstances.ownerPassed("owner-value", 12))
+
+    {
+      given traitOwnerString: Named[String] =
+        new NamedValue[String]("trait-owner")
+      println(genericTraitInstances.selected[Int]())
+    }
+
+    {
+      given inheritedOwnerString: Named[String] =
+        new NamedValue[String]("inherited-owner")
+      println(inheritedGenericTraitInstances.selected[Int]())
+    }
   }
 }

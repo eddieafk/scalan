@@ -1650,16 +1650,6 @@ TypedDeclaration Typechecker::typecheckDeclaration(const AstDeclaration& declara
       diagnostics_.error(declaration.span,
                          "inline method requires an implementation");
     }
-    if (auto enclosing = globalSymbols_.find(owner);
-        enclosing != globalSymbols_.end() &&
-        (enclosing->second.kind == AstDeclarationKind::Class ||
-         enclosing->second.kind == AstDeclarationKind::Trait) &&
-        !enclosing->second.typeParameters.empty()) {
-      diagnostics_.error(
-          declaration.span,
-          "inline instance method specialization does not support generic owner "
-          "classes or traits yet");
-    }
   }
   for (std::size_t i = 0; i < typed.parameters.size(); ++i) {
     const std::string name = parameterName(typed.parameters[i]);
@@ -4511,6 +4501,31 @@ void Typechecker::recordInlineApplication(
         "this receiver");
     return;
   }
+  const std::string definitionOwner = ownerNameOf(symbol.symbolName);
+  std::optional<TypeInfo> ownerReceiverType;
+  if (symbol.isInstanceMember) {
+    for (const TypeInfo& base : baseTypesFor(*receiverType)) {
+      const std::string baseName =
+          base.typeConstructorName.empty()
+              ? (base.runtimeName.empty() ? base.name : base.runtimeName)
+              : base.typeConstructorName;
+      if (baseName == definitionOwner) {
+        ownerReceiverType = base;
+        break;
+      }
+    }
+    if (auto owner = globalSymbols_.find(definitionOwner);
+        owner != globalSymbols_.end() && !owner->second.typeParameters.empty() &&
+        (!ownerReceiverType.has_value() ||
+         ownerReceiverType->typeArguments.size() !=
+             owner->second.typeParameters.size())) {
+      diagnostics_.error(
+          expression.span,
+          "inline instance method specialization requires a fully applied "
+          "generic owner receiver");
+      return;
+    }
+  }
   if (!expandingInlineApplications_.insert(symbol.symbolName).second) {
     diagnostics_.error(
         expression.span,
@@ -4519,10 +4534,37 @@ void Typechecker::recordInlineApplication(
   }
 
   Scope inlineScope = scope;
-  const std::string definitionOwner = ownerNameOf(symbol.symbolName);
+  std::unordered_map<std::string, TypeInfo> substitutions;
+  if (symbol.isInstanceMember && ownerReceiverType.has_value()) {
+    auto owner = globalSymbols_.find(definitionOwner);
+    if (owner != globalSymbols_.end()) {
+      const std::size_t ownerArgumentCount =
+          std::min(owner->second.typeParameters.size(),
+                   ownerReceiverType->typeArguments.size());
+      for (std::size_t index = 0; index < ownerArgumentCount; ++index) {
+        const TypeParameterInfo& parameter = owner->second.typeParameters[index];
+        const TypeInfo& argument = ownerReceiverType->typeArguments[index];
+        substitutions[parameter.symbolName] = argument;
+        SymbolInfo concreteType;
+        concreteType.kind = AstDeclarationKind::Type;
+        concreteType.name = parameter.name;
+        concreteType.symbolName = parameter.symbolName;
+        concreteType.type = argument;
+        concreteType.lowerBound = argument;
+        concreteType.upperBound = argument;
+        concreteType.hasImplementation = true;
+        inlineScope[parameter.name] = std::move(concreteType);
+      }
+    }
+  }
   if (auto members = memberScopes_.find(definitionOwner);
       members != memberScopes_.end()) {
-    mergeScope(inlineScope, members->second);
+    for (const auto& [name, member] : members->second) {
+      inlineScope[name] =
+          ownerReceiverType.has_value()
+              ? specializeMemberForReceiver(member, *ownerReceiverType)
+              : member;
+    }
   }
   if (symbol.isInstanceMember) {
     SymbolInfo thisSymbol;
@@ -4533,7 +4575,6 @@ void Typechecker::recordInlineApplication(
     thisSymbol.isLexicalValue = true;
     inlineScope["this"] = std::move(thisSymbol);
   }
-  std::unordered_map<std::string, TypeInfo> substitutions;
   for (std::size_t index = 0; index < typeArguments.size(); ++index) {
     const TypeParameterInfo& parameter = symbol.typeParameters[index];
     substitutions[parameter.symbolName] = typeArguments[index];
