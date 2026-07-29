@@ -16,6 +16,12 @@ transparent trait RoutingMarker
 trait LookupBox[+A <: LookupView] {
   def value(): A
 }
+trait LookupResult {
+  def result(): LookupView
+}
+trait AuditResult {
+  def result(): Audited
+}
 
 class RequestIdValue extends RequestId with RoutingMarker {
   def display(): String = "request"
@@ -41,11 +47,15 @@ class RequestBox extends LookupBox[RequestId] {
 class UsernameBox extends LookupBox[Username] {
   def value(): Username = new UsernameValue
 }
+class AuditedLookupResult extends LookupResult with AuditResult {
+  override def result(): LookupView & Audited = new AuditedRequest
+}
 
 type LookupKey = RequestId | Username
 type AuditedKey = LookupKey & Audited
 type EitherOf[A, B] = A | B
 type BothOf[A, B] = A & B
+type CombinedResult = LookupResult & AuditResult
 
 object CompositeTypes {
   def route(key: LookupKey): String = key.display()
@@ -65,6 +75,8 @@ object CompositeTypes {
     firstOf("retained-generic-union", 23).asInstanceOf[String]
   def inferredLookupBox(useRequest: Boolean) =
     if (useRequest) new RequestBox else new UsernameBox
+  def combinedResult(source: CombinedResult): LookupView & Audited =
+    source.result()
 
   def main(args: Array[String]): Unit = {
     val request: LookupKey = new RequestIdValue
@@ -84,5 +96,7 @@ object CompositeTypes {
     println(inferredGeneric())
     println(retainedGenericUnion())
     println(inferredLookupBox(false).value().display())
+    println(combinedResult(new AuditedLookupResult).display())
+    println(combinedResult(new AuditedLookupResult).auditLabel())
   }
 }

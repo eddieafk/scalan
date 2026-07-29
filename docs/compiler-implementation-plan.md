@@ -1271,8 +1271,14 @@ Current scaffold status:
   applications leave the original union intact. Parent substitutions are
   propagated transitively, bounds remain enforced, and more-specific applied
   bases suppress their ancestors. Runtime, NIR, and negative coverage exercises
-  these paths. Intersection members whose independently declared result types
-  need a synthesized intersection remain a later type-system slice.
+  these paths. Intersection member lookup now also follows Scala 3's member-type
+  merge for matching term shapes: methods and stable values declared with
+  different result types synthesize their meet, while method parameters and
+  mutable values retain their stricter compatibility requirements. Covariant
+  method and stable-value implementations can provide the concrete merged
+  member. Optimized runtime and NIR coverage verifies chained selection from the
+  synthesized result, stable values, applied generic members, incompatible
+  parameter lists, and invalid one-sided implementations.
 - Full inline call-site specialization remains a later milestone.
 - Postfix type application now supports typed `value.isInstanceOf[Target]` and
   checked `value.asInstanceOf[Target]` for known classes, traits, and objects.

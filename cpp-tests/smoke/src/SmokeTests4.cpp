@@ -48,6 +48,18 @@ trait LeftLabel {
 trait RightLabel {
   def label(): String
 }
+trait LeftResult {
+  def combinedResult(): Left
+}
+trait RightResult {
+  def combinedResult(): Right
+}
+trait LeftStableResult {
+  val stableResult: Left
+}
+trait RightStableResult {
+  val stableResult: Right
+}
 transparent class HiddenBase {
   def hiddenName(): String = "hidden-base"
 }
@@ -91,6 +103,17 @@ class BothValue extends Right with Tagged {
   def commonName(): String = "both-common"
   def rightName(): String = "both-right"
   def tagName(): String = "tagged-right"
+}
+class CompleteValue extends Left with Right {
+  def commonName(): String = "complete-common"
+  def leftName(): String = "complete-left"
+  def rightName(): String = "complete-right"
+}
+class CombinedResult extends LeftResult with RightResult {
+  override def combinedResult(): Left & Right = new CompleteValue
+}
+class CombinedStableResult extends LeftStableResult with RightStableResult {
+  override val stableResult: Left & Right = new CompleteValue
 }
 class BothLabels extends LeftLabel with RightLabel {
   def label(): String = "both-label"
@@ -153,6 +176,8 @@ type NestedRequired = Choice & Tagged
 type GenericDistributed = GenericRequired[Choice, Tagged]
 type DistributedSource = Tagged & (Left | Right)
 type DistributedTarget = (Tagged & Left) | (Tagged & Right)
+type CombinedResultSource = LeftResult & RightResult
+type CombinedStableResultSource = LeftStableResult & RightStableResult
 
 object Main {
   val unionField: Left | Right = new LeftValue
@@ -171,6 +196,17 @@ object Main {
   def projectedTagName(value: Required): String = value.tagName()
   def projectedMergedLabel(value: LeftLabel & RightLabel): String =
     value.label()
+  def projectedCombinedResult(value: CombinedResultSource): Left & Right =
+    value.combinedResult()
+  def projectedCombinedLeft(value: CombinedResultSource): String =
+    value.combinedResult().leftName()
+  def projectedCombinedRight(value: CombinedResultSource): String =
+    value.combinedResult().rightName()
+  def projectedStableResult(value: CombinedStableResultSource): String =
+    value.stableResult.rightName()
+  def projectedAppliedResult(
+      value: Payload[Left] & Payload[Right]): Left & Right =
+    value.payload()
   def genericIntersectionName(
       value: GenericRequired[Right, Tagged]): String =
     "generic-intersection"
@@ -275,6 +311,10 @@ object Main {
     println(projectedRightName(localIntersection))
     println(projectedTagName(localIntersection))
     println(projectedMergedLabel(new BothLabels))
+    println(projectedCombinedLeft(new CombinedResult))
+    println(projectedCombinedRight(new CombinedResult))
+    println(projectedCombinedResult(new CombinedResult).commonName())
+    println(projectedStableResult(new CombinedStableResult))
     println(genericIntersectionName(localIntersection))
     println(precedenceName(new LeftValue))
     println(precedenceName(new BothValue))
@@ -344,6 +384,27 @@ trait Right {
   def commonSpelling(): String
 }
 trait Tagged
+trait LeftConflict {
+  def conflict(value: Int): Left
+}
+trait RightConflict {
+  def conflict(value: String): Right
+}
+trait LeftResult {
+  def combinedResult(): Left
+}
+trait RightResult {
+  def combinedResult(): Right
+}
+trait Sink[A] {
+  def accept(value: A): String
+}
+trait ConcreteLeftResult {
+  def concreteResult(): Left = new LeftValue
+}
+trait ConcreteRightResult {
+  def concreteResult(): Right = new RightValue
+}
 class LeftValue extends Left {
   def commonSpelling(): String = "left"
 }
@@ -351,6 +412,10 @@ class RightValue extends Right {
   def commonSpelling(): String = "right"
 }
 class Other
+class InvalidResult extends LeftResult with RightResult {
+  override def combinedResult(): Left = new LeftValue
+}
+class InvalidConcreteResult extends ConcreteLeftResult with ConcreteRightResult
 
 object Main {
   def union(value: Left | Right): Int = 1
@@ -360,6 +425,12 @@ object Main {
   def boundedFirst[A <: Left](left: A, right: A): A = left
   def invalidUnionProjection(value: Left | Right): String =
     value.commonSpelling()
+  def incompatibleIntersectionProjection(
+      value: LeftConflict & RightConflict): Left & Right =
+    value.conflict(1)
+  def incompatibleAppliedIntersection(
+      value: Sink[Left] & Sink[Right]): String =
+    value.accept(new LeftValue)
 
   val badUnion: Left | Right = new Other
   val badIntersection: Left & Tagged = new LeftValue
@@ -427,6 +498,7 @@ object Main {
       text == "union\nunion\nalias-union\ngeneric-union\n"
               "left-common\nright-common\n"
               "intersection\nboth-right\ntagged-right\nboth-label\n"
+              "complete-left\ncomplete-right\ncomplete-common\ncomplete-right\n"
               "generic-intersection\n"
               "precedence\nprecedence\ngrouped\ngrouped\nnested\n"
               "left-tagged-common\ntagged-left\n"
@@ -476,6 +548,23 @@ object Main {
                "demo.invalidcompositetypes.Left | "
                "demo.invalidcompositetypes.Right; union members must come from "
                "a common base type") &&
+      contains(invalid.diagnosticsText,
+               "unresolved or incompatible member: conflict on intersection type "
+               "demo.invalidcompositetypes.LeftConflict & "
+               "demo.invalidcompositetypes.RightConflict") &&
+      contains(invalid.diagnosticsText,
+               "unresolved or incompatible member: accept on intersection type "
+               "demo.invalidcompositetypes.Sink [ "
+               "demo.invalidcompositetypes.Left ] & "
+               "demo.invalidcompositetypes.Sink [ "
+               "demo.invalidcompositetypes.Right ]") &&
+      contains(invalid.diagnosticsText,
+               "override combinedResult return type "
+               "demo.invalidcompositetypes.Left does not match inherited "
+               "return type demo.invalidcompositetypes.Right") &&
+      contains(invalid.diagnosticsText,
+               "class InvalidConcreteResult inherits incompatible method "
+               "concreteResult") &&
       !malformed.ok &&
       contains(malformed.diagnosticsText,
                "malformed intersection or union type: Left |") &&
@@ -503,6 +592,24 @@ object Main {
                "as-instance-of[demo.compositetypes.Tagged](%value).tagName") &&
       contains(result.nirText,
                "as-instance-of[demo.compositetypes.LeftLabel](%value).label") &&
+      contains(result.nirText,
+               "define @demo.compositetypes.Main.projectedCombinedResult : "
+               "(Object)Object") &&
+      contains(result.nirText,
+               "as-instance-of[demo.compositetypes.LeftResult](%value)"
+               ".combinedResult") &&
+      contains(result.nirText,
+               "define @demo.compositetypes.CombinedResult.combinedResult : "
+               "(demo.compositetypes.CombinedResult)Object") &&
+      contains(result.nirText,
+               "define @demo.compositetypes.Main.projectedStableResult : "
+               "(Object)String") &&
+      contains(result.nirText,
+               "as-instance-of[demo.compositetypes.LeftStableResult](%value)"
+               ".stableResult") &&
+      contains(result.nirText,
+               "define @demo.compositetypes.Main.projectedAppliedResult : "
+               "(Object)Object") &&
       contains(result.nirText,
                "define @demo.compositetypes.Main.chooseLeft : ()Object") &&
       contains(result.nirText,

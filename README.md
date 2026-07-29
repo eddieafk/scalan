@@ -92,8 +92,8 @@ build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
 # locals, nested generic arguments, generic type aliases, inferred branch
 # unions with parameterized visible-join widening or retained unconstrained
 # generic alternatives (including user-declared transparent classes/traits),
-# and members projected from intersection constituents or a union's shared
-# base-type join.
+# members projected from intersection constituents (including synthesized
+# intersection result types), or a union's shared base-type join.
 build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
   --output /tmp/composite-types \
   cpp-examples/CompositeTypes.scala

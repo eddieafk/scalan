@@ -413,6 +413,33 @@ bool inheritedContractSatisfiedBy(const SymbolInfo& effective,
   return typesMatchForOverride(required.type, effective.type);
 }
 
+bool memberShapesSupportResultMeet(const SymbolInfo& lhs,
+                                   const SymbolInfo& rhs) {
+  if (lhs.kind != rhs.kind) {
+    return false;
+  }
+  if (lhs.kind == AstDeclarationKind::Def) {
+    if (lhs.typeParameters.size() != rhs.typeParameters.size() ||
+        lhs.parameterTypes.size() != rhs.parameterTypes.size() ||
+        lhs.contextualParameters != rhs.contextualParameters) {
+      return false;
+    }
+    for (std::size_t i = 0; i < lhs.parameterTypes.size(); ++i) {
+      if (!typesMatchForOverride(lhs.parameterTypes[i], rhs.parameterTypes[i])) {
+        return false;
+      }
+    }
+    return true;
+  }
+  if (lhs.kind == AstDeclarationKind::Val) {
+    return true;
+  }
+  if (lhs.kind == AstDeclarationKind::Var) {
+    return typesMatchForOverride(lhs.type, rhs.type);
+  }
+  return lhs.symbolName == rhs.symbolName;
+}
+
 std::string trim(std::string_view text) {
   while (!text.empty() && text.front() == ' ') {
     text.remove_prefix(1);
@@ -4675,9 +4702,9 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
       } else if (callee.kind == AstExpressionKind::Select &&
                  callee.children.size() == 1) {
         const TypeInfo receiver = inferExpressionType(callee.children.front(), scope);
-        if (const SymbolInfo* member =
-                knownMemberForReceiverType(receiver, callee.text)) {
-          target = specializeMemberForReceiver(*member, receiver);
+        if (std::optional<SymbolInfo> member =
+                resolvedMemberForReceiverType(receiver, callee.text)) {
+          target = std::move(*member);
           foundTarget = true;
         }
       }
@@ -5534,9 +5561,9 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
     } else if (callee.kind == AstExpressionKind::Select &&
                callee.children.size() == 1) {
       const TypeInfo receiver = inferExpressionType(callee.children.front(), scope);
-      if (const SymbolInfo* member =
-              knownMemberForReceiverType(receiver, callee.text)) {
-        specializedCallee = specializeMemberForReceiver(*member, receiver);
+      if (std::optional<SymbolInfo> member =
+              resolvedMemberForReceiverType(receiver, callee.text)) {
+        specializedCallee = std::move(*member);
         calleeSymbol = &specializedCallee;
       }
     } else if (callee.kind == AstExpressionKind::TypeApply &&
@@ -5553,9 +5580,9 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
                  genericTarget.children.size() == 1) {
         const TypeInfo receiver =
             inferExpressionType(genericTarget.children.front(), scope);
-        if (const SymbolInfo* member =
-                knownMemberForReceiverType(receiver, genericTarget.text)) {
-          receiverSpecialized = specializeMemberForReceiver(*member, receiver);
+        if (std::optional<SymbolInfo> member =
+                resolvedMemberForReceiverType(receiver, genericTarget.text)) {
+          receiverSpecialized = std::move(*member);
           rawTarget = &receiverSpecialized;
         }
       }
@@ -7096,12 +7123,21 @@ TypeInfo Typechecker::inferSelectType(const AstExpression& expression, Scope& sc
     return TypeInfo{SimpleTypeKind::Unknown, "Unknown"};
   }
 
-  const SymbolInfo* member = selectedMember(expression, scope);
+  std::optional<SymbolInfo> resolvedMember;
+  if (expression.children.size() == 1) {
+    const TypeInfo receiver = inferExpressionType(expression.children.front(), scope);
+    resolvedMember =
+        resolvedMemberForReceiverType(receiver, expression.text);
+  }
+  const SymbolInfo* member =
+      resolvedMember.has_value() ? &*resolvedMember
+                                 : selectedMember(expression, scope);
   if (member == nullptr) {
     return TypeInfo{SimpleTypeKind::Unknown, "Unknown"};
   }
-  SymbolInfo specializedMember = *member;
-  if (expression.children.size() == 1) {
+  SymbolInfo specializedMember =
+      resolvedMember.has_value() ? *resolvedMember : *member;
+  if (!resolvedMember.has_value() && expression.children.size() == 1) {
     const TypeInfo receiver = inferExpressionType(expression.children.front(), scope);
     specializedMember = specializeMemberForReceiver(*member, receiver);
   }
@@ -7337,26 +7373,6 @@ Typechecker::knownMemberForReceiverType(const TypeInfo& receiver,
     auto member = members->second.find(memberName);
     return member == members->second.end() ? nullptr : &member->second;
   };
-  const auto compatibleIntersectionMembers = [](const SymbolInfo& lhs,
-                                                const SymbolInfo& rhs) {
-    if (lhs.symbolName == rhs.symbolName) {
-      return true;
-    }
-    if (lhs.kind != rhs.kind ||
-        lhs.typeParameters.size() != rhs.typeParameters.size() ||
-        lhs.parameterTypes.size() != rhs.parameterTypes.size() ||
-        lhs.contextualParameters != rhs.contextualParameters ||
-        !typesMatchForOverride(lhs.type, rhs.type)) {
-      return false;
-    }
-    for (std::size_t i = 0; i < lhs.parameterTypes.size(); ++i) {
-      if (!typesMatchForOverride(lhs.parameterTypes[i], rhs.parameterTypes[i])) {
-        return false;
-      }
-    }
-    return true;
-  };
-
   if (receiver.compositeKind == CompositeTypeKind::Union) {
     for (const std::string& commonBase : baseTypeNamesFor(receiver)) {
       if (const SymbolInfo* member = memberForOwner(commonBase)) {
@@ -7367,21 +7383,16 @@ Typechecker::knownMemberForReceiverType(const TypeInfo& receiver,
   }
 
   if (receiver.compositeKind == CompositeTypeKind::Intersection) {
-    const SymbolInfo* selected = nullptr;
+    if (!resolvedMemberForReceiverType(receiver, memberName).has_value()) {
+      return nullptr;
+    }
     for (const TypeInfo& operand : receiver.compositeTypes) {
       const SymbolInfo* candidate = knownMemberForReceiverType(operand, memberName);
-      if (candidate == nullptr) {
-        continue;
-      }
-      if (selected != nullptr &&
-          !compatibleIntersectionMembers(*selected, *candidate)) {
-        return nullptr;
-      }
-      if (selected == nullptr) {
-        selected = candidate;
+      if (candidate != nullptr) {
+        return candidate;
       }
     }
-    return selected;
+    return nullptr;
   }
 
   std::string memberOwner = receiver.typeConstructorName.empty()
@@ -7394,6 +7405,49 @@ Typechecker::knownMemberForReceiverType(const TypeInfo& receiver,
     return memberForOwner(receiver.runtimeName);
   }
   return nullptr;
+}
+
+std::optional<SymbolInfo> Typechecker::resolvedMemberForReceiverType(
+    const TypeInfo& receiver, const std::string& memberName) const {
+  if (receiver.kind != SimpleTypeKind::Object) {
+    return std::nullopt;
+  }
+  if (receiver.compositeKind != CompositeTypeKind::Intersection) {
+    const SymbolInfo* member =
+        knownMemberForReceiverType(receiver, memberName);
+    if (member == nullptr) {
+      return std::nullopt;
+    }
+    return specializeMemberForReceiver(*member, receiver);
+  }
+
+  std::optional<SymbolInfo> merged;
+  for (const TypeInfo& operand : receiver.compositeTypes) {
+    std::optional<SymbolInfo> candidate =
+        resolvedMemberForReceiverType(operand, memberName);
+    if (!candidate.has_value()) {
+      continue;
+    }
+    if (!merged.has_value()) {
+      merged = std::move(candidate);
+      continue;
+    }
+    if (!memberShapesSupportResultMeet(*merged, *candidate)) {
+      return std::nullopt;
+    }
+    if (merged->type.name == candidate->type.name &&
+        merged->type.compositeKind == candidate->type.compositeKind) {
+      continue;
+    }
+    if (isAssignable(merged->type, candidate->type)) {
+      merged->type = candidate->type;
+    } else if (!isAssignable(candidate->type, merged->type)) {
+      merged->type = makeCompositeType(
+          CompositeTypeKind::Intersection,
+          {std::move(merged->type), std::move(candidate->type)});
+    }
+  }
+  return merged;
 }
 
 const SymbolInfo* Typechecker::qualifiedPathSymbol(const std::string& name,
@@ -7805,6 +7859,10 @@ void Typechecker::validateInheritedMemberCompatibility(
       if (inheritedContractSatisfiedBy(effective, required)) {
         continue;
       }
+      if (!effective.hasImplementation && !required.hasImplementation &&
+          memberShapesSupportResultMeet(effective, required)) {
+        continue;
+      }
       if (effective.kind == AstDeclarationKind::Def &&
           required.kind == AstDeclarationKind::Def) {
         diagnostics_.error(declaration.span,
@@ -7911,7 +7969,7 @@ void Typechecker::validateOverride(const TypedDeclaration& overriding,
                                               " with a non-value declaration");
       return;
     }
-    if (!typesMatchForOverride(inherited.type, overriding.inferredType)) {
+    if (!isAssignable(inherited.type, overriding.inferredType)) {
       diagnostics_.error(overriding.span, "override " + overriding.name +
                                               " value type " +
                                               overriding.inferredType.name +
@@ -7955,7 +8013,7 @@ void Typechecker::validateOverride(const TypedDeclaration& overriding,
     }
   }
 
-  if (!typesMatchForOverride(inherited.type, overriding.inferredType)) {
+  if (!isAssignable(inherited.type, overriding.inferredType)) {
     diagnostics_.error(
         overriding.span,
         "override " + overriding.name + " return type " + overriding.inferredType.name +

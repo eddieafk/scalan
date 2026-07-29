@@ -4,6 +4,7 @@
 #include "scalanative/support/Diagnostics.h"
 
 #include <cstddef>
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -250,6 +251,9 @@ private:
   [[nodiscard]] const SymbolInfo*
   knownMemberForReceiverType(const TypeInfo& receiver,
                              const std::string& memberName) const;
+  [[nodiscard]] std::optional<SymbolInfo>
+  resolvedMemberForReceiverType(const TypeInfo& receiver,
+                                const std::string& memberName) const;
   [[nodiscard]] const SymbolInfo* qualifiedPathSymbol(const std::string& name,
                                                       const Scope* scope) const;
   [[nodiscard]] const SymbolInfo* typeSymbolForDeclaredName(const std::string& name,
