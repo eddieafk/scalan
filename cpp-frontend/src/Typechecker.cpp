@@ -5714,6 +5714,8 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
     SymbolInfo specializedCallee;
     std::optional<SymbolInfo> explicitInlineTarget;
     std::vector<TypeInfo> explicitInlineTypeArguments;
+    std::optional<SymbolInfo> inferredInlineTarget;
+    std::vector<TypeInfo> inferredInlineTypeArguments;
     if (callee.kind == AstExpressionKind::Identifier) {
       auto found = scope.find(callee.text);
       if (found != scope.end()) {
@@ -5772,12 +5774,6 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
     if (calleeSymbol != nullptr && callee.kind != AstExpressionKind::TypeApply &&
         !calleeSymbol->typeParameters.empty()) {
       const SymbolInfo inferenceTarget = *calleeSymbol;
-      if (inferenceTarget.isInline) {
-        diagnostics_.error(
-            expression.span,
-            "inline call-site specialization currently requires explicit type "
-            "arguments");
-      }
       std::vector<TypeInfo> inferredTypeArguments;
       bool inferenceConflict = false;
       specializedCallee = inferTypeApplication(
@@ -5820,6 +5816,16 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
       } else {
         specializedCallee = inferTypeApplication(inferenceTarget, argumentTypes,
                                                  expression.span, expectedType);
+      }
+      if (inferenceTarget.isInline && !inferenceConflict &&
+          specializedCallee.typeParameters.empty() &&
+          inferredTypeArguments.size() == inferenceTarget.typeParameters.size() &&
+          std::none_of(inferredTypeArguments.begin(), inferredTypeArguments.end(),
+                       [](const TypeInfo& type) {
+                         return type.kind == SimpleTypeKind::Unknown;
+                       })) {
+        inferredInlineTarget = inferenceTarget;
+        inferredInlineTypeArguments = inferredTypeArguments;
       }
       calleeSymbol = &specializedCallee;
       calleeType = specializedCallee.type;
@@ -5897,6 +5903,19 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
                                                  expression.children.end());
       recordInlineApplication(expression, *explicitInlineTarget,
                               explicitInlineTypeArguments, inlineArguments, scope,
+                              expectedType);
+    }
+    if (inferredInlineTarget.has_value() && calleeSymbol != nullptr &&
+        calleeSymbol->typeParameters.empty() &&
+        inferredInlineTarget->parameters.size() + 1 ==
+            expression.children.size() &&
+        std::none_of(inferredInlineTarget->contextualParameters.begin(),
+                     inferredInlineTarget->contextualParameters.end(),
+                     [](bool contextual) { return contextual; })) {
+      std::vector<AstExpression> inlineArguments(expression.children.begin() + 1,
+                                                 expression.children.end());
+      recordInlineApplication(expression, *inferredInlineTarget,
+                              inferredInlineTypeArguments, inlineArguments, scope,
                               expectedType);
     }
     return calleeSymbol == nullptr ? calleeType

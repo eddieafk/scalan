@@ -81,6 +81,14 @@ object Selectors {
     "nested-value:" + decorated[A](value)
 
   inline def passed[A](value: A): A = value
+
+  inline def inferredSelected[A](value: A): String =
+    summonFrom {
+      case found: Named[A] => prefix + found.label()
+      case _ => "inferred-fallback"
+    }
+
+  inline def inferredNull[A](): A = null
 }
 
 object Main {
@@ -106,6 +114,16 @@ object Main {
   def nestedValueSelected: String = Selectors.nestedValue[Int]("nested")
   def passedInt: Int = Selectors.passed[Int](42)
   def passedString: String = Selectors.passed[String]("forty-two")
+  def inferredInt: String = Selectors.inferredSelected(7)
+  def inferredFallback: String = Selectors.inferredSelected(true)
+  def inferredLocal: String = {
+    given inferredString: Named[String] =
+      new NamedValue[String]("inferred-local")
+    Selectors.inferredSelected("text")
+  }
+  def inferredPassedInt: Int = Selectors.passed(43)
+  def inferredPassedString: String = Selectors.passed("forty-three")
+  def inferredNullString: String = Selectors.inferredNull()
 
   def main(args: Array[String]): Unit = {
     println(intSelected)
@@ -117,6 +135,12 @@ object Main {
     println(nestedValueSelected)
     println(passedInt)
     println(passedString)
+    println(inferredInt)
+    println(inferredFallback)
+    println(inferredLocal)
+    println(inferredPassedInt)
+    println(inferredPassedString)
+    println(inferredNullString == null)
   }
 }
 )";
@@ -126,8 +150,8 @@ object Main {
 object Main {
   inline def nonGeneric: String = "non-generic"
   inline def withContext[A](using value: A): String = "context-parameter"
-  inline def inferred[A](value: A): A = value
-  def unsupportedInference: Int = inferred(1)
+  inline def noInference[A](value: String): String = value
+  def unsupportedInference: String = noInference("value")
   inline def missingBody[A]: String
   inline def recursive[A]: String = recursive[A]
   inline val unsupported: String = "value"
@@ -191,6 +215,18 @@ class Instance {
       functionText(result.nirText, "demo.inlinecalls.Main.passedInt");
   const std::string_view passedString =
       functionText(result.nirText, "demo.inlinecalls.Main.passedString");
+  const std::string_view inferredInt =
+      functionText(result.nirText, "demo.inlinecalls.Main.inferredInt");
+  const std::string_view inferredFallback =
+      functionText(result.nirText, "demo.inlinecalls.Main.inferredFallback");
+  const std::string_view inferredLocal =
+      functionText(result.nirText, "demo.inlinecalls.Main.inferredLocal");
+  const std::string_view inferredPassedInt =
+      functionText(result.nirText, "demo.inlinecalls.Main.inferredPassedInt");
+  const std::string_view inferredPassedString =
+      functionText(result.nirText, "demo.inlinecalls.Main.inferredPassedString");
+  const std::string_view inferredNullString =
+      functionText(result.nirText, "demo.inlinecalls.Main.inferredNullString");
 
   const bool valid =
       status == 0 &&
@@ -199,7 +235,9 @@ class Instance {
               "effect\nselected:member-int:value:value\n"
               "fallback:bool:bool\n"
               "nested-value:selected:member-int:nested:nested\n"
-              "42\nforty-two\n" &&
+              "42\nforty-two\n"
+              "selected:member-int\ninferred-fallback\n"
+              "selected:inferred-local\n43\nforty-three\ntrue\n" &&
       !invalid.ok &&
       contains(invalid.diagnosticsText,
                "inline call-site specialization currently requires a generic "
@@ -208,8 +246,7 @@ class Instance {
                "inline call-site specialization does not support contextual "
                "parameters yet") &&
       contains(invalid.diagnosticsText,
-               "inline call-site specialization currently requires explicit type "
-               "arguments") &&
+               "cannot infer type argument A for noInference from value arguments") &&
       contains(invalid.diagnosticsText, "inline method requires an implementation") &&
       contains(invalid.diagnosticsText,
                "recursive inline call-site specialization is not supported yet") &&
@@ -244,20 +281,40 @@ class Instance {
       contains(passedInt, "let %value : Int = 42") &&
       !contains(passedInt, "%demo.inlinecalls.Selectors.passed") &&
       contains(passedString, "let %value : String = \"forty-two\"") &&
-      !contains(passedString, "%demo.inlinecalls.Selectors.passed");
-  return valid ? 0
-               : fail("inline summonFrom smoke test failed (output='" + text +
-                      "', diagnostics='" + result.diagnosticsText +
-                      "', invalid-diagnostics='" + invalid.diagnosticsText +
-                      "', int-selected='" + std::string(intSelected) +
-                      "', local-selected='" + std::string(localSelected) +
-                      "', fallback-selected='" + std::string(fallbackSelected) +
-                      "', nested-selected='" + std::string(nestedSelected) +
-                      "', value-selected='" + std::string(valueSelected) +
-                      "', value-fallback='" + std::string(valueFallback) +
-                      "', nested-value-selected='" + std::string(nestedValueSelected) +
-                      "', passed-int='" + std::string(passedInt) +
-                      "', passed-string='" + std::string(passedString) + "')");
+      !contains(passedString, "%demo.inlinecalls.Selectors.passed") &&
+      contains(inferredInt, "call %demo.inlinecalls.Main.intNamed()") &&
+      !contains(inferredInt, "%demo.inlinecalls.Selectors.inferredSelected") &&
+      contains(inferredFallback, "\"inferred-fallback\"") &&
+      !contains(inferredFallback, "%demo.inlinecalls.Selectors.prefix") &&
+      !contains(inferredFallback, "%demo.inlinecalls.Selectors.inferredSelected") &&
+      contains(inferredLocal, "inferred-local") &&
+      !contains(inferredLocal, "%demo.inlinecalls.Selectors.inferredSelected") &&
+      contains(inferredPassedInt, "let %value : Int = 43") &&
+      !contains(inferredPassedInt, "%demo.inlinecalls.Selectors.passed") &&
+      contains(inferredPassedString, "let %value : String = \"forty-three\"") &&
+      !contains(inferredPassedString, "%demo.inlinecalls.Selectors.passed") &&
+      contains(inferredNullString, "ret String null") &&
+      !contains(inferredNullString, "%demo.inlinecalls.Selectors.inferredNull");
+  return valid
+             ? 0
+             : fail("inline summonFrom smoke test failed (output='" + text +
+                    "', diagnostics='" + result.diagnosticsText +
+                    "', invalid-diagnostics='" + invalid.diagnosticsText +
+                    "', int-selected='" + std::string(intSelected) +
+                    "', local-selected='" + std::string(localSelected) +
+                    "', fallback-selected='" + std::string(fallbackSelected) +
+                    "', nested-selected='" + std::string(nestedSelected) +
+                    "', value-selected='" + std::string(valueSelected) +
+                    "', value-fallback='" + std::string(valueFallback) +
+                    "', nested-value-selected='" + std::string(nestedValueSelected) +
+                    "', passed-int='" + std::string(passedInt) + "', passed-string='" +
+                    std::string(passedString) + "', inferred-int='" +
+                    std::string(inferredInt) + "', inferred-fallback='" +
+                    std::string(inferredFallback) + "', inferred-local='" +
+                    std::string(inferredLocal) + "', inferred-passed-int='" +
+                    std::string(inferredPassedInt) + "', inferred-passed-string='" +
+                    std::string(inferredPassedString) + "', inferred-null-string='" +
+                    std::string(inferredNullString) + "')");
 }
 
 } // namespace

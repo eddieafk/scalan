@@ -994,24 +994,25 @@ Current scaffold status:
   or dead fallback. Outside a supported inline application, reduction continues
   to use evidence visible at the definition's lexical typechecking site.
   Scala 3's soft `inline def` modifier now enables a bounded call-site
-  specialization path for generic top-level and object methods used with
-  explicit type arguments. Parameterless methods and a directly applied
-  ordinary value-parameter list are supported. The frontend rechecks each
-  inline body with its concrete type arguments, specialized parameter types,
-  definition-owner members, and caller contextual scope, retaining isolated
-  expression, contextual-argument, and nested-inline metadata for that
-  application. NIR evaluates ordinary arguments from left to right into local
-  bindings before expanding the recorded body, preserving single evaluation
-  even when a parameter is referenced repeatedly. `summonFrom` may therefore
-  select a different branch at each call and no call to the inline method
-  remains. Recursive expansion is diagnosed. Inferred type applications,
-  contextual parameter lists, instance methods, multiple application clauses,
-  `transparent inline`, and the remaining Scala 3 inline surface stay future
-  milestones. Focused native coverage exercises ordered search, wildcard
+  specialization path for generic top-level and object methods. Explicit type
+  applications and unambiguous ordinary argument/expected-result inference are
+  supported, along with parameterless methods and a directly applied ordinary
+  value-parameter list. The frontend rechecks each inline body with its concrete
+  type arguments, specialized parameter types, definition-owner members, and
+  caller contextual scope, retaining isolated expression, contextual-argument,
+  and nested-inline metadata for that application. NIR evaluates ordinary
+  arguments from left to right into local bindings before expanding the
+  recorded body, preserving single evaluation even when a parameter is
+  referenced repeatedly. `summonFrom` may therefore select a different branch
+  at each call and no call to the inline method remains. Recursive expansion is
+  diagnosed. Contextual parameter lists, instance methods, multiple application
+  clauses, `transparent inline`, and the remaining Scala 3 inline surface stay
+  future milestones. Focused native coverage exercises ordered search, wildcard
   fallback, pattern-bound contextual evidence, recursive generic factories,
   lexical definition-owner values, member and nearest local caller evidence,
-  ordinary argument single evaluation, concrete scalar and reference parameter
-  and result types, nested parameterized inline expansion, dead-branch
+  ordinary argument single evaluation, explicit and inferred scalar/reference
+  parameter and result types, expected-result-only inference, inferred call-site
+  contextual selection, nested parameterized inline expansion, dead-branch
   elimination, malformed cases, unmatched search, ambiguity propagation, and
   unsupported inline forms.
 - Anonymous givens and block-local named or anonymous givens now use the same
@@ -1296,8 +1297,8 @@ Current scaffold status:
   member. Optimized runtime and NIR coverage verifies chained selection from the
   synthesized result, stable values, applied generic members, incompatible
   parameter lists, and invalid one-sided implementations.
-- Full inline call-site specialization beyond the bounded explicit-type,
-  single-value-parameter-list slice remains a later milestone.
+- Full inline call-site specialization beyond the bounded single-value-parameter
+  list and ordinary generic-inference slice remains a later milestone.
 - Postfix type application now supports typed `value.isInstanceOf[Target]` and
   checked `value.asInstanceOf[Target]` for known classes, traits, and objects.
   NIR uses dedicated `is-instance-of[T]` and `as-instance-of[T]` values; verification

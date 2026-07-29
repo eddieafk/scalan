@@ -30,6 +30,14 @@ object Selectors {
     "nested-value:" + decorated[A](value)
 
   inline def passed[A](value: A): A = value
+
+  inline def inferredSelected[A](value: A): String =
+    summonFrom {
+      case found: Named[A] => prefix + found.label()
+      case _ => "inferred-fallback"
+    }
+
+  inline def inferredNull[A](): A = null
 }
 
 object Main {
@@ -43,9 +51,11 @@ object Main {
   def main(args: Array[String]): Unit = {
     println(Selectors.selected[Int])
 
-    given localString: Named[String] =
-      new NamedValue[String]("local-string")
-    println(Selectors.selected[String]())
+    {
+      given localString: Named[String] =
+        new NamedValue[String]("local-string")
+      println(Selectors.selected[String]())
+    }
 
     println(Selectors.selected[Boolean])
     println(Selectors.nested[Int])
@@ -54,5 +64,17 @@ object Main {
     println(Selectors.nestedValue[Int]("nested"))
     println(Selectors.passed[Int](42))
     println(Selectors.passed[String]("forty-two"))
+    println(Selectors.inferredSelected(7))
+    println(Selectors.inferredSelected(true))
+
+    {
+      given inferredString: Named[String] =
+        new NamedValue[String]("inferred-local")
+      println(Selectors.inferredSelected("text"))
+    }
+    println(Selectors.passed(43))
+    println(Selectors.passed("forty-three"))
+    val inferredNull: String = Selectors.inferredNull()
+    println(inferredNull == null)
   }
 }
