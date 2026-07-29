@@ -94,6 +94,7 @@ struct TypedDeclaration {
   bool importsWildcard = false;
   TypeInfo inferredType;
   bool isOverride = false;
+  bool isInline = false;
   bool isGiven = false;
   bool isAnonymousGiven = false;
   bool hasInitializer = false;
@@ -128,11 +129,22 @@ struct TypedContextApplication {
   std::size_t selectedBranch = 0;
 };
 
+struct TypedInlineApplication {
+  support::SourceSpan span;
+  std::string symbolName;
+  std::string ownerName;
+  AstExpression body;
+  std::vector<TypedExpressionInfo> expressionTypes;
+  std::vector<TypedContextApplication> contextApplications;
+  std::vector<TypedInlineApplication> inlineApplications;
+};
+
 struct TypedModule {
   std::string packageName;
   std::vector<TypedDeclaration> declarations;
   std::vector<TypedExpressionInfo> expressionTypes;
   std::vector<TypedContextApplication> contextApplications;
+  std::vector<TypedInlineApplication> inlineApplications;
 };
 
 struct SymbolInfo {
@@ -153,6 +165,7 @@ struct SymbolInfo {
   bool isGiven = false;
   bool isAnonymousGiven = false;
   bool isTransparent = false;
+  bool isInline = false;
   bool isContextParameter = false;
   bool isModuleMember = false;
   bool isInstanceMember = false;
@@ -160,6 +173,7 @@ struct SymbolInfo {
   std::size_t captureParameterCount = 0;
   std::size_t contextPrerequisiteCount = 0;
   std::size_t contextualNestingDepth = 0;
+  AstExpression inlineBody;
 };
 
 class Typechecker {
@@ -311,6 +325,10 @@ private:
       bool reportDiagnostics = true,
       std::vector<TypeInfo>* inferredTypeArguments = nullptr,
       bool* inferenceConflict = nullptr) const;
+  void recordInlineApplication(const AstExpression& expression,
+                               const SymbolInfo& symbol,
+                               const std::vector<TypeInfo>& typeArguments,
+                               Scope& scope, const TypeInfo* expectedType);
   [[nodiscard]] std::vector<SymbolInfo> inferContextualTypeApplications(
       const SymbolInfo& symbol, const std::vector<TypeInfo>& inferredTypeArguments,
       std::size_t firstContextParameter, Scope& scope, const support::SourceSpan& span,
@@ -373,6 +391,8 @@ private:
   std::vector<TypedDeclaration> localFactoryDeclarations_;
   std::vector<TypedExpressionInfo> expressionTypes_;
   std::vector<TypedContextApplication> contextApplications_;
+  std::vector<TypedInlineApplication> inlineApplications_;
+  std::unordered_set<std::string> expandingInlineApplications_;
   std::unordered_set<std::string> directZoneReceiverEscapes_;
   std::unordered_map<std::string, std::vector<AstExpression>> receiverMethodCallSites_;
   std::unordered_map<std::string, std::unordered_set<std::string>>

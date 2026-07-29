@@ -1509,6 +1509,8 @@ TypedModule Typechecker::typecheck(const AstModule& module) {
   localFactoryDeclarations_.clear();
   expressionTypes_.clear();
   contextApplications_.clear();
+  inlineApplications_.clear();
+  expandingInlineApplications_.clear();
   directZoneReceiverEscapes_.clear();
   receiverMethodCallSites_.clear();
   implicitReceiverMethodNames_.clear();
@@ -1597,6 +1599,7 @@ TypedModule Typechecker::typecheck(const AstModule& module) {
   }
   typed.expressionTypes = expressionTypes_;
   typed.contextApplications = contextApplications_;
+  typed.inlineApplications = inlineApplications_;
   return typed;
 }
 
@@ -1608,6 +1611,7 @@ TypedDeclaration Typechecker::typecheckDeclaration(const AstDeclaration& declara
   }
 
   TypedDeclaration typed;
+  typed.isInline = declaration.isInline;
   typed.kind = declaration.kind;
   typed.name = declaration.name;
   typed.symbolName = declaration.kind == AstDeclarationKind::Import
@@ -1636,6 +1640,32 @@ TypedDeclaration Typechecker::typecheckDeclaration(const AstDeclaration& declara
                                         &typed.parameterTypes, &declaration.span);
   typed.contextualParameters = declaration.contextualParameters;
   typed.contextualParameters.resize(typed.parameters.size(), false);
+  if (typed.isInline) {
+    if (typed.typeParameters.empty()) {
+      diagnostics_.error(
+          declaration.span,
+          "inline call-site specialization currently requires a generic method");
+    }
+    if (!typed.parameterTypes.empty()) {
+      diagnostics_.error(
+          declaration.span,
+          "inline call-site specialization currently requires a parameterless "
+          "method");
+    }
+    if (!typed.hasInitializer) {
+      diagnostics_.error(declaration.span,
+                         "inline method requires an implementation");
+    }
+    if (auto enclosing = globalSymbols_.find(owner);
+        enclosing != globalSymbols_.end() &&
+        (enclosing->second.kind == AstDeclarationKind::Class ||
+         enclosing->second.kind == AstDeclarationKind::Trait)) {
+      diagnostics_.error(
+          declaration.span,
+          "inline call-site specialization currently requires a top-level or "
+          "object method");
+    }
+  }
   for (std::size_t i = 0; i < typed.parameters.size(); ++i) {
     const std::string name = parameterName(typed.parameters[i]);
     if (name.empty()) {
@@ -1815,6 +1845,10 @@ TypedDeclaration Typechecker::typecheckDeclaration(const AstDeclaration& declara
     symbol.isGiven = typed.isGiven;
     symbol.isAnonymousGiven = typed.isAnonymousGiven;
     symbol.isTransparent = declaration.isTransparent;
+    symbol.isInline = declaration.isInline;
+    if (declaration.isInline) {
+      symbol.inlineBody = declaration.initializer;
+    }
     if (auto enclosing = globalSymbols_.find(owner);
         enclosing != globalSymbols_.end() &&
         enclosing->second.kind == AstDeclarationKind::Object) {
@@ -2070,6 +2104,10 @@ TypedDeclaration Typechecker::typecheckDeclaration(const AstDeclaration& declara
     updated.parameterTypes = typedMember.parameterTypes;
     updated.contextualParameters = typedMember.contextualParameters;
     updated.isGiven = typedMember.isGiven;
+    updated.isInline = typedMember.isInline;
+    if (typedMember.isInline) {
+      updated.inlineBody = member.initializer;
+    }
     updated.isAnonymousGiven = typedMember.isAnonymousGiven;
     updated.isModuleMember = declaration.kind == AstDeclarationKind::Object &&
                              (typedMember.kind == AstDeclarationKind::Val ||
@@ -2618,6 +2656,10 @@ void Typechecker::collectDeclaration(const AstDeclaration& declaration,
   symbol.isGiven = declaration.isGiven;
   symbol.isAnonymousGiven = declaration.isAnonymousGiven;
   symbol.isTransparent = declaration.isTransparent;
+  symbol.isInline = declaration.isInline;
+  if (declaration.isInline) {
+    symbol.inlineBody = declaration.initializer;
+  }
   if (auto enclosing = globalSymbols_.find(owner);
       enclosing != globalSymbols_.end() &&
       enclosing->second.kind == AstDeclarationKind::Object) {
@@ -4435,6 +4477,81 @@ TypeInfo Typechecker::inferExpressionType(const AstExpression& expression, Scope
   return type;
 }
 
+void Typechecker::recordInlineApplication(
+    const AstExpression& expression, const SymbolInfo& symbol,
+    const std::vector<TypeInfo>& typeArguments, Scope& scope,
+    const TypeInfo* expectedType) {
+  if (!symbol.isInline || !symbol.hasImplementation ||
+      symbol.inlineBody.kind == AstExpressionKind::Empty ||
+      symbol.typeParameters.size() != typeArguments.size()) {
+    return;
+  }
+  if (!expandingInlineApplications_.insert(symbol.symbolName).second) {
+    diagnostics_.error(
+        expression.span,
+        "recursive inline call-site specialization is not supported yet");
+    return;
+  }
+
+  Scope inlineScope = scope;
+  const std::string definitionOwner = ownerNameOf(symbol.symbolName);
+  if (auto members = memberScopes_.find(definitionOwner);
+      members != memberScopes_.end()) {
+    mergeScope(inlineScope, members->second);
+  }
+  for (std::size_t index = 0; index < typeArguments.size(); ++index) {
+    const TypeParameterInfo& parameter = symbol.typeParameters[index];
+    SymbolInfo concreteType;
+    concreteType.kind = AstDeclarationKind::Type;
+    concreteType.name = parameter.name;
+    concreteType.symbolName = parameter.symbolName;
+    concreteType.type = typeArguments[index];
+    concreteType.lowerBound = typeArguments[index];
+    concreteType.upperBound = typeArguments[index];
+    concreteType.hasImplementation = true;
+    inlineScope[parameter.name] = std::move(concreteType);
+  }
+
+  std::vector<TypedExpressionInfo> outerExpressionTypes =
+      std::move(expressionTypes_);
+  std::vector<TypedContextApplication> outerContextApplications =
+      std::move(contextApplications_);
+  std::vector<TypedInlineApplication> outerInlineApplications =
+      std::move(inlineApplications_);
+  expressionTypes_.clear();
+  contextApplications_.clear();
+  inlineApplications_.clear();
+
+  (void)inferExpressionType(symbol.inlineBody, inlineScope, expectedType);
+
+  TypedInlineApplication application;
+  application.span = expression.span;
+  application.symbolName = symbol.symbolName;
+  application.ownerName = definitionOwner;
+  application.body = symbol.inlineBody;
+  application.expressionTypes = std::move(expressionTypes_);
+  application.contextApplications = std::move(contextApplications_);
+  application.inlineApplications = std::move(inlineApplications_);
+
+  expressionTypes_ = std::move(outerExpressionTypes);
+  contextApplications_ = std::move(outerContextApplications);
+  inlineApplications_ = std::move(outerInlineApplications);
+  expandingInlineApplications_.erase(symbol.symbolName);
+
+  const auto sameSpan = [&](const TypedInlineApplication& candidate) {
+    return candidate.span.source == expression.span.source &&
+           candidate.span.start == expression.span.start &&
+           candidate.span.length == expression.span.length;
+  };
+  auto existing =
+      std::find_if(inlineApplications_.begin(), inlineApplications_.end(), sameSpan);
+  if (existing == inlineApplications_.end()) {
+    inlineApplications_.push_back(std::move(application));
+  } else {
+    *existing = std::move(application);
+  }
+}
+
 bool Typechecker::isSupportedArrayElementType(const TypeInfo& candidate,
                                               const Scope& scope,
                                               const support::SourceSpan& span) const {
@@ -4721,8 +4838,20 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
                            target.name + " does not declare type parameters");
         return target.type;
       }
-      return specializeTypeApplication(target, typeArguments, scope, expression.span)
-          .type;
+      SymbolInfo specialized =
+          specializeTypeApplication(target, typeArguments, scope, expression.span);
+      if (target.isInline && target.kind == AstDeclarationKind::Def &&
+          target.parameterTypes.empty() && target.hasImplementation) {
+        std::vector<TypeInfo> resolvedArguments;
+        resolvedArguments.reserve(typeArguments.size());
+        for (const std::string& argument : typeArguments) {
+          resolvedArguments.push_back(
+              typeFromDeclaredName(argument, &scope));
+        }
+        recordInlineApplication(expression, target, resolvedArguments, scope,
+                                expectedType);
+      }
+      return specialized.type;
     }
 
     if (typeArguments.size() != 1) {

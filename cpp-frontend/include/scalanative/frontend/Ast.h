@@ -125,6 +125,7 @@ struct AstDeclaration {
   bool isOverride = false;
   bool isSealed = false;
   bool isTransparent = false;
+  bool isInline = false;
   bool isGiven = false;
   bool isLegacyImplicit = false;
   bool isAnonymousGiven = false;

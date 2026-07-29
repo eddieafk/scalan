@@ -42,7 +42,7 @@ still use the selected preset normally. During work on the newest coverage, use:
 
 ```sh
 cmake --build build/debug --target cpp-smoke-tests -j2
-CPP_SCALANATIVE_SMOKE_TESTS3_ONLY=1 \
+CPP_SCALANATIVE_SMOKE_TESTS5_ONLY=1 \
   build/debug/cpp-tests/smoke/cpp-smoke-tests
 ```
 
@@ -87,6 +87,12 @@ build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
 build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
   --output /tmp/contextual-abstractions \
   cpp-examples/ContextualAbstractions.scala
+
+# Compile parameterless generic `inline def` call-site specialization with
+# explicit type arguments and per-call `summonFrom` reduction.
+build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
+  --output /tmp/inline-summon-from \
+  cpp-examples/InlineSummonFrom.scala
 
 # Compile explicit Scala 3 union/intersection types across parameters, results,
 # locals, nested generic arguments, generic type aliases, inferred branch

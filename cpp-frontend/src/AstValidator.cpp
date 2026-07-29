@@ -115,6 +115,11 @@ bool AstValidator::validateDeclaration(const AstDeclaration& declaration,
         "transparent modifier is only supported on classes and traits");
     ok = false;
   }
+  if (declaration.isInline && declaration.kind != AstDeclarationKind::Def) {
+    diagnostics.error(declaration.span,
+                      "inline modifier is only supported on methods");
+    ok = false;
+  }
   if (declaration.isLegacyImplicit && !declaration.isGiven) {
     diagnostics.error(declaration.span,
                       "legacy-implicit metadata requires a contextual declaration");

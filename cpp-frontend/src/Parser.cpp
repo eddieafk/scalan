@@ -197,6 +197,23 @@ bool Parser::match(TokenKind kind) {
 }
 
 bool Parser::isDeclarationStart() const {
+  if (peek().kind == TokenKind::Identifier && peek().text == "inline" &&
+      current_ + 1 < tokens_.size()) {
+    switch (tokens_[current_ + 1].kind) {
+    case TokenKind::KeywordObject:
+    case TokenKind::KeywordClass:
+    case TokenKind::KeywordTrait:
+    case TokenKind::KeywordType:
+    case TokenKind::KeywordDef:
+    case TokenKind::KeywordGiven:
+    case TokenKind::KeywordImplicit:
+    case TokenKind::KeywordVal:
+    case TokenKind::KeywordVar:
+      return true;
+    default:
+      break;
+    }
+  }
   if (peek().kind == TokenKind::Identifier &&
       (peek().text == "infix" || peek().text == "transparent") &&
       current_ + 1 < tokens_.size() &&
@@ -273,6 +290,19 @@ void Parser::parsePackage(AstModule& module) {
 
 AstDeclaration Parser::parseDeclaration() {
   consumeSeparators();
+  if (check(TokenKind::Identifier) && peek().text == "inline") {
+    const Token modifier = advance();
+    if (!match(TokenKind::KeywordDef)) {
+      diagnostics_.error(peek().span,
+                         "'inline' must modify a def in this milestone");
+      synchronize();
+      return {};
+    }
+    AstDeclaration declaration = parseDef(previous());
+    declaration.isInline = true;
+    declaration.span = modifier.span;
+    return declaration;
+  }
   if (check(TokenKind::Identifier) && peek().text == "transparent") {
     const Token modifier = advance();
     AstDeclaration declaration;

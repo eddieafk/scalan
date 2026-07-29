@@ -45,6 +45,7 @@ void writeDeclaration(std::ostringstream& out, const AstDeclaration& declaration
   std::string indent(depth * 2, ' ');
   out << indent << (declaration.isTransparent ? "transparent " : "")
       << (declaration.isSealed ? "sealed " : "")
+      << (declaration.isInline ? "inline " : "")
       << (declaration.isLegacyImplicit
               ? std::string("implicit ") + declarationKindName(declaration.kind)
               : declaration.isGiven ? "given"

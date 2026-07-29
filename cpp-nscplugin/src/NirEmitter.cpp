@@ -29,6 +29,7 @@ struct ValueContext {
   const std::vector<frontend::TypedDeclaration>* declarations = nullptr;
   const std::vector<frontend::TypedExpressionInfo>* expressionTypes = nullptr;
   const std::vector<frontend::TypedContextApplication>* contextApplications = nullptr;
+  const std::vector<frontend::TypedInlineApplication>* inlineApplications = nullptr;
   std::unordered_set<std::string>* referenceArrayElementTypes = nullptr;
   std::map<std::string, std::string>* runtimeArrayDeclarations = nullptr;
   std::vector<std::string> superTypes;
@@ -648,6 +649,38 @@ contextApplicationFor(const frontend::AstExpression& expression,
                candidate.span.length == expression.span.length;
       });
   return application == context.contextApplications->rend() ? nullptr : &*application;
+}
+
+const frontend::TypedInlineApplication*
+inlineApplicationFor(const frontend::AstExpression& expression,
+                     const ValueContext& context) {
+  if (context.inlineApplications == nullptr || !expression.span.isValid()) {
+    return nullptr;
+  }
+  auto application = std::find_if(
+      context.inlineApplications->rbegin(), context.inlineApplications->rend(),
+      [&](const frontend::TypedInlineApplication& candidate) {
+        return candidate.span.source == expression.span.source &&
+               candidate.span.start == expression.span.start &&
+               candidate.span.length == expression.span.length;
+      });
+  return application == context.inlineApplications->rend() ? nullptr : &*application;
+}
+
+ValueContext inlineContextFor(
+    const frontend::TypedInlineApplication& application,
+    const ValueContext& callSiteContext) {
+  ValueContext inlineContext = callSiteContext;
+  inlineContext.expressionTypes = &application.expressionTypes;
+  inlineContext.contextApplications = &application.contextApplications;
+  inlineContext.inlineApplications = &application.inlineApplications;
+  inlineContext.currentOwner = application.ownerName;
+  inlineContext.hasImplicitReceiver = false;
+  inlineContext.implicitThisMembers.clear();
+  inlineContext.stackableSuper = false;
+  inlineContext.superTypes.clear();
+  inlineContext.superType.clear();
+  return inlineContext;
 }
 
 std::string byteBufferRuntimeName(const frontend::AstExpression& expression,
@@ -2499,6 +2532,11 @@ nir::Value valueFor(const frontend::AstExpression& expression,
     if (expression.children.size() != 1) {
       return nir::unknownValue("type-apply <malformed>", expression.span);
     }
+    if (const frontend::TypedInlineApplication* application =
+            inlineApplicationFor(expression, context)) {
+      ValueContext inlineContext = inlineContextFor(*application, context);
+      return scopedBodyValueFor(application->body, inlineContext);
+    }
     const frontend::AstExpression& callee = expression.children.front();
     const bool isArrayEmpty =
         callee.kind == AstExpressionKind::Select && callee.children.size() == 1 &&
@@ -2572,6 +2610,17 @@ nir::Value valueFor(const frontend::AstExpression& expression,
       return nir::unknownValue("call <empty>", expression.span);
     }
     const frontend::AstExpression& firstClause = expression.children.front();
+    if (firstClause.kind == AstExpressionKind::TypeApply) {
+      if (const frontend::TypedInlineApplication* application =
+              inlineApplicationFor(firstClause, context)) {
+        if (expression.children.size() != 1) {
+          return nir::unknownValue("<inline-arguments-unsupported>",
+                                   expression.span);
+        }
+        ValueContext inlineContext = inlineContextFor(*application, context);
+        return scopedBodyValueFor(application->body, inlineContext);
+      }
+    }
     if (firstClause.kind == AstExpressionKind::Call &&
         !firstClause.children.empty()) {
       const frontend::AstExpression* targetExpression =
@@ -4443,6 +4492,7 @@ void NirEmitter::emitDeclaration(
   context.declarations = &module.declarations;
   context.expressionTypes = &module.expressionTypes;
   context.contextApplications = &module.contextApplications;
+  context.inlineApplications = &module.inlineApplications;
   context.referenceArrayElementTypes = referenceArrayElementTypes;
   context.runtimeArrayDeclarations = runtimeArrayDeclarations;
   context.hasImplicitReceiver = hasImplicitReceiver;
