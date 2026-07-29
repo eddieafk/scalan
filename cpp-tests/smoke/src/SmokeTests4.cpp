@@ -177,6 +177,13 @@ object Main {
     val inferred = firstOf(new LeftValue, new RightValue)
     inferred.commonName()
   }
+  def inferredGenericTransparent() =
+    firstOf(new HiddenLeft, new HiddenRight)
+  def inferredGenericUnrelated() =
+    firstOf(new LeftLabelValue, new RightLabelValue)
+  def inferredGenericScalar() = firstOf(11, "eleven")
+  def inferredGenericBox(flag: Boolean) =
+    new Box(if (flag) new HiddenLeft else new HiddenRight)
   def unrelatedName(value: LeftLabelValue | RightLabelValue): String =
     "unrelated"
 
@@ -234,6 +241,12 @@ object Main {
     println(inferredTransparentClass(false).hiddenName())
     println(inferredVisibleWithoutMarker(true).visibleName())
     println(inferredVisibleWithoutMarker(false).visibleName())
+    println(inferredGenericTransparent().hiddenName())
+    println(unrelatedName(inferredGenericUnrelated()))
+    println(inferredGenericScalar().asInstanceOf[Int])
+    println(firstOf("twelve", 12).asInstanceOf[String])
+    println(inferredGenericBox(false).value.hiddenName())
+    println(inferredGenericBox(false).value.isInstanceOf[HiddenRight])
     println(inferredScalar(true).asInstanceOf[Int])
     println(inferredScalar(false).asInstanceOf[String])
     println(unrelatedName(inferredUnrelated(false)))
@@ -265,6 +278,7 @@ object Main {
   def intersection(value: Left & Tagged): Int = 2
   def needLeft(value: Left): Int = 3
   def grouped(value: (Left | Right) & Tagged): Int = 4
+  def boundedFirst[A <: Left](left: A, right: A): A = left
   def invalidUnionProjection(value: Left | Right): String =
     value.commonSpelling()
 
@@ -276,6 +290,7 @@ object Main {
     union(new Other)
     intersection(new LeftValue)
     grouped(new LeftValue)
+    boundedFirst(new LeftValue, new RightValue)
     println(needLeft(choice))
   }
 }
@@ -343,6 +358,7 @@ object Main {
               "right-common\nleft-common\n"
               "left-common\nright-common\nleft-common\n"
               "hidden-base\nhidden-base\nvisible-left\nvisible-right\n"
+              "hidden-base\nunrelated\n11\ntwelve\nhidden-base\ntrue\n"
               "7\nseven\nunrelated\n" &&
       !invalid.ok &&
       contains(invalid.diagnosticsText,
@@ -364,6 +380,10 @@ object Main {
                                         "demo.invalidcompositetypes.Tagged | "
                                         "demo.invalidcompositetypes.Right & "
                                         "demo.invalidcompositetypes.Tagged") &&
+      contains(invalid.diagnosticsText,
+               "type argument demo.invalidcompositetypes.LeftValue | "
+               "demo.invalidcompositetypes.RightValue for A does not conform to "
+               "upper bound demo.invalidcompositetypes.Left") &&
       contains(invalid.diagnosticsText,
                "type demo.invalidcompositetypes.Left | "
                "demo.invalidcompositetypes.Right does not conform to parameter "
@@ -421,6 +441,18 @@ object Main {
       contains(result.nirText,
                "define @demo.compositetypes.Main.inferredVisibleWithoutMarker : "
                "(Boolean)demo.compositetypes.VisibleName") &&
+      contains(result.nirText,
+               "define @demo.compositetypes.Main.inferredGenericTransparent : "
+               "()Object") &&
+      contains(result.nirText,
+               "define @demo.compositetypes.Main.inferredGenericUnrelated : "
+               "()Object") &&
+      contains(result.nirText,
+               "define @demo.compositetypes.Main.inferredGenericScalar : "
+               "()Object") &&
+      contains(result.nirText,
+               "define @demo.compositetypes.Main.inferredGenericBox : "
+               "(Boolean)demo.compositetypes.Box") &&
       contains(result.nirText, "let %inferred : demo.compositetypes.CommonName = "
                                "as-instance-of[demo.compositetypes.CommonName](if(") &&
       contains(result.nirText, "let %explicit : Object = if(") &&

@@ -1273,8 +1273,11 @@ object Main {
                "ambiguous contextual type inference for mixed; "
                "use explicit type arguments") &&
       contains(invalid.diagnosticsText,
-               "conflicting inferred types Int and String for type parameter A "
-               "of conflicting") &&
+               "cannot infer type argument B for conflicting from value arguments; "
+               "use explicit type arguments") &&
+      !contains(invalid.diagnosticsText,
+                "conflicting inferred types Int and String for type parameter A "
+                "of conflicting") &&
       !contains(invalid.diagnosticsText,
                 "ambiguous contextual type inference for conflicting") &&
       contains(invalid.diagnosticsText,

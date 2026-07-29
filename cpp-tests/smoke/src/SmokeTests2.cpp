@@ -6758,12 +6758,12 @@ object InvalidInference {
           contains(invalid.diagnosticsText,
                    "cannot infer type argument A for Empty from value arguments; "
                    "use explicit type arguments") &&
-          contains(invalid.diagnosticsText,
-                   "conflicting inferred types Int and String for type parameter A "
-                   "of same") &&
-          contains(invalid.diagnosticsText,
-                   "conflicting inferred types Base and Other for type parameter A "
-                   "of same") &&
+          !contains(invalid.diagnosticsText,
+                    "conflicting inferred types Int and String for type parameter A "
+                    "of same") &&
+          !contains(invalid.diagnosticsText,
+                    "conflicting inferred types Base and Other for type parameter A "
+                    "of same") &&
           contains(invalid.diagnosticsText,
                    "cannot infer type argument A for unwrap from value arguments; "
                    "use explicit type arguments") &&

@@ -8503,8 +8503,7 @@ SymbolInfo Typechecker::inferTypeApplication(
     if (!merged.softUnion) {
       return merged;
     }
-    const TypeInfo widened = widenSoftUnion(merged);
-    return widened.softUnion ? TypeInfo{SimpleTypeKind::Unknown, "Unknown"} : widened;
+    return widenSoftUnion(merged);
   };
 
   std::function<void(const TypeInfo&, const TypeInfo&, bool)> collectInference;
@@ -8629,19 +8628,6 @@ SymbolInfo Typechecker::inferTypeApplication(
         parameter.upperBound.compositeKind == CompositeTypeKind::Union
             ? inferred->second
             : widenSoftUnion(inferred->second);
-    if (inferredArgument.softUnion &&
-        parameter.upperBound.compositeKind != CompositeTypeKind::Union) {
-      complete = false;
-      inferredArguments.push_back(TypeInfo{SimpleTypeKind::Unknown, "Unknown"});
-      if (reportDiagnostics) {
-        diagnostics_.error(span,
-                           "cannot infer type argument " + parameter.name + " for " +
-                               symbol.name +
-                               " because its alternatives have no visible common base; "
-                               "use an explicit union type argument");
-      }
-      continue;
-    }
     inferredArguments.push_back(std::move(inferredArgument));
   }
   if (inferredTypeArguments != nullptr) {

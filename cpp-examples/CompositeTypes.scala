@@ -52,6 +52,8 @@ object CompositeTypes {
     if (useRequest) new AuditedRequest else new AuditedUsername
   def inferredGeneric(): String =
     firstOf(new RequestIdValue, new UsernameValue).display()
+  def retainedGenericUnion(): String =
+    firstOf("retained-generic-union", 23).asInstanceOf[String]
 
   def main(args: Array[String]): Unit = {
     val request: LookupKey = new RequestIdValue
@@ -69,5 +71,6 @@ object CompositeTypes {
     println(inferredLookup(false).display())
     println(inferredAudited(false).auditLabel())
     println(inferredGeneric())
+    println(retainedGenericUnion())
   }
 }

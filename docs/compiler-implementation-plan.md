@@ -1260,11 +1260,14 @@ Current scaffold status:
   `transparent` modifier is now accepted on user classes and traits and carried
   in declaration symbols: transparent-only joins retain the original union,
   while mixed joins discard transparent parents and widen to the remaining
-  visible bases. Runtime and NIR coverage exercises both paths. Retained soft
-  unions as unconstrained generic type arguments, parameterized join
-  specialization, and intersection members whose independently declared
-  result types need a synthesized intersection remain later type-system
-  slices.
+  visible bases. Generic method and constructor inference now applies the same
+  rule: an unconstrained type argument widens to a visible common base when one
+  exists and otherwise retains the inferred union, including unrelated
+  references, transparent-only references, and boxed scalar alternatives.
+  Declared upper bounds are still checked against the resulting inferred type.
+  Runtime, NIR, and negative coverage exercises these paths. Parameterized join
+  specialization and intersection members whose independently declared result
+  types need a synthesized intersection remain later type-system slices.
 - Full inline call-site specialization remains a later milestone.
 - Postfix type application now supports typed `value.isInstanceOf[Target]` and
   checked `value.asInstanceOf[Target]` for known classes, traits, and objects.
