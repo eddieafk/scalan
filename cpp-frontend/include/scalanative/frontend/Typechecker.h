@@ -326,6 +326,8 @@ private:
                                                     const Scope* scope = nullptr) const;
   [[nodiscard]] TypeInfo commonType(const TypeInfo& lhs, const TypeInfo& rhs) const;
   [[nodiscard]] TypeInfo widenSoftUnion(const TypeInfo& type) const;
+  [[nodiscard]] std::vector<TypeInfo>
+  baseTypesFor(const TypeInfo& type) const;
   [[nodiscard]] std::vector<std::string>
   baseTypeNamesFor(const TypeInfo& type) const;
   [[nodiscard]] bool isAssignable(const TypeInfo& expected,

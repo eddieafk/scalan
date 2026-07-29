@@ -1265,9 +1265,14 @@ Current scaffold status:
   exists and otherwise retains the inferred union, including unrelated
   references, transparent-only references, and boxed scalar alternatives.
   Declared upper bounds are still checked against the resulting inferred type.
-  Runtime, NIR, and negative coverage exercises these paths. Parameterized join
-  specialization and intersection members whose independently declared result
-  types need a synthesized intersection remain later type-system slices.
+  Visible joins now preserve specialized generic parents as well. Identical
+  applied bases retain their arguments, covariant arguments join through `|`,
+  contravariant arguments meet through `&`, and incompatible invariant
+  applications leave the original union intact. Parent substitutions are
+  propagated transitively, bounds remain enforced, and more-specific applied
+  bases suppress their ancestors. Runtime, NIR, and negative coverage exercises
+  these paths. Intersection members whose independently declared result types
+  need a synthesized intersection remain a later type-system slice.
 - Full inline call-site specialization remains a later milestone.
 - Postfix type application now supports typed `value.isInstanceOf[Target]` and
   checked `value.asInstanceOf[Target]` for known classes, traits, and objects.

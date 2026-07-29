@@ -59,6 +59,20 @@ transparent trait HiddenMarker {
 trait VisibleName {
   def visibleName(): String
 }
+trait Payload[+A] {
+  def payload(): A
+}
+trait LeftPayload[+A] extends Payload[A]
+trait RightPayload[+A] extends Payload[A]
+trait Consumer[-A] {
+  def consumerName(): String
+}
+trait Cell[A] {
+  def cell(): A
+}
+trait BoundedPayload[+A <: CommonName] {
+  def boundedPayload(): A
+}
 
 class LeftValue extends Left {
   def commonName(): String = "left-common"
@@ -94,6 +108,39 @@ class VisibleLeft extends VisibleName with HiddenMarker {
 class VisibleRight extends VisibleName with HiddenMarker {
   def visibleName(): String = "visible-right"
   def hiddenMarker(): String = "hidden-right"
+}
+class IntPayloadLeft extends Payload[Int] {
+  def payload(): Int = 31
+}
+class IntPayloadRight extends Payload[Int] {
+  def payload(): Int = 32
+}
+class StringPayload extends Payload[String] {
+  def payload(): String = "payload-string"
+}
+class TransitiveLeftPayload extends LeftPayload[Int] {
+  def payload(): Int = 51
+}
+class TransitiveRightPayload extends RightPayload[Int] {
+  def payload(): Int = 52
+}
+class IntConsumer extends Consumer[Int] {
+  def consumerName(): String = "int-consumer"
+}
+class StringConsumer extends Consumer[String] {
+  def consumerName(): String = "string-consumer"
+}
+class IntCell extends Cell[Int] {
+  def cell(): Int = 41
+}
+class StringCell extends Cell[String] {
+  def cell(): String = "cell-string"
+}
+class BoundedLeftPayload extends BoundedPayload[Left] {
+  def boundedPayload(): Left = new LeftValue
+}
+class BoundedRightPayload extends BoundedPayload[Right] {
+  def boundedPayload(): Right = new RightValue
 }
 class Box[A](val value: A)
 
@@ -184,8 +231,29 @@ object Main {
   def inferredGenericScalar() = firstOf(11, "eleven")
   def inferredGenericBox(flag: Boolean) =
     new Box(if (flag) new HiddenLeft else new HiddenRight)
+  def inferredAppliedSame(flag: Boolean) =
+    if (flag) new IntPayloadLeft else new IntPayloadRight
+  def inferredAppliedCovariant(flag: Boolean) =
+    if (flag) new IntPayloadLeft else new StringPayload
+  def inferredAppliedTransitive(flag: Boolean) =
+    if (flag) new TransitiveLeftPayload else new TransitiveRightPayload
+  def inferredAppliedContravariant(flag: Boolean) =
+    if (flag) new IntConsumer else new StringConsumer
+  def inferredAppliedInvariant(flag: Boolean) =
+    if (flag) new IntCell else new StringCell
+  def inferredAppliedBounded(flag: Boolean) =
+    if (flag) new BoundedLeftPayload else new BoundedRightPayload
+  def appliedSamePayload(value: Payload[Int]): Int = value.payload()
+  def appliedCovariantPayload(value: Payload[Int | String]): Int | String =
+    value.payload()
+  def appliedTransitivePayload(value: Payload[Int]): Int = value.payload()
+  def appliedContravariantName(value: Consumer[Int & String]): String =
+    value.consumerName()
+  def appliedBoundedName(value: BoundedPayload[CommonName]): String =
+    value.boundedPayload().commonName()
   def unrelatedName(value: LeftLabelValue | RightLabelValue): String =
     "unrelated"
+  def invariantCellName(value: IntCell | StringCell): String = "invariant-cell"
 
   def main(args: Array[String]): Unit = {
     val localUnion: Choice = new RightValue
@@ -247,6 +315,17 @@ object Main {
     println(firstOf("twelve", 12).asInstanceOf[String])
     println(inferredGenericBox(false).value.hiddenName())
     println(inferredGenericBox(false).value.isInstanceOf[HiddenRight])
+    println(appliedSamePayload(inferredAppliedSame(true)))
+    println(appliedSamePayload(inferredAppliedSame(false)))
+    println(appliedCovariantPayload(inferredAppliedCovariant(true)).asInstanceOf[Int])
+    println(appliedCovariantPayload(inferredAppliedCovariant(false)).asInstanceOf[String])
+    println(appliedTransitivePayload(inferredAppliedTransitive(true)))
+    println(appliedTransitivePayload(inferredAppliedTransitive(false)))
+    println(appliedContravariantName(inferredAppliedContravariant(true)))
+    println(appliedContravariantName(inferredAppliedContravariant(false)))
+    println(invariantCellName(inferredAppliedInvariant(false)))
+    println(appliedBoundedName(inferredAppliedBounded(true)))
+    println(appliedBoundedName(inferredAppliedBounded(false)))
     println(inferredScalar(true).asInstanceOf[Int])
     println(inferredScalar(false).asInstanceOf[String])
     println(unrelatedName(inferredUnrelated(false)))
@@ -317,6 +396,7 @@ object Main {
   scalanative::tools::build::BuildDriver driver;
   scalanative::tools::build::BuildOptions options;
   options.action = scalanative::tools::build::BuildAction::BuildBinary;
+  options.optimize = true;
   options.outputPath = binary;
   scalanative::support::DiagnosticEngine diagnostics;
   const scalanative::tools::build::BuildResult result =
@@ -359,6 +439,9 @@ object Main {
               "left-common\nright-common\nleft-common\n"
               "hidden-base\nhidden-base\nvisible-left\nvisible-right\n"
               "hidden-base\nunrelated\n11\ntwelve\nhidden-base\ntrue\n"
+              "31\n32\n31\npayload-string\n"
+              "51\n52\nint-consumer\nstring-consumer\n"
+              "invariant-cell\nleft-common\nright-common\n"
               "7\nseven\nunrelated\n" &&
       !invalid.ok &&
       contains(invalid.diagnosticsText,
@@ -453,6 +536,24 @@ object Main {
       contains(result.nirText,
                "define @demo.compositetypes.Main.inferredGenericBox : "
                "(Boolean)demo.compositetypes.Box") &&
+      contains(result.nirText,
+               "define @demo.compositetypes.Main.inferredAppliedSame : "
+               "(Boolean)demo.compositetypes.Payload") &&
+      contains(result.nirText,
+               "define @demo.compositetypes.Main.inferredAppliedCovariant : "
+               "(Boolean)demo.compositetypes.Payload") &&
+      contains(result.nirText,
+               "define @demo.compositetypes.Main.inferredAppliedTransitive : "
+               "(Boolean)demo.compositetypes.Payload") &&
+      contains(result.nirText,
+               "define @demo.compositetypes.Main.inferredAppliedContravariant : "
+               "(Boolean)demo.compositetypes.Consumer") &&
+      contains(result.nirText,
+               "define @demo.compositetypes.Main.inferredAppliedInvariant : "
+               "(Boolean)Object") &&
+      contains(result.nirText,
+               "define @demo.compositetypes.Main.inferredAppliedBounded : "
+               "(Boolean)demo.compositetypes.BoundedPayload") &&
       contains(result.nirText, "let %inferred : demo.compositetypes.CommonName = "
                                "as-instance-of[demo.compositetypes.CommonName](if(") &&
       contains(result.nirText, "let %explicit : Object = if(") &&

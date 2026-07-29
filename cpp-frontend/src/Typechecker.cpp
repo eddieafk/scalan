@@ -9401,12 +9401,79 @@ TypeInfo Typechecker::commonType(const TypeInfo& lhs, const TypeInfo& rhs) const
   return TypeInfo{SimpleTypeKind::Unknown, "Unknown"};
 }
 
-std::vector<std::string> Typechecker::baseTypeNamesFor(const TypeInfo& type) const {
+std::vector<TypeInfo> Typechecker::baseTypesFor(const TypeInfo& type) const {
+  const auto baseName = [](const TypeInfo& base) {
+    return base.typeConstructorName.empty()
+               ? (base.runtimeName.empty() ? base.name : base.runtimeName)
+               : base.typeConstructorName;
+  };
+  const auto mergeAppliedBase =
+      [&](const TypeInfo& lhs, const TypeInfo& rhs) -> std::optional<TypeInfo> {
+    const std::string lhsName = baseName(lhs);
+    if (lhsName.empty() || lhsName != baseName(rhs)) {
+      return std::nullopt;
+    }
+    if (lhs.name == rhs.name && lhs.compositeKind == rhs.compositeKind) {
+      return lhs;
+    }
+
+    auto symbol = globalSymbols_.find(lhsName);
+    if (symbol == globalSymbols_.end() ||
+        symbol->second.typeParameters.empty() ||
+        lhs.typeConstructorName != lhsName || rhs.typeConstructorName != lhsName ||
+        lhs.typeArguments.size() != symbol->second.typeParameters.size() ||
+        rhs.typeArguments.size() != symbol->second.typeParameters.size()) {
+      return std::nullopt;
+    }
+
+    std::vector<TypeInfo> arguments;
+    arguments.reserve(lhs.typeArguments.size());
+    for (std::size_t i = 0; i < lhs.typeArguments.size(); ++i) {
+      const TypeInfo& left = lhs.typeArguments[i];
+      const TypeInfo& right = rhs.typeArguments[i];
+      switch (symbol->second.typeParameters[i].variance) {
+      case TypeVariance::Invariant:
+        if (left.name != right.name ||
+            left.compositeKind != right.compositeKind) {
+          return std::nullopt;
+        }
+        arguments.push_back(left);
+        break;
+      case TypeVariance::Covariant: {
+        TypeInfo merged = commonType(left, right);
+        if (merged.kind == SimpleTypeKind::Unknown) {
+          return std::nullopt;
+        }
+        arguments.push_back(widenSoftUnion(merged));
+        break;
+      }
+      case TypeVariance::Contravariant:
+        if (isAssignable(left, right)) {
+          arguments.push_back(right);
+        } else if (isAssignable(right, left)) {
+          arguments.push_back(left);
+        } else {
+          arguments.push_back(
+              makeCompositeType(CompositeTypeKind::Intersection, {left, right}));
+        }
+        break;
+      }
+    }
+    return specializeResolvedTypeApplication(
+               symbol->second, arguments, support::SourceSpan::none(), false)
+        .type;
+  };
+
   if (type.compositeKind == CompositeTypeKind::Intersection) {
-    std::vector<std::string> result;
+    std::vector<TypeInfo> result;
     for (const TypeInfo& operand : type.compositeTypes) {
-      for (std::string base : baseTypeNamesFor(operand)) {
-        if (std::find(result.begin(), result.end(), base) == result.end()) {
+      for (TypeInfo base : baseTypesFor(operand)) {
+        const std::string name = baseName(base);
+        const bool present =
+            std::any_of(result.begin(), result.end(), [&](const TypeInfo& candidate) {
+              return baseName(candidate) == name;
+            });
+        if (!present) {
           result.push_back(std::move(base));
         }
       }
@@ -9417,14 +9484,29 @@ std::vector<std::string> Typechecker::baseTypeNamesFor(const TypeInfo& type) con
     if (type.compositeTypes.empty()) {
       return {};
     }
-    std::vector<std::string> common = baseTypeNamesFor(type.compositeTypes.front());
+    std::vector<TypeInfo> common = baseTypesFor(type.compositeTypes.front());
     for (std::size_t i = 1; i < type.compositeTypes.size(); ++i) {
-      const std::vector<std::string> alternatives =
-          baseTypeNamesFor(type.compositeTypes[i]);
-      std::erase_if(common, [&](const std::string& candidate) {
-        return std::find(alternatives.begin(), alternatives.end(), candidate) ==
-               alternatives.end();
-      });
+      const std::vector<TypeInfo> alternatives =
+          baseTypesFor(type.compositeTypes[i]);
+      for (auto candidate = common.begin(); candidate != common.end();) {
+        auto alternative =
+            std::find_if(alternatives.begin(), alternatives.end(),
+                         [&](const TypeInfo& other) {
+                           return baseName(*candidate) == baseName(other);
+                         });
+        if (alternative == alternatives.end()) {
+          candidate = common.erase(candidate);
+          continue;
+        }
+        std::optional<TypeInfo> merged =
+            mergeAppliedBase(*candidate, *alternative);
+        if (!merged.has_value()) {
+          candidate = common.erase(candidate);
+          continue;
+        }
+        *candidate = std::move(*merged);
+        ++candidate;
+      }
     }
     return common;
   }
@@ -9435,8 +9517,53 @@ std::vector<std::string> Typechecker::baseTypeNamesFor(const TypeInfo& type) con
       !type.runtimeName.empty()) {
     owner = type.runtimeName;
   }
-  return owner.empty() ? std::vector<std::string>{}
-                       : linearizedParentsFor({owner}, globalSymbols_);
+  if (owner.empty()) {
+    return {};
+  }
+
+  std::vector<TypeInfo> directParents;
+  if (auto symbol = globalSymbols_.find(owner); symbol != globalSymbols_.end()) {
+    directParents.reserve(symbol->second.parentTypes.size());
+    for (const TypeInfo& parent : symbol->second.parentTypes) {
+      directParents.push_back(specializeTypeForReceiver(parent, type));
+    }
+  }
+  const std::unordered_map<std::string, TypeInfo> effectiveParents =
+      effectiveParentTypes(directParents);
+
+  std::vector<TypeInfo> result;
+  for (const std::string& name :
+       linearizedParentsFor({owner}, globalSymbols_)) {
+    if (name == owner) {
+      result.push_back(type);
+      continue;
+    }
+    if (auto parent = effectiveParents.find(name);
+        parent != effectiveParents.end()) {
+      result.push_back(parent->second);
+      continue;
+    }
+    if (auto symbol = globalSymbols_.find(name);
+        symbol != globalSymbols_.end()) {
+      result.push_back(symbol->second.type);
+    }
+  }
+  return result;
+}
+
+std::vector<std::string> Typechecker::baseTypeNamesFor(const TypeInfo& type) const {
+  std::vector<std::string> result;
+  for (const TypeInfo& base : baseTypesFor(type)) {
+    std::string name =
+        base.typeConstructorName.empty()
+            ? (base.runtimeName.empty() ? base.name : base.runtimeName)
+            : base.typeConstructorName;
+    if (!name.empty() &&
+        std::find(result.begin(), result.end(), name) == result.end()) {
+      result.push_back(std::move(name));
+    }
+  }
+  return result;
 }
 
 TypeInfo Typechecker::widenSoftUnion(const TypeInfo& type) const {
@@ -9465,22 +9592,32 @@ TypeInfo Typechecker::widenSoftUnion(const TypeInfo& type) const {
     return symbol != globalSymbols_.end() && symbol->second.isTransparent;
   };
 
-  const std::vector<std::string> commonBases = baseTypeNamesFor(type);
+  const auto baseName = [](const TypeInfo& base) {
+    return base.typeConstructorName.empty()
+               ? (base.runtimeName.empty() ? base.name : base.runtimeName)
+               : base.typeConstructorName;
+  };
+  const std::vector<TypeInfo> commonBases = baseTypesFor(type);
   std::vector<TypeInfo> visibleBases;
-  for (const std::string& base : commonBases) {
-    auto symbol = globalSymbols_.find(base);
+  for (const TypeInfo& base : commonBases) {
+    const std::string name = baseName(base);
+    auto symbol = globalSymbols_.find(name);
     if (symbol == globalSymbols_.end() ||
         !isInheritableDeclaration(symbol->second.kind) ||
-        !symbol->second.typeParameters.empty() || isTransparentBase(base)) {
+        (!symbol->second.typeParameters.empty() &&
+         (base.typeConstructorName != name ||
+          base.typeArguments.size() != symbol->second.typeParameters.size())) ||
+        isTransparentBase(name)) {
       continue;
     }
     const bool hasMoreSpecificCommonBase = std::any_of(
-        commonBases.begin(), commonBases.end(), [&](const std::string& candidate) {
-          return candidate != base && !isTransparentBase(candidate) &&
-                 isSubtypeOf(candidate, base);
+        commonBases.begin(), commonBases.end(), [&](const TypeInfo& candidate) {
+          const std::string candidateName = baseName(candidate);
+          return candidateName != name && !isTransparentBase(candidateName) &&
+                 isSubtypeOf(candidateName, name);
         });
     if (!hasMoreSpecificCommonBase) {
-      visibleBases.push_back(symbol->second.type);
+      visibleBases.push_back(base);
     }
   }
 

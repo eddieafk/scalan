@@ -6246,7 +6246,9 @@ struct DirectReferenceContext {
   std::string moduleName;
   std::string ownerName;
   const std::unordered_map<std::string, const nir::Definition*>* definitions = nullptr;
+  const ParentMap* parentMap = nullptr;
   std::unordered_set<std::string> localNames;
+  std::unordered_map<std::string, std::string> localTypes;
 };
 
 std::unordered_map<std::string, std::string>
@@ -6290,6 +6292,107 @@ resolveDirectReference(const std::string& reference,
   return std::nullopt;
 }
 
+std::string directSignatureReturnType(const std::string& signature) {
+  const std::size_t close = signature.rfind(')');
+  if (close == std::string::npos) {
+    return signature;
+  }
+  return trim(std::string_view(signature).substr(close + 1));
+}
+
+std::string directValueType(const nir::Value& value,
+                            const DirectReferenceContext& context);
+
+std::optional<std::string>
+resolveDirectSelectedReference(const nir::Value& value,
+                               const DirectReferenceContext& context) {
+  if (value.kind != nir::ValueKind::Select || value.operands.size() != 1 ||
+      value.text.empty() || context.definitions == nullptr) {
+    return std::nullopt;
+  }
+  const std::string receiverType =
+      directValueType(value.operands.front(), context);
+  if (receiverType.empty() || receiverType == "Unknown") {
+    return std::nullopt;
+  }
+
+  const std::vector<std::string> owners =
+      context.parentMap == nullptr
+          ? std::vector<std::string>{receiverType}
+          : nir::linearizedTypeNames(receiverType, *context.parentMap);
+  for (const std::string& owner : owners) {
+    const std::string selected = owner + "." + value.text;
+    if (context.definitions->contains(selected)) {
+      return selected;
+    }
+  }
+  return std::nullopt;
+}
+
+std::string directValueType(const nir::Value& value,
+                            const DirectReferenceContext& context) {
+  if (!value.type.empty() && value.type != "Unknown") {
+    return value.type;
+  }
+  switch (value.kind) {
+  case nir::ValueKind::New:
+    return value.text;
+  case nir::ValueKind::Local:
+    if (auto local = context.localTypes.find(value.text);
+        local != context.localTypes.end()) {
+      return local->second;
+    }
+    if (std::optional<std::string> target =
+            resolveDirectReference(value.text, context)) {
+      auto definition = context.definitions->find(*target);
+      if (definition != context.definitions->end() &&
+          definition->second != nullptr) {
+        return isFunctionDefinitionKind(definition->second->kind)
+                   ? directSignatureReturnType(definition->second->signature)
+                   : definition->second->name;
+      }
+    }
+    return "Unknown";
+  case nir::ValueKind::Select: {
+    std::optional<std::string> selected =
+        resolveDirectSelectedReference(value, context);
+    if (!selected) {
+      return "Unknown";
+    }
+    auto definition = context.definitions->find(*selected);
+    return definition == context.definitions->end() ||
+                   definition->second == nullptr
+               ? "Unknown"
+               : directSignatureReturnType(definition->second->signature);
+  }
+  case nir::ValueKind::Call:
+    if (!value.operands.empty()) {
+      const nir::Value& callee = value.operands.front();
+      std::optional<std::string> target;
+      if (callee.kind == nir::ValueKind::Local) {
+        target = resolveDirectReference(callee.text, context);
+      } else if (callee.kind == nir::ValueKind::Select) {
+        target = resolveDirectSelectedReference(callee, context);
+      }
+      if (target) {
+        auto definition = context.definitions->find(*target);
+        if (definition != context.definitions->end() &&
+            definition->second != nullptr) {
+          return directSignatureReturnType(definition->second->signature);
+        }
+      }
+    }
+    return "Unknown";
+  case nir::ValueKind::Box:
+    return "Object";
+  case nir::ValueKind::Unbox:
+  case nir::ValueKind::AsInstanceOf:
+    return value.text;
+  default:
+    return "Unknown";
+  }
+}
+
 bool isDispatchOwnedFunction(
     const nir::Definition& definition,
     const std::unordered_map<std::string, const nir::Definition*>& definitions) {
@@ -6301,6 +6404,37 @@ bool isDispatchOwnedFunction(
   auto ownerDefinition = definitions.find(owner);
   return ownerDefinition != definitions.end() &&
          isDispatchOwner(ownerDefinition->second->kind);
+}
+
+std::vector<std::string> dispatchTargetsFor(
+    const nir::Definition& definition,
+    const std::unordered_map<std::string, const nir::Definition*>& definitions,
+    const ParentMap& parentMap) {
+  std::vector<std::string> targets;
+  if (!isDispatchOwnedFunction(definition, definitions)) {
+    return targets;
+  }
+
+  const std::string owner = ownerNameOf(definition.name);
+  const std::string member =
+      definition.name.substr(owner.empty() ? 0 : owner.size() + 1);
+  for (const auto& [candidateName, candidate] : definitions) {
+    if (candidate == nullptr || !isFunctionDefinitionKind(candidate->kind)) {
+      continue;
+    }
+    const std::string candidateOwner = ownerNameOf(candidateName);
+    if (candidateOwner.empty() ||
+        candidateName.substr(candidateOwner.size() + 1) != member) {
+      continue;
+    }
+    const std::vector<std::string> linearized =
+        nir::linearizedTypeNames(candidateOwner, parentMap);
+    if (std::find(linearized.begin(), linearized.end(), owner) !=
+        linearized.end()) {
+      targets.push_back(candidateName);
+    }
+  }
+  return targets;
 }
 
 bool shouldRetainOriginalReachableDefinition(
@@ -6330,6 +6464,9 @@ void collectDirectBindingReference(const nir::Value& binding,
   }
   if (!binding.text.empty()) {
     context.localNames.insert(binding.text);
+    if (!binding.type.empty()) {
+      context.localTypes[binding.text] = binding.type;
+    }
   }
 }
 
@@ -6391,16 +6528,9 @@ void collectDirectValueReferences(const nir::Value& value,
     return;
   }
   case nir::ValueKind::Select:
-    if (value.operands.size() == 1 &&
-        value.operands.front().kind == nir::ValueKind::Local &&
-        !context.localNames.contains(value.operands.front().text)) {
-      if (std::optional<std::string> receiver =
-              resolveDirectReference(value.operands.front().text, context)) {
-        const std::string selected = *receiver + "." + value.text;
-        if (context.definitions != nullptr && context.definitions->contains(selected)) {
-          references.push_back(selected);
-        }
-      }
+    if (std::optional<std::string> selected =
+            resolveDirectSelectedReference(value, context)) {
+      references.push_back(*selected);
     }
     for (const nir::Value& operand : value.operands) {
       collectDirectValueReferences(operand, context, references);
@@ -6435,7 +6565,8 @@ void collectDirectValueReferences(const nir::Value& value,
 
 std::vector<std::string> collectDirectDefinitionReferences(
     const nir::Definition& definition, const std::string& moduleName,
-    const std::unordered_map<std::string, const nir::Definition*>& definitions) {
+    const std::unordered_map<std::string, const nir::Definition*>& definitions,
+    const ParentMap& parentMap) {
   std::vector<std::string> references;
   if (definition.kind != nir::DefinitionKind::FunctionDef &&
       !(definition.kind == nir::DefinitionKind::Field && !definition.body.empty())) {
@@ -6446,10 +6577,14 @@ std::vector<std::string> collectDirectDefinitionReferences(
   context.moduleName = moduleName;
   context.ownerName = ownerNameOf(definition.name);
   context.definitions = &definitions;
+  context.parentMap = &parentMap;
   for (const nir::Instruction& instruction : definition.body.instructions) {
     if (instruction.kind == nir::InstructionKind::Param) {
       if (!instruction.name.empty()) {
         context.localNames.insert(instruction.name);
+        if (!instruction.type.empty()) {
+          context.localTypes[instruction.name] = instruction.type;
+        }
       }
       continue;
     }
@@ -6458,6 +6593,9 @@ std::vector<std::string> collectDirectDefinitionReferences(
       collectDirectValueReferences(instruction.value, context, references);
       if (!instruction.name.empty()) {
         context.localNames.insert(instruction.name);
+        if (!instruction.type.empty()) {
+          context.localTypes[instruction.name] = instruction.type;
+        }
       }
       continue;
     }
@@ -6472,6 +6610,7 @@ std::unordered_set<std::string>
 recomputedReachableAfterInlining(const linker::LinkedProgram& program) {
   const std::unordered_map<std::string, const nir::Definition*> definitions =
       definitionIndexFor(program);
+  const ParentMap parentMap = parentMapFor(definitions);
   const std::unordered_map<std::string, std::string> modules = moduleIndexFor(program);
   std::unordered_set<std::string> reachable;
   std::vector<std::string> worklist;
@@ -6490,6 +6629,10 @@ recomputedReachableAfterInlining(const linker::LinkedProgram& program) {
       if (definition == definitions.end()) {
         continue;
       }
+      for (const std::string& target :
+           dispatchTargetsFor(*definition->second, definitions, parentMap)) {
+        addReachable(target);
+      }
       const std::string ownerName = ownerNameOf(definition->second->name);
       auto owner = definitions.find(ownerName);
       if (owner != definitions.end() &&
@@ -6503,7 +6646,7 @@ recomputedReachableAfterInlining(const linker::LinkedProgram& program) {
         moduleName = module->second;
       }
       for (const std::string& reference : collectDirectDefinitionReferences(
-               *definition->second, moduleName, definitions)) {
+               *definition->second, moduleName, definitions, parentMap)) {
         addReachable(reference);
       }
     }

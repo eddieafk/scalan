@@ -90,9 +90,9 @@ build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
 
 # Compile explicit Scala 3 union/intersection types across parameters, results,
 # locals, nested generic arguments, generic type aliases, inferred branch
-# unions with visible-join widening or retained unconstrained generic
-# alternatives (including user-declared transparent classes/traits), and
-# members projected from intersection constituents or a union's shared
+# unions with parameterized visible-join widening or retained unconstrained
+# generic alternatives (including user-declared transparent classes/traits),
+# and members projected from intersection constituents or a union's shared
 # base-type join.
 build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
   --output /tmp/composite-types \

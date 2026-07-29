@@ -13,6 +13,9 @@ trait Audited {
   def auditLabel(): String
 }
 transparent trait RoutingMarker
+trait LookupBox[+A <: LookupView] {
+  def value(): A
+}
 
 class RequestIdValue extends RequestId with RoutingMarker {
   def display(): String = "request"
@@ -31,6 +34,12 @@ class AuditedUsername extends Username with Audited with RoutingMarker {
   def display(): String = "audited-username"
   def usernamePart(): String = "audited-username-part"
   def auditLabel(): String = "username-audit"
+}
+class RequestBox extends LookupBox[RequestId] {
+  def value(): RequestId = new RequestIdValue
+}
+class UsernameBox extends LookupBox[Username] {
+  def value(): Username = new UsernameValue
 }
 
 type LookupKey = RequestId | Username
@@ -54,6 +63,8 @@ object CompositeTypes {
     firstOf(new RequestIdValue, new UsernameValue).display()
   def retainedGenericUnion(): String =
     firstOf("retained-generic-union", 23).asInstanceOf[String]
+  def inferredLookupBox(useRequest: Boolean) =
+    if (useRequest) new RequestBox else new UsernameBox
 
   def main(args: Array[String]): Unit = {
     val request: LookupKey = new RequestIdValue
@@ -72,5 +83,6 @@ object CompositeTypes {
     println(inferredAudited(false).auditLabel())
     println(inferredGeneric())
     println(retainedGenericUnion())
+    println(inferredLookupBox(false).value().display())
   }
 }
