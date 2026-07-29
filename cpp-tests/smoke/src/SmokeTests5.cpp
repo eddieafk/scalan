@@ -109,8 +109,43 @@ object Selectors {
     prefix + named.label()
 }
 
+class InstanceSelectors(val instancePrefix: String) {
+  inline def selected[A](): String =
+    summonFrom {
+      case found: Named[A] => instancePrefix + found.label()
+      case _ => instancePrefix + "fallback"
+    }
+
+  inline def contextualValue[A](value: String)(using named: Named[A]): String =
+    instancePrefix + named.label() + ":" + named.label() + ":" + value + ":" + value
+
+  inline def nestedContextual[A](value: String)(using named: Named[A]): String =
+    "instance-nested:" + contextualValue[A](value)
+
+  inline def inferred[A](value: A): String = instancePrefix + "inferred"
+
+  inline def thisPrefix[A](): String = this.instancePrefix
+}
+
+trait TraitInstanceSelectors {
+  def traitPrefix(): String
+
+  inline def traitSelected[A](): String =
+    summonFrom {
+      case found: Named[A] => traitPrefix() + found.label()
+      case _ => traitPrefix() + "fallback"
+    }
+}
+
+class TraitInstanceSelectorsValue(val value: String) extends TraitInstanceSelectors {
+  def traitPrefix(): String = value
+}
+
 object Main {
   given intNamed: Named[Int] = new NamedValue[Int]("member-int")
+  val instances: InstanceSelectors = new InstanceSelectors("instance:")
+  val traitInstances: TraitInstanceSelectors =
+    new TraitInstanceSelectorsValue("trait-instance:")
 
   def nextValue(): String = {
     println("effect")
@@ -120,6 +155,11 @@ object Main {
   def nextContextValue(): String = {
     println("context-effect")
     "context-value"
+  }
+
+  def nextInstanceValue(): String = {
+    println("instance-effect")
+    "instance-value"
   }
 
   def intSelected: String = Selectors.selected[Int]
@@ -162,6 +202,23 @@ object Main {
     Selectors.nestedContextual[Int]("nested")
   def inferredContextualSelected: String = Selectors.inferredContextual(9)
   def inferredContextOnly: String = Selectors.inferredFromContext()
+  def instanceSelected: String = instances.selected[Int]()
+  def instanceFallback: String = instances.selected[Boolean]()
+  def instanceContextualValue: String =
+    instances.contextualValue[Int](nextInstanceValue())
+  def instanceExplicitContext: String =
+    instances.contextualValue[String]("explicit")(using
+      new NamedValue[String]("explicit-instance"))
+  def instanceNestedContextual: String =
+    instances.nestedContextual[Int]("nested")
+  def instanceInferred: String = instances.inferred(10)
+  def instanceThisPrefix: String = instances.thisPrefix[Int]()
+  def localInstanceSelected: String = {
+    val localInstances: InstanceSelectors =
+      new InstanceSelectors("local-instance:")
+    localInstances.selected[Int]()
+  }
+  def traitInstanceSelected: String = traitInstances.traitSelected[Int]()
 
   def main(args: Array[String]): Unit = {
     println(intSelected)
@@ -186,6 +243,15 @@ object Main {
     println(nestedContextualSelected)
     println(inferredContextualSelected)
     println(inferredContextOnly)
+    println(instanceSelected)
+    println(instanceFallback)
+    println(instanceContextualValue)
+    println(instanceExplicitContext)
+    println(instanceNestedContextual)
+    println(instanceInferred)
+    println(instanceThisPrefix)
+    println(localInstanceSelected)
+    println(traitInstanceSelected)
   }
 }
 )";
@@ -201,13 +267,19 @@ object Main {
   def unsupportedMissingContext: String = missingContext[Int]()
   inline def noInference[A](value: String): String = value
   def unsupportedInference: String = noInference("value")
+  def unsupportedReceiver: String =
+    new EffectfulInstance().value[Int]()
   inline def missingBody[A]: String
   inline def recursive[A]: String = recursive[A]
   inline val unsupported: String = "value"
 }
 
-class Instance {
+class GenericInstance[T] {
   inline def unsupportedInstance[A]: String = "instance"
+}
+
+class EffectfulInstance {
+  inline def value[A](): String = "instance"
 }
 )";
 
@@ -290,6 +362,24 @@ class Instance {
       functionText(result.nirText, "demo.inlinecalls.Main.inferredContextualSelected");
   const std::string_view inferredContextOnly =
       functionText(result.nirText, "demo.inlinecalls.Main.inferredContextOnly");
+  const std::string_view instanceSelected =
+      functionText(result.nirText, "demo.inlinecalls.Main.instanceSelected");
+  const std::string_view instanceFallback =
+      functionText(result.nirText, "demo.inlinecalls.Main.instanceFallback");
+  const std::string_view instanceContextualValue =
+      functionText(result.nirText, "demo.inlinecalls.Main.instanceContextualValue");
+  const std::string_view instanceExplicitContext =
+      functionText(result.nirText, "demo.inlinecalls.Main.instanceExplicitContext");
+  const std::string_view instanceNestedContextual =
+      functionText(result.nirText, "demo.inlinecalls.Main.instanceNestedContextual");
+  const std::string_view instanceInferred =
+      functionText(result.nirText, "demo.inlinecalls.Main.instanceInferred");
+  const std::string_view instanceThisPrefix =
+      functionText(result.nirText, "demo.inlinecalls.Main.instanceThisPrefix");
+  const std::string_view localInstanceSelected =
+      functionText(result.nirText, "demo.inlinecalls.Main.localInstanceSelected");
+  const std::string_view traitInstanceSelected =
+      functionText(result.nirText, "demo.inlinecalls.Main.traitInstanceSelected");
 
   const bool valid =
       status == 0 &&
@@ -306,7 +396,14 @@ class Instance {
               "selected:member-int:member-int:context-value:context-value\n"
               "selected:explicit-context\n"
               "nested-context:selected:member-int:member-int:nested:nested\n"
-              "selected:member-int\nselected:member-int\n" &&
+              "selected:member-int\nselected:member-int\n"
+              "instance:member-int\ninstance:fallback\n"
+              "instance-effect\n"
+              "instance:member-int:member-int:instance-value:instance-value\n"
+              "instance:explicit-instance:explicit-instance:explicit:explicit\n"
+              "instance-nested:instance:member-int:member-int:nested:nested\n"
+              "instance:inferred\ninstance:\nlocal-instance:member-int\n"
+              "trait-instance:member-int\n" &&
       !invalid.ok &&
       contains(invalid.diagnosticsText,
                "inline call-site specialization currently requires a generic "
@@ -320,8 +417,11 @@ class Instance {
       contains(invalid.diagnosticsText,
                "recursive inline call-site specialization is not supported yet") &&
       contains(invalid.diagnosticsText,
-               "inline call-site specialization currently requires a top-level or "
-               "object method") &&
+               "inline instance method specialization does not support generic "
+               "owner classes or traits yet") &&
+      contains(invalid.diagnosticsText,
+               "inline instance method specialization requires a stable identifier "
+               "or this receiver") &&
       contains(invalid.diagnosticsText,
                "'inline' must modify a def in this milestone") &&
       contains(intSelected, "call %demo.inlinecalls.Main.intNamed()") &&
@@ -388,7 +488,52 @@ class Instance {
       !contains(inferredContextualSelected,
                 "%demo.inlinecalls.Selectors.inferredContextual") &&
       countOccurrences(inferredContextOnly, "Main.intNamed") == 1 &&
-      !contains(inferredContextOnly, "%demo.inlinecalls.Selectors.inferredFromContext");
+      !contains(inferredContextOnly,
+                "%demo.inlinecalls.Selectors.inferredFromContext") &&
+      contains(instanceSelected, "let %this : demo.inlinecalls.InstanceSelectors") &&
+      contains(instanceSelected, ".instancePrefix") &&
+      countOccurrences(instanceSelected, "Main.instances") == 1 &&
+      countOccurrences(instanceSelected, "Main.intNamed") == 1 &&
+      !contains(instanceSelected, "%demo.inlinecalls.InstanceSelectors.selected") &&
+      contains(instanceFallback, "\"fallback\"") &&
+      countOccurrences(instanceFallback, "Main.instances") == 1 &&
+      !contains(instanceFallback, "Main.intNamed") &&
+      !contains(instanceFallback, "%demo.inlinecalls.InstanceSelectors.selected") &&
+      contains(instanceContextualValue, "let %value : String") &&
+      contains(instanceContextualValue, "let %named : demo.inlinecalls.Named") &&
+      countOccurrences(instanceContextualValue, "Main.instances") == 1 &&
+      countOccurrences(instanceContextualValue, "nextInstanceValue") == 1 &&
+      countOccurrences(instanceContextualValue, "Main.intNamed") == 1 &&
+      !contains(instanceContextualValue,
+                "%demo.inlinecalls.InstanceSelectors.contextualValue") &&
+      contains(instanceExplicitContext, "explicit-instance") &&
+      countOccurrences(instanceExplicitContext, "Main.instances") == 1 &&
+      !contains(instanceExplicitContext, "Main.intNamed") &&
+      !contains(instanceExplicitContext,
+                "%demo.inlinecalls.InstanceSelectors.contextualValue") &&
+      contains(instanceNestedContextual, "\"instance-nested:\"") &&
+      countOccurrences(instanceNestedContextual, "Main.instances") == 1 &&
+      countOccurrences(instanceNestedContextual, "Main.intNamed") == 1 &&
+      !contains(instanceNestedContextual,
+                "%demo.inlinecalls.InstanceSelectors.nestedContextual") &&
+      !contains(instanceNestedContextual,
+                "%demo.inlinecalls.InstanceSelectors.contextualValue") &&
+      contains(instanceInferred, "\"inferred\"") &&
+      countOccurrences(instanceInferred, "Main.instances") == 1 &&
+      !contains(instanceInferred, "%demo.inlinecalls.InstanceSelectors.inferred") &&
+      contains(instanceThisPrefix, ".instancePrefix") &&
+      countOccurrences(instanceThisPrefix, "Main.instances") == 1 &&
+      !contains(instanceThisPrefix, "%demo.inlinecalls.InstanceSelectors.thisPrefix") &&
+      contains(localInstanceSelected, "local-instance:") &&
+      countOccurrences(localInstanceSelected, "Main.intNamed") == 1 &&
+      !contains(localInstanceSelected,
+                "%demo.inlinecalls.InstanceSelectors.selected") &&
+      contains(traitInstanceSelected,
+               "let %this : demo.inlinecalls.TraitInstanceSelectors") &&
+      countOccurrences(traitInstanceSelected, "Main.traitInstances") == 1 &&
+      countOccurrences(traitInstanceSelected, "Main.intNamed") == 1 &&
+      !contains(traitInstanceSelected,
+                "%demo.inlinecalls.TraitInstanceSelectors.traitSelected");
   return valid
              ? 0
              : fail("inline summonFrom smoke test failed (output='" + text +
@@ -416,7 +561,19 @@ class Instance {
                     std::string(nestedContextualSelected) + "', inferred-contextual='" +
                     std::string(inferredContextualSelected) +
                     "', inferred-context-only='" + std::string(inferredContextOnly) +
-                    "')");
+                    "', instance-selected='" + std::string(instanceSelected) +
+                    "', instance-fallback='" + std::string(instanceFallback) +
+                    "', instance-contextual-value='" +
+                    std::string(instanceContextualValue) +
+                    "', instance-explicit-context='" +
+                    std::string(instanceExplicitContext) +
+                    "', instance-nested-contextual='" +
+                    std::string(instanceNestedContextual) + "', instance-inferred='" +
+                    std::string(instanceInferred) + "', instance-this-prefix='" +
+                    std::string(instanceThisPrefix) + "', local-instance-selected='" +
+                    std::string(localInstanceSelected) +
+                    "', trait-instance-selected='" +
+                    std::string(traitInstanceSelected) + "')");
 }
 
 } // namespace

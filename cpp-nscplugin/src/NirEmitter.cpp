@@ -667,6 +667,10 @@ inlineApplicationFor(const frontend::AstExpression& expression,
   return application == context.inlineApplications->rend() ? nullptr : &*application;
 }
 
+std::unordered_set<std::string>
+implicitThisMembersFor(const std::vector<frontend::TypedDeclaration>& declarations,
+                       const std::string& owner);
+
 ValueContext inlineContextFor(
     const frontend::TypedInlineApplication& application,
     const ValueContext& callSiteContext) {
@@ -675,8 +679,12 @@ ValueContext inlineContextFor(
   inlineContext.contextApplications = &application.contextApplications;
   inlineContext.inlineApplications = &application.inlineApplications;
   inlineContext.currentOwner = application.ownerName;
-  inlineContext.hasImplicitReceiver = false;
-  inlineContext.implicitThisMembers.clear();
+  inlineContext.hasImplicitReceiver = application.hasReceiver;
+  inlineContext.implicitThisMembers =
+      application.hasReceiver && callSiteContext.declarations != nullptr
+          ? implicitThisMembersFor(*callSiteContext.declarations,
+                                   application.ownerName)
+          : std::unordered_set<std::string>{};
   inlineContext.stackableSuper = false;
   inlineContext.superTypes.clear();
   inlineContext.superType.clear();
@@ -1993,13 +2001,25 @@ nir::Value inlineApplicationValueFor(
     const frontend::TypedInlineApplication& application,
     const ValueContext& callSiteContext) {
   ValueContext inlineContext = inlineContextFor(application, callSiteContext);
-  if (application.arguments.empty() &&
+  if (!application.hasReceiver && application.arguments.empty() &&
       application.contextualArguments.empty()) {
     return scopedBodyValueFor(application.body, inlineContext);
   }
 
   std::vector<nir::Value> values;
-  values.reserve(application.parameterNames.size() + 1);
+  values.reserve(application.parameterNames.size() +
+                 (application.hasReceiver ? 2 : 1));
+  if (application.hasReceiver) {
+    const std::string receiverType = runtimeTypeName(application.receiverType);
+    nir::Value receiver =
+        expressionValueFor(application.receiver, callSiteContext);
+    receiver = narrowCompositeValue(std::move(receiver),
+                                    application.receiverType,
+                                    application.receiver, callSiteContext);
+    values.push_back(nir::localLetValue(
+        "this", receiverType, std::move(receiver), application.receiver.span));
+    inlineContext.localNames.insert("this");
+  }
   std::size_t sourceArgumentIndex = 0;
   for (std::size_t parameterIndex = 0;
        parameterIndex < application.parameterNames.size(); ++parameterIndex) {

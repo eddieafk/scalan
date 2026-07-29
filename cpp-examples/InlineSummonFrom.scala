@@ -58,8 +58,43 @@ object Selectors {
     prefix + named.label()
 }
 
+class InstanceSelectors(val instancePrefix: String) {
+  inline def selected[A](): String =
+    summonFrom {
+      case found: Named[A] => instancePrefix + found.label()
+      case _ => instancePrefix + "fallback"
+    }
+
+  inline def contextualValue[A](value: String)(using named: Named[A]): String =
+    instancePrefix + named.label() + ":" + named.label() + ":" + value + ":" + value
+
+  inline def nestedContextual[A](value: String)(using named: Named[A]): String =
+    "instance-nested:" + contextualValue[A](value)
+
+  inline def inferred[A](value: A): String = instancePrefix + "inferred"
+
+  inline def thisPrefix[A](): String = this.instancePrefix
+}
+
+trait TraitInstanceSelectors {
+  def traitPrefix(): String
+
+  inline def traitSelected[A](): String =
+    summonFrom {
+      case found: Named[A] => traitPrefix() + found.label()
+      case _ => traitPrefix() + "fallback"
+    }
+}
+
+class TraitInstanceSelectorsValue(val value: String) extends TraitInstanceSelectors {
+  def traitPrefix(): String = value
+}
+
 object Main {
   given intNamed: Named[Int] = new NamedValue[Int]("member-int")
+  val instances: InstanceSelectors = new InstanceSelectors("instance:")
+  val traitInstances: TraitInstanceSelectors =
+    new TraitInstanceSelectorsValue("trait-instance:")
 
   def nextValue(): String = {
     println("effect")
@@ -69,6 +104,11 @@ object Main {
   def nextContextValue(): String = {
     println("context-effect")
     "context-value"
+  }
+
+  def nextInstanceValue(): String = {
+    println("instance-effect")
+    "instance-value"
   }
 
   def main(args: Array[String]): Unit = {
@@ -113,5 +153,21 @@ object Main {
     println(Selectors.nestedContextual[Int]("nested"))
     println(Selectors.inferredContextual(9))
     println(Selectors.inferredFromContext())
+    println(instances.selected[Int]())
+    println(instances.selected[Boolean]())
+    println(instances.contextualValue[Int](nextInstanceValue()))
+    println(
+      instances.contextualValue[String]("explicit")(using
+        new NamedValue[String]("explicit-instance")))
+    println(instances.nestedContextual[Int]("nested"))
+    println(instances.inferred(10))
+    println(instances.thisPrefix[Int]())
+
+    {
+      val localInstances: InstanceSelectors =
+        new InstanceSelectors("local-instance:")
+      println(localInstances.selected[Int]())
+    }
+    println(traitInstances.traitSelected[Int]())
   }
 }

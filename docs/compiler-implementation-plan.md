@@ -994,27 +994,32 @@ Current scaffold status:
   or dead fallback. Outside a supported inline application, reduction continues
   to use evidence visible at the definition's lexical typechecking site.
   Scala 3's soft `inline def` modifier now enables a bounded call-site
-  specialization path for generic top-level and object methods. Explicit type
-  applications and unambiguous ordinary argument/expected-result inference are
-  supported, along with parameterless methods, a directly applied ordinary
-  value-parameter list, and one trailing contextual `using` list. Contextual
-  arguments may be resolved from the caller or supplied explicitly, and their
-  evidence can complete generic inference. The frontend rechecks each inline
-  body with its concrete type arguments, specialized parameter types,
-  definition-owner members, and caller contextual scope, retaining isolated
-  expression, contextual-argument, and nested-inline metadata for that
-  application. NIR evaluates ordinary and contextual arguments in declaration
-  order into local bindings before expanding the recorded body, preserving
-  single evaluation even when a parameter is referenced repeatedly.
+  specialization path for generic top-level, object, and instance methods.
+  Instance methods are bounded to non-generic class or trait owners and stable
+  identifier or `this` receivers. Explicit type applications and unambiguous
+  ordinary argument/expected-result inference are supported, along with
+  parameterless methods, a directly applied ordinary value-parameter list, and
+  one trailing contextual `using` list. Contextual arguments may be resolved
+  from the caller or supplied explicitly, and their evidence can complete
+  generic inference. The frontend rechecks each inline body with its concrete
+  type arguments, specialized parameter types, definition-owner members, bound
+  receiver, and caller contextual scope, retaining isolated expression,
+  contextual-argument, and nested-inline metadata for that application. NIR
+  evaluates the receiver first, then ordinary and contextual arguments in
+  declaration order into local bindings before expanding the recorded body,
+  preserving single evaluation even when a receiver or parameter is referenced
+  repeatedly.
   `summonFrom` may therefore select a different branch at each call and no call
-  to the inline method remains. Recursive expansion is diagnosed. Instance
-  methods, additional ordinary application clauses, `transparent inline`, and
-  the remaining Scala 3 inline surface stay future milestones. Focused native
-  coverage exercises ordered search, wildcard fallback, pattern-bound
-  contextual evidence, recursive generic factories, lexical definition-owner
-  values, member and nearest local caller evidence, ordinary and contextual
-  argument single evaluation, synthesized and explicit `using` values, nested
-  contextual forwarding, explicit and inferred scalar/reference parameter and
+  to the inline method remains. Recursive expansion is diagnosed. Generic
+  instance owners, effectful receiver expressions, additional ordinary
+  application clauses, `transparent inline`, and the remaining Scala 3 inline
+  surface stay future milestones. Focused native coverage exercises ordered
+  search, wildcard fallback, pattern-bound contextual evidence, recursive
+  generic factories, lexical definition-owner values, member and nearest local
+  caller evidence, stable class and trait receivers, receiver-member and
+  explicit-`this` access, receiver/ordinary/contextual argument single
+  evaluation, synthesized and explicit `using` values, nested contextual and
+  instance forwarding, explicit and inferred scalar/reference parameter and
   result types, ordinary/expected-result/context-only inference, inferred
   call-site contextual selection, nested parameterized inline expansion,
   dead-branch elimination, malformed cases, unmatched search, ambiguity
@@ -1301,9 +1306,9 @@ Current scaffold status:
   member. Optimized runtime and NIR coverage verifies chained selection from the
   synthesized result, stable values, applied generic members, incompatible
   parameter lists, and invalid one-sided implementations.
-- Full inline call-site specialization beyond the bounded ordinary parameter
-  list with a trailing contextual list and generic-inference slice remains a
-  later milestone.
+- Full inline call-site specialization beyond stable receivers on non-generic
+  owners, the bounded ordinary parameter list with a trailing contextual list,
+  and the generic-inference slice remains a later milestone.
 - Postfix type application now supports typed `value.isInstanceOf[Target]` and
   checked `value.asInstanceOf[Target]` for known classes, traits, and objects.
   NIR uses dedicated `is-instance-of[T]` and `as-instance-of[T]` values; verification

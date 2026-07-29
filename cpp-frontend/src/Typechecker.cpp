@@ -1653,11 +1653,12 @@ TypedDeclaration Typechecker::typecheckDeclaration(const AstDeclaration& declara
     if (auto enclosing = globalSymbols_.find(owner);
         enclosing != globalSymbols_.end() &&
         (enclosing->second.kind == AstDeclarationKind::Class ||
-         enclosing->second.kind == AstDeclarationKind::Trait)) {
+         enclosing->second.kind == AstDeclarationKind::Trait) &&
+        !enclosing->second.typeParameters.empty()) {
       diagnostics_.error(
           declaration.span,
-          "inline call-site specialization currently requires a top-level or "
-          "object method");
+          "inline instance method specialization does not support generic owner "
+          "classes or traits yet");
     }
   }
   for (std::size_t i = 0; i < typed.parameters.size(); ++i) {
@@ -4475,7 +4476,8 @@ void Typechecker::recordInlineApplication(
     const AstExpression& expression, const SymbolInfo& symbol,
     const std::vector<TypeInfo>& typeArguments,
     const std::vector<AstExpression>& arguments,
-    const std::vector<TypedContextArgument>& contextualArguments, Scope& scope,
+    const std::vector<TypedContextArgument>& contextualArguments,
+    const AstExpression* receiver, const TypeInfo* receiverType, Scope& scope,
     const TypeInfo* expectedType) {
   const std::size_t contextualParameterCount = static_cast<std::size_t>(
       std::count(symbol.contextualParameters.begin(),
@@ -4497,6 +4499,18 @@ void Typechecker::recordInlineApplication(
       (!hasExplicitContextArguments && !hasMaterializedContextArguments)) {
     return;
   }
+  if (symbol.isInstanceMember &&
+      (receiver == nullptr || receiverType == nullptr)) {
+    return;
+  }
+  if (symbol.isInstanceMember && receiver->kind != AstExpressionKind::Identifier &&
+      receiver->kind != AstExpressionKind::This) {
+    diagnostics_.error(
+        expression.span,
+        "inline instance method specialization requires a stable identifier or "
+        "this receiver");
+    return;
+  }
   if (!expandingInlineApplications_.insert(symbol.symbolName).second) {
     diagnostics_.error(
         expression.span,
@@ -4509,6 +4523,15 @@ void Typechecker::recordInlineApplication(
   if (auto members = memberScopes_.find(definitionOwner);
       members != memberScopes_.end()) {
     mergeScope(inlineScope, members->second);
+  }
+  if (symbol.isInstanceMember) {
+    SymbolInfo thisSymbol;
+    thisSymbol.kind = AstDeclarationKind::Val;
+    thisSymbol.name = "this";
+    thisSymbol.symbolName = "this";
+    thisSymbol.type = *receiverType;
+    thisSymbol.isLexicalValue = true;
+    inlineScope["this"] = std::move(thisSymbol);
   }
   std::unordered_map<std::string, TypeInfo> substitutions;
   for (std::size_t index = 0; index < typeArguments.size(); ++index) {
@@ -4570,6 +4593,11 @@ void Typechecker::recordInlineApplication(
   application.parameterTypes = std::move(parameterTypes);
   application.arguments = arguments;
   application.contextualArguments = contextualArguments;
+  application.hasReceiver = symbol.isInstanceMember;
+  if (application.hasReceiver) {
+    application.receiver = *receiver;
+    application.receiverType = *receiverType;
+  }
   application.expressionTypes = std::move(expressionTypes_);
   application.contextApplications = std::move(contextApplications_);
   application.inlineApplications = std::move(inlineApplications_);
@@ -4845,6 +4873,8 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
     if (!isTypeTest && !isCast) {
       SymbolInfo target;
       bool foundTarget = false;
+      std::optional<AstExpression> inlineReceiver;
+      std::optional<TypeInfo> inlineReceiverType;
       if (callee.kind == AstExpressionKind::New) {
         if (const SymbolInfo* constructor =
                 typeSymbolForDeclaredName(callee.text, &scope)) {
@@ -4864,6 +4894,8 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
                 resolvedMemberForReceiverType(receiver, callee.text)) {
           target = std::move(*member);
           foundTarget = true;
+          inlineReceiver = callee.children.front();
+          inlineReceiverType = receiver;
         }
       }
 
@@ -4883,14 +4915,26 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
           specializeTypeApplication(target, typeArguments, scope, expression.span);
       if (target.isInline && target.kind == AstDeclarationKind::Def &&
           target.parameterTypes.empty() && target.hasImplementation) {
+        if (target.isInstanceMember && !inlineReceiver.has_value()) {
+          if (auto thisSymbol = scope.find("this"); thisSymbol != scope.end()) {
+            AstExpression implicitReceiver;
+            implicitReceiver.kind = AstExpressionKind::This;
+            implicitReceiver.span = callee.span;
+            inlineReceiver = std::move(implicitReceiver);
+            inlineReceiverType = thisSymbol->second.type;
+          }
+        }
         std::vector<TypeInfo> resolvedArguments;
         resolvedArguments.reserve(typeArguments.size());
         for (const std::string& argument : typeArguments) {
           resolvedArguments.push_back(
               typeFromDeclaredName(argument, &scope));
         }
-        recordInlineApplication(expression, target, resolvedArguments, {}, {}, scope,
-                                expectedType);
+        recordInlineApplication(
+            expression, target, resolvedArguments, {}, {},
+            inlineReceiver.has_value() ? &*inlineReceiver : nullptr,
+            inlineReceiverType.has_value() ? &*inlineReceiverType : nullptr, scope,
+            expectedType);
       }
       return specialized.type;
     }
@@ -5727,10 +5771,21 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
     std::vector<TypeInfo> explicitInlineTypeArguments;
     std::optional<SymbolInfo> inferredInlineTarget;
     std::vector<TypeInfo> inferredInlineTypeArguments;
+    std::optional<AstExpression> inlineReceiver;
+    std::optional<TypeInfo> inlineReceiverType;
     if (callee.kind == AstExpressionKind::Identifier) {
       auto found = scope.find(callee.text);
       if (found != scope.end()) {
         calleeSymbol = &found->second;
+        if (found->second.isInstanceMember) {
+          if (auto thisSymbol = scope.find("this"); thisSymbol != scope.end()) {
+            AstExpression implicitReceiver;
+            implicitReceiver.kind = AstExpressionKind::This;
+            implicitReceiver.span = callee.span;
+            inlineReceiver = std::move(implicitReceiver);
+            inlineReceiverType = thisSymbol->second.type;
+          }
+        }
       }
     } else if (callee.kind == AstExpressionKind::Select &&
                callee.children.size() == 1) {
@@ -5739,6 +5794,8 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
               resolvedMemberForReceiverType(receiver, callee.text)) {
         specializedCallee = std::move(*member);
         calleeSymbol = &specializedCallee;
+        inlineReceiver = callee.children.front();
+        inlineReceiverType = receiver;
       }
     } else if (callee.kind == AstExpressionKind::TypeApply &&
                callee.children.size() == 1) {
@@ -5749,6 +5806,15 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
         auto found = scope.find(genericTarget.text);
         if (found != scope.end()) {
           rawTarget = &found->second;
+          if (found->second.isInstanceMember) {
+            if (auto thisSymbol = scope.find("this"); thisSymbol != scope.end()) {
+              AstExpression implicitReceiver;
+              implicitReceiver.kind = AstExpressionKind::This;
+              implicitReceiver.span = genericTarget.span;
+              inlineReceiver = std::move(implicitReceiver);
+              inlineReceiverType = thisSymbol->second.type;
+            }
+          }
         }
       } else if (genericTarget.kind == AstExpressionKind::Select &&
                  genericTarget.children.size() == 1) {
@@ -5758,6 +5824,8 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
                 resolvedMemberForReceiverType(receiver, genericTarget.text)) {
           receiverSpecialized = std::move(*member);
           rawTarget = &receiverSpecialized;
+          inlineReceiver = genericTarget.children.front();
+          inlineReceiverType = receiver;
         }
       }
       if (rawTarget != nullptr) {
@@ -5931,7 +5999,11 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
                                                  expression.children.end());
       recordInlineApplication(expression, *explicitInlineTarget,
                               explicitInlineTypeArguments, inlineArguments,
-                              inlineContextArguments, scope, expectedType);
+                              inlineContextArguments,
+                              inlineReceiver.has_value() ? &*inlineReceiver : nullptr,
+                              inlineReceiverType.has_value() ? &*inlineReceiverType
+                                                             : nullptr,
+                              scope, expectedType);
     }
     if (inferredInlineTarget.has_value() && calleeSymbol != nullptr &&
         calleeSymbol->typeParameters.empty() &&
@@ -5940,7 +6012,11 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
                                                  expression.children.end());
       recordInlineApplication(expression, *inferredInlineTarget,
                               inferredInlineTypeArguments, inlineArguments,
-                              inlineContextArguments, scope, expectedType);
+                              inlineContextArguments,
+                              inlineReceiver.has_value() ? &*inlineReceiver : nullptr,
+                              inlineReceiverType.has_value() ? &*inlineReceiverType
+                                                             : nullptr,
+                              scope, expectedType);
     }
     return calleeSymbol == nullptr ? calleeType
                                    : staticExpressionType(std::move(calleeType));

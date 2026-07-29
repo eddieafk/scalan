@@ -138,6 +138,9 @@ struct TypedInlineApplication {
   std::vector<TypeInfo> parameterTypes;
   std::vector<AstExpression> arguments;
   std::vector<TypedContextArgument> contextualArguments;
+  bool hasReceiver = false;
+  AstExpression receiver;
+  TypeInfo receiverType;
   std::vector<TypedExpressionInfo> expressionTypes;
   std::vector<TypedContextApplication> contextApplications;
   std::vector<TypedInlineApplication> inlineApplications;
@@ -335,6 +338,8 @@ private:
                                const std::vector<AstExpression>& arguments,
                                const std::vector<TypedContextArgument>&
                                    contextualArguments,
+                               const AstExpression* receiver,
+                               const TypeInfo* receiverType,
                                Scope& scope, const TypeInfo* expectedType);
   [[nodiscard]] std::vector<SymbolInfo> inferContextualTypeApplications(
       const SymbolInfo& symbol, const std::vector<TypeInfo>& inferredTypeArguments,
