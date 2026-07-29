@@ -418,6 +418,9 @@ std::string effectValueType(
     if (value.operands.size() != 3) {
       return "Unknown";
     }
+    if (!value.type.empty()) {
+      return value.type;
+    }
     {
       const std::string thenType =
           effectValueType(value.operands[1], state, globals, parentMap);
@@ -1415,6 +1418,9 @@ private:
       if (value.operands.size() != 3) {
         return "Unknown";
       }
+      if (!value.type.empty()) {
+        return value.type;
+      }
       {
         const std::string thenType = zoneValueType(value.operands[1], state);
         const std::string elseType = zoneValueType(value.operands[2], state);
@@ -2273,6 +2279,21 @@ private:
     }
     ValueInfo thenValue = verifyValue(value.operands[1]);
     ValueInfo elseValue = verifyValue(value.operands[2]);
+    if (!value.type.empty()) {
+      if (!typesConformTo(value.type, thenValue.type)) {
+        addError("NIR function definition '" + definition_.name +
+                 "' has if branch of type " + thenValue.type +
+                 " that does not conform to result type " + value.type);
+      }
+      if (!typesConformTo(value.type, elseValue.type)) {
+        addError("NIR function definition '" + definition_.name +
+                 "' has if branch of type " + elseValue.type +
+                 " that does not conform to result type " + value.type);
+      }
+      return ValueInfo{condition.resolved && thenValue.resolved && elseValue.resolved,
+                       value.type,
+                       {}};
+    }
     if (thenValue.type == elseValue.type) {
       return ValueInfo{condition.resolved && thenValue.resolved && elseValue.resolved,
                        thenValue.type,

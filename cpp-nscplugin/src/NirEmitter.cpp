@@ -3258,10 +3258,20 @@ nir::Value valueFor(const frontend::AstExpression& expression,
                           scopedBodyValueFor(expression.children[1], context),
                           nir::unitValue(expression.span), expression.span);
     }
-    return nir::ifValue(expressionValueFor(expression.children[0], context),
-                        scopedBodyValueFor(expression.children[1], context),
-                        scopedBodyValueFor(expression.children[2], context),
-                        expression.span);
+    {
+      const frontend::TypeInfo* semanticType = annotatedTypeFor(expression, context);
+      const std::string resultType =
+          semanticType == nullptr ? std::string{} : runtimeTypeName(*semanticType);
+      nir::Value thenValue = scopedBodyValueFor(expression.children[1], context);
+      nir::Value elseValue = scopedBodyValueFor(expression.children[2], context);
+      thenValue = boxForObjectStorage(std::move(thenValue), resultType,
+                                      expression.children[1], context);
+      elseValue = boxForObjectStorage(std::move(elseValue), resultType,
+                                      expression.children[2], context);
+      return nir::ifValue(expressionValueFor(expression.children[0], context),
+                          std::move(thenValue), std::move(elseValue), resultType,
+                          expression.span);
+    }
   case AstExpressionKind::While:
     if (expression.children.size() != 2) {
       return nir::unknownValue("<malformed-while>", expression.span);

@@ -613,6 +613,9 @@ std::string valueSimpleType(const nir::Value& value, const ReferenceContext& con
   case nir::ValueKind::LocalVar:
     return "Unit";
   case nir::ValueKind::If:
+    if (!value.type.empty()) {
+      return value.type;
+    }
     if (value.operands.size() == 3) {
       const std::string thenType = valueSimpleType(value.operands[1], context);
       const std::string elseType = valueSimpleType(value.operands[2], context);

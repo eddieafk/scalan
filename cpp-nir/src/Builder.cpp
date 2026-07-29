@@ -161,11 +161,17 @@ Value tryValue(Value body, std::vector<Value> catches, Value finalizer,
 
 Value ifValue(Value condition, Value thenValue, Value elseValue,
               support::SourceSpan span) {
+  return ifValue(std::move(condition), std::move(thenValue), std::move(elseValue), {},
+                 span);
+}
+
+Value ifValue(Value condition, Value thenValue, Value elseValue, std::string resultType,
+              support::SourceSpan span) {
   std::vector<Value> operands;
   operands.push_back(std::move(condition));
   operands.push_back(std::move(thenValue));
   operands.push_back(std::move(elseValue));
-  return Value{ValueKind::If, {}, {}, std::move(operands), span};
+  return Value{ValueKind::If, std::move(resultType), {}, std::move(operands), span};
 }
 
 Value whileValue(Value condition, Value body, support::SourceSpan span) {

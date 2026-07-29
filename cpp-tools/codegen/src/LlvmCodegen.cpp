@@ -4666,6 +4666,9 @@ std::string inferSimpleType(const nir::Value& value, const LoweringState& state)
   case nir::ValueKind::Finally:
     return "Unit";
   case nir::ValueKind::If:
+    if (!value.type.empty()) {
+      return value.type;
+    }
     if (value.operands.size() == 3) {
       const std::string thenType = inferSimpleType(value.operands[1], state);
       const std::string elseType = inferSimpleType(value.operands[2], state);

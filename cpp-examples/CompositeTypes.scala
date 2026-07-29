@@ -44,6 +44,13 @@ object CompositeTypes {
   def record(key: AuditedKey): String = key.auditLabel()
   def recordGeneric(key: BothOf[LookupKey, Audited]): String =
     key.auditLabel()
+  def firstOf[A](left: A, right: A): A = left
+  def inferredLookup(useRequest: Boolean) =
+    if (useRequest) new RequestIdValue else new UsernameValue
+  def inferredAudited(useRequest: Boolean) =
+    if (useRequest) new AuditedRequest else new AuditedUsername
+  def inferredGeneric(): String =
+    firstOf(new RequestIdValue, new UsernameValue).display()
 
   def main(args: Array[String]): Unit = {
     val request: LookupKey = new RequestIdValue
@@ -57,5 +64,9 @@ object CompositeTypes {
     println(record(auditedRequest))
     println(record(auditedUsername))
     println(recordGeneric(auditedRequest))
+    println(inferredLookup(true).display())
+    println(inferredLookup(false).display())
+    println(inferredAudited(false).auditLabel())
+    println(inferredGeneric())
   }
 }

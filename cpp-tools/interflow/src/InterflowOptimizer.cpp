@@ -628,6 +628,9 @@ knownValueType(const nir::Value& value,
     return value.operands.empty() ? "Unknown"
                                   : knownValueType(value.operands.front(), localTypes);
   case nir::ValueKind::If:
+    if (!value.type.empty()) {
+      return value.type;
+    }
     if (value.operands.size() == 3) {
       const std::string thenType = knownValueType(value.operands[1], localTypes);
       const std::string elseType = knownValueType(value.operands[2], localTypes);

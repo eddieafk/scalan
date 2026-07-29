@@ -1704,6 +1704,9 @@ TypedDeclaration Typechecker::typecheckDeclaration(const AstDeclaration& declara
   const bool declaredIsValueType = declaration.kind == AstDeclarationKind::Def ||
                                    declaration.kind == AstDeclarationKind::Val ||
                                    declaration.kind == AstDeclarationKind::Var;
+  if (declaredIsValueType && declared.kind == SimpleTypeKind::Unknown) {
+    inferred = widenSoftUnion(inferred);
+  }
   if (declaredIsValueType && declared.kind != SimpleTypeKind::Unknown) {
     const bool storedAny = (declaration.kind == AstDeclarationKind::Val ||
                             declaration.kind == AstDeclarationKind::Var) &&
@@ -5706,7 +5709,7 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
                       local.children.front(), blockScope,
                       declared.kind == SimpleTypeKind::Unknown ? nullptr : &declared);
         if (local.declaredType.empty()) {
-          return initializerType;
+          return widenSoftUnion(initializerType);
         }
 
         const bool targetsAny = isAnyArrayElementType(declared);
@@ -7352,48 +7355,8 @@ Typechecker::knownMemberForReceiverType(const TypeInfo& receiver,
     return true;
   };
 
-  std::function<std::vector<std::string>(const TypeInfo&)> baseTypesFor;
-  baseTypesFor = [&](const TypeInfo& type) {
-    if (type.compositeKind == CompositeTypeKind::Intersection) {
-      std::vector<std::string> result;
-      for (const TypeInfo& operand : type.compositeTypes) {
-        for (std::string base : baseTypesFor(operand)) {
-          if (std::find(result.begin(), result.end(), base) == result.end()) {
-            result.push_back(std::move(base));
-          }
-        }
-      }
-      return result;
-    }
-    if (type.compositeKind == CompositeTypeKind::Union) {
-      if (type.compositeTypes.empty()) {
-        return std::vector<std::string>{};
-      }
-      std::vector<std::string> common = baseTypesFor(type.compositeTypes.front());
-      for (std::size_t i = 1; i < type.compositeTypes.size(); ++i) {
-        const std::vector<std::string> alternatives =
-            baseTypesFor(type.compositeTypes[i]);
-        std::erase_if(common, [&](const std::string& candidate) {
-          return std::find(alternatives.begin(), alternatives.end(), candidate) ==
-                 alternatives.end();
-        });
-      }
-      return common;
-    }
-
-    std::string owner =
-        type.typeConstructorName.empty() ? type.name : type.typeConstructorName;
-    if (!memberScopes_.contains(owner) && !type.runtimeName.empty()) {
-      owner = type.runtimeName;
-    }
-    if (owner.empty()) {
-      return std::vector<std::string>{};
-    }
-    return linearizedParentsFor({owner}, globalSymbols_);
-  };
-
   if (receiver.compositeKind == CompositeTypeKind::Union) {
-    for (const std::string& commonBase : baseTypesFor(receiver)) {
+    for (const std::string& commonBase : baseTypeNamesFor(receiver)) {
       if (const SymbolInfo* member = memberForOwner(commonBase)) {
         return member;
       }
@@ -8343,8 +8306,8 @@ TypeInfo Typechecker::substituteTypeParameters(
     operand = substituteTypeParameters(operand, substitutions);
   }
   if (substituted.compositeKind != CompositeTypeKind::None) {
-    TypeInfo normalized = makeCompositeType(
-        substituted.compositeKind, std::move(substituted.compositeTypes));
+    TypeInfo normalized = makeCompositeType(substituted.compositeKind,
+                                            std::move(substituted.compositeTypes));
     normalized.dependentOwnerName = std::move(substituted.dependentOwnerName);
     normalized.dependentMemberName = std::move(substituted.dependentMemberName);
     normalized.dependentPathName = std::move(substituted.dependentPathName);
@@ -8352,6 +8315,8 @@ TypeInfo Typechecker::substituteTypeParameters(
     normalized.abstractTypeMember = substituted.abstractTypeMember;
     normalized.pathDependent = substituted.pathDependent;
     normalized.typeProjection = substituted.typeProjection;
+    normalized.softUnion =
+        substituted.softUnion && normalized.compositeKind == CompositeTypeKind::Union;
     return normalized;
   }
   for (TypeInfo& argument : substituted.typeArguments) {
@@ -8532,10 +8497,12 @@ SymbolInfo Typechecker::inferTypeApplication(
     if (isAssignable(candidate, current)) {
       return candidate;
     }
-    if (current.kind == candidate.kind) {
-      return TypeInfo{SimpleTypeKind::Unknown, "Unknown"};
+    const TypeInfo merged = commonType(current, candidate);
+    if (!merged.softUnion) {
+      return merged;
     }
-    return commonType(current, candidate);
+    const TypeInfo widened = widenSoftUnion(merged);
+    return widened.softUnion ? TypeInfo{SimpleTypeKind::Unknown, "Unknown"} : widened;
   };
 
   std::function<void(const TypeInfo&, const TypeInfo&, bool)> collectInference;
@@ -8656,7 +8623,24 @@ SymbolInfo Typechecker::inferTypeApplication(
       }
       continue;
     }
-    inferredArguments.push_back(inferred->second);
+    TypeInfo inferredArgument =
+        parameter.upperBound.compositeKind == CompositeTypeKind::Union
+            ? inferred->second
+            : widenSoftUnion(inferred->second);
+    if (inferredArgument.softUnion &&
+        parameter.upperBound.compositeKind != CompositeTypeKind::Union) {
+      complete = false;
+      inferredArguments.push_back(TypeInfo{SimpleTypeKind::Unknown, "Unknown"});
+      if (reportDiagnostics) {
+        diagnostics_.error(span,
+                           "cannot infer type argument " + parameter.name + " for " +
+                               symbol.name +
+                               " because its alternatives have no visible common base; "
+                               "use an explicit union type argument");
+      }
+      continue;
+    }
+    inferredArguments.push_back(std::move(inferredArgument));
   }
   if (inferredTypeArguments != nullptr) {
     *inferredTypeArguments = inferredArguments;
@@ -9364,7 +9348,8 @@ TypeInfo Typechecker::preliminaryDeclarationType(const AstDeclaration& declarati
 }
 
 TypeInfo Typechecker::commonType(const TypeInfo& lhs, const TypeInfo& rhs) const {
-  if (lhs.kind == rhs.kind) {
+  if (lhs.kind == rhs.kind && lhs.name == rhs.name &&
+      lhs.compositeKind == rhs.compositeKind) {
     return lhs;
   }
   if (lhs.kind == SimpleTypeKind::Unknown) {
@@ -9378,6 +9363,12 @@ TypeInfo Typechecker::commonType(const TypeInfo& lhs, const TypeInfo& rhs) const
   }
   if (rhs.kind == SimpleTypeKind::Nothing) {
     return lhs;
+  }
+  if (isAssignable(lhs, rhs)) {
+    return lhs;
+  }
+  if (isAssignable(rhs, lhs)) {
+    return rhs;
   }
 
   auto rank = [](SimpleTypeKind kind) {
@@ -9404,7 +9395,106 @@ TypeInfo Typechecker::commonType(const TypeInfo& lhs, const TypeInfo& rhs) const
   if (lhsRank != 0 && rhsRank != 0) {
     return lhsRank >= rhsRank ? lhs : rhs;
   }
+
+  const auto supportsSoftUnion = [](const TypeInfo& type) {
+    return type.kind == SimpleTypeKind::Unit || type.kind == SimpleTypeKind::Boolean ||
+           type.kind == SimpleTypeKind::Byte || type.kind == SimpleTypeKind::Short ||
+           type.kind == SimpleTypeKind::Int || type.kind == SimpleTypeKind::Long ||
+           type.kind == SimpleTypeKind::Float || type.kind == SimpleTypeKind::Double ||
+           type.kind == SimpleTypeKind::Char || type.kind == SimpleTypeKind::String ||
+           type.kind == SimpleTypeKind::Symbol || type.kind == SimpleTypeKind::Null ||
+           type.kind == SimpleTypeKind::Object;
+  };
+  if (supportsSoftUnion(lhs) && supportsSoftUnion(rhs)) {
+    TypeInfo result = makeCompositeType(CompositeTypeKind::Union, {lhs, rhs});
+    result.softUnion = result.compositeKind == CompositeTypeKind::Union;
+    return result;
+  }
   return TypeInfo{SimpleTypeKind::Unknown, "Unknown"};
+}
+
+std::vector<std::string> Typechecker::baseTypeNamesFor(const TypeInfo& type) const {
+  if (type.compositeKind == CompositeTypeKind::Intersection) {
+    std::vector<std::string> result;
+    for (const TypeInfo& operand : type.compositeTypes) {
+      for (std::string base : baseTypeNamesFor(operand)) {
+        if (std::find(result.begin(), result.end(), base) == result.end()) {
+          result.push_back(std::move(base));
+        }
+      }
+    }
+    return result;
+  }
+  if (type.compositeKind == CompositeTypeKind::Union) {
+    if (type.compositeTypes.empty()) {
+      return {};
+    }
+    std::vector<std::string> common = baseTypeNamesFor(type.compositeTypes.front());
+    for (std::size_t i = 1; i < type.compositeTypes.size(); ++i) {
+      const std::vector<std::string> alternatives =
+          baseTypeNamesFor(type.compositeTypes[i]);
+      std::erase_if(common, [&](const std::string& candidate) {
+        return std::find(alternatives.begin(), alternatives.end(), candidate) ==
+               alternatives.end();
+      });
+    }
+    return common;
+  }
+
+  std::string owner =
+      type.typeConstructorName.empty() ? type.name : type.typeConstructorName;
+  if ((!globalSymbols_.contains(owner) || !memberScopes_.contains(owner)) &&
+      !type.runtimeName.empty()) {
+    owner = type.runtimeName;
+  }
+  return owner.empty() ? std::vector<std::string>{}
+                       : linearizedParentsFor({owner}, globalSymbols_);
+}
+
+TypeInfo Typechecker::widenSoftUnion(const TypeInfo& type) const {
+  if (!type.softUnion || type.compositeKind != CompositeTypeKind::Union) {
+    return type;
+  }
+
+  const auto isTransparentBase = [](const std::string& name) {
+    static const std::unordered_set<std::string> transparent{
+        "Any",
+        "scala.Any",
+        "AnyVal",
+        "scala.AnyVal",
+        "Object",
+        std::string(support::StdNames::JavaLangObject),
+        "Matchable",
+        "scala.Matchable",
+        "scala.Product",
+        "java.lang.Comparable",
+        "java.io.Serializable",
+    };
+    return transparent.contains(name);
+  };
+
+  const std::vector<std::string> commonBases = baseTypeNamesFor(type);
+  std::vector<TypeInfo> visibleBases;
+  for (const std::string& base : commonBases) {
+    auto symbol = globalSymbols_.find(base);
+    if (symbol == globalSymbols_.end() ||
+        !isInheritableDeclaration(symbol->second.kind) ||
+        !symbol->second.typeParameters.empty() || isTransparentBase(base)) {
+      continue;
+    }
+    const bool hasMoreSpecificCommonBase = std::any_of(
+        commonBases.begin(), commonBases.end(), [&](const std::string& candidate) {
+          return candidate != base && !isTransparentBase(candidate) &&
+                 isSubtypeOf(candidate, base);
+        });
+    if (!hasMoreSpecificCommonBase) {
+      visibleBases.push_back(symbol->second.type);
+    }
+  }
+
+  return visibleBases.empty() ? type
+                              : makeCompositeType(CompositeTypeKind::Intersection,
+                                                  std::move(visibleBases));
 }
 
 bool Typechecker::isAssignable(const TypeInfo& expected, const TypeInfo& actual) const {
@@ -9420,11 +9510,10 @@ bool Typechecker::isAssignable(const TypeInfo& expected, const TypeInfo& actual)
       return true;
     }
     if (value.compositeKind == CompositeTypeKind::Union) {
-      return std::all_of(
-          value.compositeTypes.begin(), value.compositeTypes.end(),
-          [&](const TypeInfo& operand) {
-            return conforms(target, operand, allowNumericWidening);
-          });
+      return std::all_of(value.compositeTypes.begin(), value.compositeTypes.end(),
+                         [&](const TypeInfo& operand) {
+                           return conforms(target, operand, allowNumericWidening);
+                         });
     }
     if (target.compositeKind == CompositeTypeKind::Intersection) {
       return std::all_of(

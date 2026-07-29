@@ -70,6 +70,12 @@ class BothValue extends Right with Tagged {
 class BothLabels extends LeftLabel with RightLabel {
   def label(): String = "both-label"
 }
+class LeftLabelValue extends LeftLabel {
+  def label(): String = "left-label"
+}
+class RightLabelValue extends RightLabel {
+  def label(): String = "right-label"
+}
 class Box[A](val value: A)
 
 type Choice = Left | Right
@@ -121,6 +127,35 @@ object Main {
   def chooseRight(): GenericChoice[Left, Right] = new RightValue
   def chooseBoth(): Required = new BothValue
   def narrowResult(value: Required): Right = value
+  def inferredCommon(flag: Boolean) =
+    if (flag) new LeftValue else new RightValue
+  def inferredUnrelated(flag: Boolean) =
+    if (flag) new LeftLabelValue else new RightLabelValue
+  def inferredCommonTagged(flag: Boolean) =
+    if (flag) new LeftTaggedValue else new BothValue
+  def inferredScalar(flag: Boolean) = if (flag) 7 else "seven"
+  def inferredMatch(value: Int) =
+    value match {
+      case 0 => new LeftValue
+      case _ => new RightValue
+    }
+  def firstOf[A](left: A, right: A): A = left
+  def localWidened(flag: Boolean): String = {
+    val inferred =
+      if (flag) new LeftValue else new RightValue
+    inferred.commonName()
+  }
+  def localHardUnion(flag: Boolean): String = {
+    val explicit: Choice =
+      if (flag) new LeftValue else new RightValue
+    explicit.commonName()
+  }
+  def genericWidened(): String = {
+    val inferred = firstOf(new LeftValue, new RightValue)
+    inferred.commonName()
+  }
+  def unrelatedName(value: LeftLabelValue | RightLabelValue): String =
+    "unrelated"
 
   def main(args: Array[String]): Unit = {
     val localUnion: Choice = new RightValue
@@ -163,6 +198,18 @@ object Main {
     println(unionName(chooseLeft()))
     println(unionName(chooseRight()))
     println(rightName(chooseBoth()))
+    println(inferredCommon(true).commonName())
+    println(inferredCommon(false).commonName())
+    println(inferredCommonTagged(true).commonName())
+    println(inferredCommonTagged(false).tagName())
+    println(localWidened(false))
+    println(localHardUnion(true))
+    println(inferredMatch(0).commonName())
+    println(inferredMatch(1).commonName())
+    println(genericWidened())
+    println(inferredScalar(true).asInstanceOf[Int])
+    println(inferredScalar(false).asInstanceOf[String])
+    println(unrelatedName(inferredUnrelated(false)))
   }
 }
 )";
@@ -262,7 +309,10 @@ object Main {
               "generic-distributed\n"
               "distributed-target\ndistributed-source\n"
               "object\nright\nright\nright\nright\nright\nbox\n"
-              "union\nunion\nright\n" &&
+              "union\nunion\nright\n"
+              "left-common\nright-common\nleft-tagged-common\ntagged-right\n"
+              "right-common\nleft-common\n"
+              "left-common\nright-common\nleft-common\n7\nseven\nunrelated\n" &&
       !invalid.ok &&
       contains(invalid.diagnosticsText, "does not conform to declared type "
                                         "demo.invalidcompositetypes.Left | "
@@ -321,7 +371,22 @@ object Main {
                "define @demo.compositetypes.Main.chooseLeft : ()Object") &&
       contains(result.nirText,
                "define @demo.compositetypes.Main.chooseBoth : ()Object") &&
-      !contains(result.nirText, " | ") && !contains(result.nirText, " & ");
+      contains(result.nirText, "define @demo.compositetypes.Main.inferredCommon : "
+                               "(Boolean)demo.compositetypes.CommonName") &&
+      contains(result.nirText, "define @demo.compositetypes.Main.inferredUnrelated : "
+                               "(Boolean)Object") &&
+      contains(result.nirText,
+               "define @demo.compositetypes.Main.inferredCommonTagged : "
+               "(Boolean)Object") &&
+      contains(result.nirText, "define @demo.compositetypes.Main.inferredScalar : "
+                               "(Boolean)Object") &&
+      contains(result.nirText, "let %inferred : demo.compositetypes.CommonName = "
+                               "as-instance-of[demo.compositetypes.CommonName](if(") &&
+      contains(result.nirText, "let %explicit : Object = if(") &&
+      contains(result.nirText, "as-instance-of[demo.compositetypes.CommonName]"
+                               "(call %firstOf(") &&
+      contains(result.nirText, "box[Int](7)") && !contains(result.nirText, " | ") &&
+      !contains(result.nirText, " & ");
   return valid ? 0
                : fail("composite-type smoke test failed (output='" + text +
                       "', diagnostics='" + result.diagnosticsText +

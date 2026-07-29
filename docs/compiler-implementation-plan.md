@@ -1247,9 +1247,20 @@ Current scaffold status:
   constituent or common base before dispatch. Native coverage includes
   distributed intersections, identically typed members merged across an
   intersection, and rejection of same-spelled members on unrelated union
-  alternatives. Intersection members whose independently declared result
-  types need a synthesized intersection, parameterized join specialization,
-  and unconstrained union inference remain later type-system slices.
+  alternatives. Branch alternatives now produce marked soft unions for `if`
+  and desugared `match` expressions. Inferred `val`, `var`, and `def`
+  boundaries widen those unions to their minimal non-transparent shared base
+  intersection; when only transparent roots are common, the precise union is
+  retained. Generic inference performs the same widening when a visible
+  non-parameterized base exists, while explicit annotations remain hard
+  unions. Typed NIR `if` values preserve the widened result contract and box
+  scalar alternatives when the retained union erases to `Object`. Native
+  coverage verifies shared-trait, shared-intersection, unrelated, scalar,
+  match, explicit-hard-union, and generic-visible-join cases. User-declared
+  `transparent` parents, retained soft unions as unconstrained generic type
+  arguments, parameterized join specialization, and intersection members
+  whose independently declared result types need a synthesized intersection
+  remain later type-system slices.
 - Full inline call-site specialization remains a later milestone.
 - Postfix type application now supports typed `value.isInstanceOf[Target]` and
   checked `value.asInstanceOf[Target]` for known classes, traits, and objects.

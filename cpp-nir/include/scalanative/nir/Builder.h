@@ -50,6 +50,8 @@ namespace scalanative::nir {
                              std::string resultType, support::SourceSpan span = {});
 [[nodiscard]] Value ifValue(Value condition, Value thenValue, Value elseValue,
                             support::SourceSpan span = {});
+[[nodiscard]] Value ifValue(Value condition, Value thenValue, Value elseValue,
+                            std::string resultType, support::SourceSpan span = {});
 [[nodiscard]] Value whileValue(Value condition, Value body,
                                support::SourceSpan span = {});
 [[nodiscard]] Value blockValue(std::vector<Value> values,
