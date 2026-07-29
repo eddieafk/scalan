@@ -1,13 +1,36 @@
 package demo.compositetypes
 
-trait RequestId
-trait Username
-trait Audited
+trait LookupView {
+  def display(): String
+}
+trait RequestId extends LookupView {
+  def requestPart(): String
+}
+trait Username extends LookupView {
+  def usernamePart(): String
+}
+trait Audited {
+  def auditLabel(): String
+}
 
-class RequestIdValue extends RequestId
-class UsernameValue extends Username
-class AuditedRequest extends RequestId with Audited
-class AuditedUsername extends Username with Audited
+class RequestIdValue extends RequestId {
+  def display(): String = "request"
+  def requestPart(): String = "request-part"
+}
+class UsernameValue extends Username {
+  def display(): String = "username"
+  def usernamePart(): String = "username-part"
+}
+class AuditedRequest extends RequestId with Audited {
+  def display(): String = "audited-request"
+  def requestPart(): String = "audited-request-part"
+  def auditLabel(): String = "request-audit"
+}
+class AuditedUsername extends Username with Audited {
+  def display(): String = "audited-username"
+  def usernamePart(): String = "audited-username-part"
+  def auditLabel(): String = "username-audit"
+}
 
 type LookupKey = RequestId | Username
 type AuditedKey = LookupKey & Audited
@@ -15,12 +38,12 @@ type EitherOf[A, B] = A | B
 type BothOf[A, B] = A & B
 
 object CompositeTypes {
-  def route(key: LookupKey): String = "routed"
+  def route(key: LookupKey): String = key.display()
   def routeGeneric(key: EitherOf[RequestId, Username]): String =
-    "routed-generic"
-  def record(key: AuditedKey): String = "recorded"
+    key.display()
+  def record(key: AuditedKey): String = key.auditLabel()
   def recordGeneric(key: BothOf[LookupKey, Audited]): String =
-    "recorded-generic"
+    key.auditLabel()
 
   def main(args: Array[String]): Unit = {
     val request: LookupKey = new RequestIdValue

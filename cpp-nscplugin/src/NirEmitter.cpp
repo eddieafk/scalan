@@ -1149,6 +1149,89 @@ const frontend::TypedDeclaration* findMemberDeclaration(const ValueContext& cont
   return nullptr;
 }
 
+std::vector<std::string> baseTypeNamesFor(
+    const frontend::TypeInfo& type,
+    const std::unordered_map<std::string, std::vector<std::string>>& parentMap) {
+  using frontend::CompositeTypeKind;
+
+  if (type.compositeKind == CompositeTypeKind::Intersection) {
+    std::vector<std::string> result;
+    for (const frontend::TypeInfo& operand : type.compositeTypes) {
+      for (std::string base : baseTypeNamesFor(operand, parentMap)) {
+        if (std::find(result.begin(), result.end(), base) == result.end()) {
+          result.push_back(std::move(base));
+        }
+      }
+    }
+    return result;
+  }
+  if (type.compositeKind == CompositeTypeKind::Union) {
+    if (type.compositeTypes.empty()) {
+      return {};
+    }
+    std::vector<std::string> common =
+        baseTypeNamesFor(type.compositeTypes.front(), parentMap);
+    for (std::size_t i = 1; i < type.compositeTypes.size(); ++i) {
+      const std::vector<std::string> alternatives =
+          baseTypeNamesFor(type.compositeTypes[i], parentMap);
+      std::erase_if(common, [&](const std::string& candidate) {
+        return std::find(alternatives.begin(), alternatives.end(), candidate) ==
+               alternatives.end();
+      });
+    }
+    return common;
+  }
+
+  std::string owner =
+      type.typeConstructorName.empty() ? type.name : type.typeConstructorName;
+  if (!parentMap.contains(owner) && !type.runtimeName.empty()) {
+    owner = type.runtimeName;
+  }
+  return owner.empty() ? std::vector<std::string>{}
+                       : nir::linearizedTypeNames(owner, parentMap);
+}
+
+std::string compositeMemberOwner(const ValueContext& context,
+                                 const frontend::TypeInfo& type,
+                                 const std::string& memberName) {
+  using frontend::CompositeTypeKind;
+
+  if (context.declarations == nullptr) {
+    return {};
+  }
+  std::unordered_map<std::string, std::vector<std::string>> parentMap;
+  collectParentMap(*context.declarations, parentMap);
+
+  if (type.compositeKind == CompositeTypeKind::Union) {
+    for (const std::string& commonBase : baseTypeNamesFor(type, parentMap)) {
+      if (findMemberDeclaration(context, commonBase, memberName) != nullptr) {
+        return commonBase;
+      }
+    }
+    return {};
+  }
+  if (type.compositeKind == CompositeTypeKind::Intersection) {
+    for (const frontend::TypeInfo& operand : type.compositeTypes) {
+      if (const std::string owner = compositeMemberOwner(context, operand, memberName);
+          !owner.empty()) {
+        return owner;
+      }
+    }
+    return {};
+  }
+
+  std::string owner =
+      type.typeConstructorName.empty() ? type.name : type.typeConstructorName;
+  if (findMemberDeclaration(context, owner, memberName) != nullptr) {
+    return owner;
+  }
+  if (!type.runtimeName.empty() && type.runtimeName != owner &&
+      findMemberDeclaration(context, type.runtimeName, memberName) != nullptr) {
+    return type.runtimeName;
+  }
+  return {};
+}
+
 const frontend::TypedDeclaration*
 findNestedObjectDeclaration(const ValueContext& context, const std::string& ownerName,
                             const std::string& memberName) {
@@ -1262,7 +1345,13 @@ declarationForExpression(const frontend::AstExpression& expression,
     if (expression.children.empty()) {
       return nullptr;
     }
-    const std::string receiver = receiverTypeFor(expression.children.front(), context);
+    const frontend::TypeInfo* receiverType =
+        annotatedTypeFor(expression.children.front(), context);
+    const std::string receiver =
+        receiverType != nullptr &&
+                receiverType->compositeKind != frontend::CompositeTypeKind::None
+            ? compositeMemberOwner(context, *receiverType, expression.text)
+            : receiverTypeFor(expression.children.front(), context);
     if (const frontend::TypedDeclaration* member =
             findMemberDeclaration(context, receiver, expression.text)) {
       return member;
@@ -1314,8 +1403,14 @@ std::string memberReceiverType(const frontend::AstExpression& expression,
                : memberReceiverType(expression.children.front(), context);
   }
   if (expression.kind == frontend::AstExpressionKind::Select) {
-    return expression.children.empty()
-               ? std::string{}
+    if (expression.children.empty()) {
+      return {};
+    }
+    const frontend::TypeInfo* receiverType =
+        annotatedTypeFor(expression.children.front(), context);
+    return receiverType != nullptr &&
+                   receiverType->compositeKind != frontend::CompositeTypeKind::None
+               ? compositeMemberOwner(context, *receiverType, expression.text)
                : receiverTypeFor(expression.children.front(), context);
   }
   if (expression.kind == frontend::AstExpressionKind::Identifier) {
@@ -2388,9 +2483,17 @@ nir::Value valueFor(const frontend::AstExpression& expression,
         return adaptSelectedValue(nir::selectValue(
             nir::superValue(owner, expression.span), expression.text, expression.span));
       }
+      nir::Value receiver = expressionValueFor(expression.children.front(), context);
+      const frontend::TypeInfo* receiverType =
+          annotatedTypeFor(expression.children.front(), context);
+      if (receiverType != nullptr &&
+          receiverType->compositeKind != frontend::CompositeTypeKind::None &&
+          !selectedReceiver.empty()) {
+        receiver = nir::asInstanceOfValue(selectedReceiver, std::move(receiver),
+                                          expression.children.front().span);
+      }
       return adaptSelectedValue(
-          nir::selectValue(expressionValueFor(expression.children.front(), context),
-                           expression.text, expression.span));
+          nir::selectValue(std::move(receiver), expression.text, expression.span));
     }
   case AstExpressionKind::TypeApply: {
     if (expression.children.size() != 1) {

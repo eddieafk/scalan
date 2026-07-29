@@ -7297,29 +7297,24 @@ const SymbolInfo* Typechecker::selectedMember(const AstExpression& expression,
     return nullptr;
   }
 
-  std::string memberOwner = receiver.typeConstructorName.empty()
-                                ? receiver.name
-                                : receiver.typeConstructorName;
-  auto members = memberScopes_.find(memberOwner);
-  if (members == memberScopes_.end() && !receiver.runtimeName.empty() &&
-      receiver.runtimeName != memberOwner) {
-    memberOwner = receiver.runtimeName;
-    members = memberScopes_.find(memberOwner);
+  if (const SymbolInfo* member =
+          knownMemberForReceiverType(receiver, expression.text)) {
+    return member;
   }
-  if (members == memberScopes_.end()) {
+  if (receiver.compositeKind == CompositeTypeKind::Union) {
     diagnostics_.error(expression.span,
-                       "no known members for receiver: " + receiver.name);
-    return nullptr;
-  }
-
-  auto member = members->second.find(expression.text);
-  if (member == members->second.end()) {
+                       "unresolved member: " + expression.text + " on union type " +
+                           receiver.name +
+                           "; union members must come from a common base type");
+  } else if (receiver.compositeKind == CompositeTypeKind::Intersection) {
     diagnostics_.error(expression.span,
-                       "unresolved member: " + expression.text + " on " + memberOwner);
-    return nullptr;
+                       "unresolved or incompatible member: " + expression.text +
+                           " on intersection type " + receiver.name);
+  } else {
+    diagnostics_.error(expression.span, "unresolved member: " + expression.text +
+                                            " on " + receiver.name);
   }
-
-  return &member->second;
+  return nullptr;
 }
 
 const SymbolInfo*
@@ -7329,24 +7324,111 @@ Typechecker::knownMemberForReceiverType(const TypeInfo& receiver,
     return nullptr;
   }
 
-  std::string memberOwner = receiver.typeConstructorName.empty()
-                                ? receiver.name
-                                : receiver.typeConstructorName;
-  auto members = memberScopes_.find(memberOwner);
-  if (members == memberScopes_.end() && !receiver.runtimeName.empty() &&
-      receiver.runtimeName != memberOwner) {
-    memberOwner = receiver.runtimeName;
-    members = memberScopes_.find(memberOwner);
-  }
-  if (members == memberScopes_.end()) {
+  const auto memberForOwner = [&](const std::string& owner) -> const SymbolInfo* {
+    auto members = memberScopes_.find(owner);
+    if (members == memberScopes_.end()) {
+      return nullptr;
+    }
+    auto member = members->second.find(memberName);
+    return member == members->second.end() ? nullptr : &member->second;
+  };
+  const auto compatibleIntersectionMembers = [](const SymbolInfo& lhs,
+                                                const SymbolInfo& rhs) {
+    if (lhs.symbolName == rhs.symbolName) {
+      return true;
+    }
+    if (lhs.kind != rhs.kind ||
+        lhs.typeParameters.size() != rhs.typeParameters.size() ||
+        lhs.parameterTypes.size() != rhs.parameterTypes.size() ||
+        lhs.contextualParameters != rhs.contextualParameters ||
+        !typesMatchForOverride(lhs.type, rhs.type)) {
+      return false;
+    }
+    for (std::size_t i = 0; i < lhs.parameterTypes.size(); ++i) {
+      if (!typesMatchForOverride(lhs.parameterTypes[i], rhs.parameterTypes[i])) {
+        return false;
+      }
+    }
+    return true;
+  };
+
+  std::function<std::vector<std::string>(const TypeInfo&)> baseTypesFor;
+  baseTypesFor = [&](const TypeInfo& type) {
+    if (type.compositeKind == CompositeTypeKind::Intersection) {
+      std::vector<std::string> result;
+      for (const TypeInfo& operand : type.compositeTypes) {
+        for (std::string base : baseTypesFor(operand)) {
+          if (std::find(result.begin(), result.end(), base) == result.end()) {
+            result.push_back(std::move(base));
+          }
+        }
+      }
+      return result;
+    }
+    if (type.compositeKind == CompositeTypeKind::Union) {
+      if (type.compositeTypes.empty()) {
+        return std::vector<std::string>{};
+      }
+      std::vector<std::string> common = baseTypesFor(type.compositeTypes.front());
+      for (std::size_t i = 1; i < type.compositeTypes.size(); ++i) {
+        const std::vector<std::string> alternatives =
+            baseTypesFor(type.compositeTypes[i]);
+        std::erase_if(common, [&](const std::string& candidate) {
+          return std::find(alternatives.begin(), alternatives.end(), candidate) ==
+                 alternatives.end();
+        });
+      }
+      return common;
+    }
+
+    std::string owner =
+        type.typeConstructorName.empty() ? type.name : type.typeConstructorName;
+    if (!memberScopes_.contains(owner) && !type.runtimeName.empty()) {
+      owner = type.runtimeName;
+    }
+    if (owner.empty()) {
+      return std::vector<std::string>{};
+    }
+    return linearizedParentsFor({owner}, globalSymbols_);
+  };
+
+  if (receiver.compositeKind == CompositeTypeKind::Union) {
+    for (const std::string& commonBase : baseTypesFor(receiver)) {
+      if (const SymbolInfo* member = memberForOwner(commonBase)) {
+        return member;
+      }
+    }
     return nullptr;
   }
 
-  auto member = members->second.find(memberName);
-  if (member == members->second.end()) {
-    return nullptr;
+  if (receiver.compositeKind == CompositeTypeKind::Intersection) {
+    const SymbolInfo* selected = nullptr;
+    for (const TypeInfo& operand : receiver.compositeTypes) {
+      const SymbolInfo* candidate = knownMemberForReceiverType(operand, memberName);
+      if (candidate == nullptr) {
+        continue;
+      }
+      if (selected != nullptr &&
+          !compatibleIntersectionMembers(*selected, *candidate)) {
+        return nullptr;
+      }
+      if (selected == nullptr) {
+        selected = candidate;
+      }
+    }
+    return selected;
   }
-  return &member->second;
+
+  std::string memberOwner = receiver.typeConstructorName.empty()
+                                ? receiver.name
+                                : receiver.typeConstructorName;
+  if (const SymbolInfo* member = memberForOwner(memberOwner)) {
+    return member;
+  }
+  if (!receiver.runtimeName.empty() && receiver.runtimeName != memberOwner) {
+    return memberForOwner(receiver.runtimeName);
+  }
+  return nullptr;
 }
 
 const SymbolInfo* Typechecker::qualifiedPathSymbol(const std::string& name,
@@ -8290,6 +8372,16 @@ TypeInfo Typechecker::substituteTypeParameters(
 
 SymbolInfo Typechecker::specializeMemberForReceiver(const SymbolInfo& member,
                                                     const TypeInfo& receiver) const {
+  if (receiver.compositeKind != CompositeTypeKind::None) {
+    for (const TypeInfo& operand : receiver.compositeTypes) {
+      if (const SymbolInfo* candidate =
+              knownMemberForReceiverType(operand, member.name);
+          candidate != nullptr && candidate->symbolName == member.symbolName) {
+        return specializeMemberForReceiver(member, operand);
+      }
+    }
+    return member;
+  }
   if (receiver.typeConstructorName.empty() || receiver.typeArguments.empty()) {
     return member;
   }

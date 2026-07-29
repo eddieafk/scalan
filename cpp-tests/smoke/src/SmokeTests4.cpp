@@ -30,14 +30,46 @@ std::string readTextFile(const std::filesystem::path& path) {
 int smokeCompositeTypes() {
   constexpr const char* source = R"(package demo.compositetypes
 
-trait Left
-trait Right
-trait Tagged
+trait CommonName {
+  def commonName(): String
+}
+trait Left extends CommonName {
+  def leftName(): String
+}
+trait Right extends CommonName {
+  def rightName(): String
+}
+trait Tagged {
+  def tagName(): String
+}
+trait LeftLabel {
+  def label(): String
+}
+trait RightLabel {
+  def label(): String
+}
 
-class LeftValue extends Left
-class LeftTaggedValue extends Left with Tagged
-class RightValue extends Right
-class BothValue extends Right with Tagged
+class LeftValue extends Left {
+  def commonName(): String = "left-common"
+  def leftName(): String = "left-only"
+}
+class LeftTaggedValue extends Left with Tagged {
+  def commonName(): String = "left-tagged-common"
+  def leftName(): String = "left-tagged-only"
+  def tagName(): String = "tagged-left"
+}
+class RightValue extends Right {
+  def commonName(): String = "right-common"
+  def rightName(): String = "right-only"
+}
+class BothValue extends Right with Tagged {
+  def commonName(): String = "both-common"
+  def rightName(): String = "both-right"
+  def tagName(): String = "tagged-right"
+}
+class BothLabels extends LeftLabel with RightLabel {
+  def label(): String = "both-label"
+}
 class Box[A](val value: A)
 
 type Choice = Left | Right
@@ -61,13 +93,21 @@ object Main {
   def aliasUnionName(value: Choice): String = "alias-union"
   def genericUnionName(value: GenericChoice[Left, Right]): String =
     "generic-union"
+  def projectedCommonName(value: Choice): String = value.commonName()
   def intersectionName(value: Right & Tagged): String = "intersection"
+  def projectedRightName(value: Required): String = value.rightName()
+  def projectedTagName(value: Required): String = value.tagName()
+  def projectedMergedLabel(value: LeftLabel & RightLabel): String =
+    value.label()
   def genericIntersectionName(
       value: GenericRequired[Right, Tagged]): String =
     "generic-intersection"
   def precedenceName(value: Left | Right & Tagged): String = "precedence"
   def groupedName(value: GroupedRequired): String = "grouped"
   def nestedName(value: NestedRequired): String = "nested"
+  def projectedNestedCommonName(value: NestedRequired): String =
+    value.commonName()
+  def projectedNestedTagName(value: NestedRequired): String = value.tagName()
   def genericDistributedName(value: GenericDistributed): String =
     "generic-distributed"
   def distributedTargetName(value: DistributedTarget): String =
@@ -96,13 +136,20 @@ object Main {
     println(unionName(new RightValue))
     println(aliasUnionName(unionField))
     println(genericUnionName(localUnion))
+    println(projectedCommonName(new LeftValue))
+    println(projectedCommonName(localUnion))
     println(intersectionName(new BothValue))
+    println(projectedRightName(localIntersection))
+    println(projectedTagName(localIntersection))
+    println(projectedMergedLabel(new BothLabels))
     println(genericIntersectionName(localIntersection))
     println(precedenceName(new LeftValue))
     println(precedenceName(new BothValue))
     println(groupedName(new LeftTaggedValue))
     println(groupedName(new BothValue))
     println(nestedName(nestedIntersection))
+    println(projectedNestedCommonName(nestedIntersection))
+    println(projectedNestedTagName(nestedIntersection))
     println(genericDistributedName(genericDistributed))
     println(distributedTargetName(distributedSource))
     println(distributedSourceName(distributedTarget))
@@ -122,11 +169,19 @@ object Main {
   constexpr const char* invalidSource =
       R"(package demo.invalidcompositetypes
 
-trait Left
-trait Right
+trait Left {
+  def commonSpelling(): String
+}
+trait Right {
+  def commonSpelling(): String
+}
 trait Tagged
-class LeftValue extends Left
-class RightValue extends Right
+class LeftValue extends Left {
+  def commonSpelling(): String = "left"
+}
+class RightValue extends Right {
+  def commonSpelling(): String = "right"
+}
 class Other
 
 object Main {
@@ -134,6 +189,8 @@ object Main {
   def intersection(value: Left & Tagged): Int = 2
   def needLeft(value: Left): Int = 3
   def grouped(value: (Left | Right) & Tagged): Int = 4
+  def invalidUnionProjection(value: Left | Right): String =
+    value.commonSpelling()
 
   val badUnion: Left | Right = new Other
   val badIntersection: Left & Tagged = new LeftValue
@@ -175,20 +232,17 @@ object Main {
       driver.buildSource("CompositeTypes.scala", source, options, diagnostics);
 
   scalanative::support::DiagnosticEngine invalidDiagnostics;
-  const scalanative::tools::build::BuildResult invalid =
-      driver.buildSource("InvalidCompositeTypes.scala", invalidSource, {},
-                         invalidDiagnostics);
+  const scalanative::tools::build::BuildResult invalid = driver.buildSource(
+      "InvalidCompositeTypes.scala", invalidSource, {}, invalidDiagnostics);
   scalanative::support::DiagnosticEngine malformedDiagnostics;
-  const scalanative::tools::build::BuildResult malformed =
-      driver.buildSource("MalformedCompositeTypes.scala", malformedSource, {},
-                         malformedDiagnostics);
+  const scalanative::tools::build::BuildResult malformed = driver.buildSource(
+      "MalformedCompositeTypes.scala", malformedSource, {}, malformedDiagnostics);
 
   if (!result.ok) {
     if (contains(result.diagnosticsText, "clang toolchain not found")) {
       return 0;
     }
-    return fail("composite-type native build failed: " +
-                result.diagnosticsText);
+    return fail("composite-type native build failed: " + result.diagnosticsText);
   }
 
   const std::string command = binary.string() + " > " + output.string();
@@ -200,39 +254,42 @@ object Main {
   const bool valid =
       status == 0 &&
       text == "union\nunion\nalias-union\ngeneric-union\n"
-              "intersection\ngeneric-intersection\n"
+              "left-common\nright-common\n"
+              "intersection\nboth-right\ntagged-right\nboth-label\n"
+              "generic-intersection\n"
               "precedence\nprecedence\ngrouped\ngrouped\nnested\n"
+              "left-tagged-common\ntagged-left\n"
               "generic-distributed\n"
               "distributed-target\ndistributed-source\n"
               "object\nright\nright\nright\nright\nright\nbox\n"
               "union\nunion\nright\n" &&
       !invalid.ok &&
-      contains(invalid.diagnosticsText,
-               "does not conform to declared type "
-               "demo.invalidcompositetypes.Left | "
-               "demo.invalidcompositetypes.Right") &&
-      contains(invalid.diagnosticsText,
-               "does not conform to declared type "
-               "demo.invalidcompositetypes.Left & "
-               "demo.invalidcompositetypes.Tagged") &&
-      contains(invalid.diagnosticsText,
-               "does not conform to parameter type "
-               "demo.invalidcompositetypes.Left | "
-               "demo.invalidcompositetypes.Right") &&
-      contains(invalid.diagnosticsText,
-               "does not conform to parameter type "
-               "demo.invalidcompositetypes.Left & "
-               "demo.invalidcompositetypes.Tagged") &&
-      contains(invalid.diagnosticsText,
-               "does not conform to parameter type "
-               "demo.invalidcompositetypes.Left & "
-               "demo.invalidcompositetypes.Tagged | "
-               "demo.invalidcompositetypes.Right & "
-               "demo.invalidcompositetypes.Tagged") &&
+      contains(invalid.diagnosticsText, "does not conform to declared type "
+                                        "demo.invalidcompositetypes.Left | "
+                                        "demo.invalidcompositetypes.Right") &&
+      contains(invalid.diagnosticsText, "does not conform to declared type "
+                                        "demo.invalidcompositetypes.Left & "
+                                        "demo.invalidcompositetypes.Tagged") &&
+      contains(invalid.diagnosticsText, "does not conform to parameter type "
+                                        "demo.invalidcompositetypes.Left | "
+                                        "demo.invalidcompositetypes.Right") &&
+      contains(invalid.diagnosticsText, "does not conform to parameter type "
+                                        "demo.invalidcompositetypes.Left & "
+                                        "demo.invalidcompositetypes.Tagged") &&
+      contains(invalid.diagnosticsText, "does not conform to parameter type "
+                                        "demo.invalidcompositetypes.Left & "
+                                        "demo.invalidcompositetypes.Tagged | "
+                                        "demo.invalidcompositetypes.Right & "
+                                        "demo.invalidcompositetypes.Tagged") &&
       contains(invalid.diagnosticsText,
                "type demo.invalidcompositetypes.Left | "
                "demo.invalidcompositetypes.Right does not conform to parameter "
                "type demo.invalidcompositetypes.Left") &&
+      contains(invalid.diagnosticsText,
+               "unresolved member: commonSpelling on union type "
+               "demo.invalidcompositetypes.Left | "
+               "demo.invalidcompositetypes.Right; union members must come from "
+               "a common base type") &&
       !malformed.ok &&
       contains(malformed.diagnosticsText,
                "malformed intersection or union type: Left |") &&
@@ -243,31 +300,33 @@ object Main {
                "Object") &&
       contains(result.nirText,
                "define @demo.compositetypes.Main.unionName : (Object)String") &&
-      contains(result.nirText,
-               "define @demo.compositetypes.Main.intersectionName : "
-               "(Object)String") &&
-      contains(result.nirText,
-               "let %localUnion : Object = new "
-               "demo.compositetypes.RightValue") &&
-      contains(result.nirText,
-               "let %localIntersection : Object = new "
-               "demo.compositetypes.BothValue") &&
+      contains(result.nirText, "define @demo.compositetypes.Main.intersectionName : "
+                               "(Object)String") &&
+      contains(result.nirText, "let %localUnion : Object = new "
+                               "demo.compositetypes.RightValue") &&
+      contains(result.nirText, "let %localIntersection : Object = new "
+                               "demo.compositetypes.BothValue") &&
       contains(result.nirText,
                "call %rightName(as-instance-of[demo.compositetypes.Right]"
                "(%localIntersection))") &&
+      contains(result.nirText, "as-instance-of[demo.compositetypes.CommonName](%value)"
+                               ".commonName") &&
+      contains(result.nirText,
+               "as-instance-of[demo.compositetypes.Right](%value).rightName") &&
+      contains(result.nirText,
+               "as-instance-of[demo.compositetypes.Tagged](%value).tagName") &&
+      contains(result.nirText,
+               "as-instance-of[demo.compositetypes.LeftLabel](%value).label") &&
       contains(result.nirText,
                "define @demo.compositetypes.Main.chooseLeft : ()Object") &&
       contains(result.nirText,
                "define @demo.compositetypes.Main.chooseBoth : ()Object") &&
-      !contains(result.nirText, " | ") &&
-      !contains(result.nirText, " & ");
-  return valid
-             ? 0
-             : fail("composite-type smoke test failed (output='" + text +
-                    "', diagnostics='" + result.diagnosticsText +
-                    "', invalid-diagnostics='" + invalid.diagnosticsText +
-                    "', malformed-diagnostics='" +
-                    malformed.diagnosticsText + "')");
+      !contains(result.nirText, " | ") && !contains(result.nirText, " & ");
+  return valid ? 0
+               : fail("composite-type smoke test failed (output='" + text +
+                      "', diagnostics='" + result.diagnosticsText +
+                      "', invalid-diagnostics='" + invalid.diagnosticsText +
+                      "', malformed-diagnostics='" + malformed.diagnosticsText + "')");
 }
 
 } // namespace

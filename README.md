@@ -89,7 +89,8 @@ build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
   cpp-examples/ContextualAbstractions.scala
 
 # Compile explicit Scala 3 union/intersection types across parameters, results,
-# locals, nested generic arguments, and generic type aliases.
+# locals, nested generic arguments, generic type aliases, and members projected
+# from intersection constituents or a union's shared base-type join.
 build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
   --output /tmp/composite-types \
   cpp-examples/CompositeTypes.scala

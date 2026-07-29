@@ -1240,8 +1240,16 @@ Current scaffold status:
   incremental smoke translation unit verifies runtime behavior, generic alias
   substitution, Object ABI lowering,
   precedence/grouping, distributivity, rejection in both conformance
-  directions, and malformed syntax. Common-member projection and unconstrained
-  union inference remain later type-system slices.
+  directions, and malformed syntax. Composite receivers now support member
+  projection as well: intersections expose compatible members from either
+  constituent, while unions expose members inherited through their shared
+  base-type join. NIR narrows the Object-erased receiver to the selected
+  constituent or common base before dispatch. Native coverage includes
+  distributed intersections, identically typed members merged across an
+  intersection, and rejection of same-spelled members on unrelated union
+  alternatives. Intersection members whose independently declared result
+  types need a synthesized intersection, parameterized join specialization,
+  and unconstrained union inference remain later type-system slices.
 - Full inline call-site specialization remains a later milestone.
 - Postfix type application now supports typed `value.isInstanceOf[Target]` and
   checked `value.asInstanceOf[Target]` for known classes, traits, and objects.
