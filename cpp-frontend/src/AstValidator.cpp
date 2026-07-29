@@ -226,6 +226,42 @@ bool AstValidator::validateDeclaration(const AstDeclaration& declaration,
                       "contextual parameter metadata is inconsistent");
     ok = false;
   }
+  if (declaration.parameterClauseSizes.size() !=
+      declaration.contextualParameterClauses.size()) {
+    diagnostics.error(declaration.span,
+                      "parameter-clause metadata is inconsistent");
+    ok = false;
+  } else if (!declaration.parameterClauseSizes.empty()) {
+    std::size_t parameterIndex = 0;
+    for (std::size_t clauseIndex = 0;
+         clauseIndex < declaration.parameterClauseSizes.size(); ++clauseIndex) {
+      const std::size_t clauseEnd =
+          parameterIndex + declaration.parameterClauseSizes[clauseIndex];
+      if (clauseEnd > declaration.parameters.size()) {
+        diagnostics.error(declaration.span,
+                          "parameter-clause metadata exceeds the parameter list");
+        ok = false;
+        break;
+      }
+      for (; parameterIndex < clauseEnd; ++parameterIndex) {
+        if (parameterIndex >= declaration.contextualParameters.size() ||
+            declaration.contextualParameters[parameterIndex] !=
+                declaration.contextualParameterClauses[clauseIndex]) {
+          diagnostics.error(
+              declaration.span,
+              "parameter-clause contextual metadata is inconsistent");
+          ok = false;
+          break;
+        }
+      }
+    }
+    if (parameterIndex != declaration.parameters.size()) {
+      diagnostics.error(declaration.span,
+                        "parameter-clause metadata does not cover the parameter "
+                        "list");
+      ok = false;
+    }
+  }
   ok = validateParameterNames(declaration.parameters, declaration.span, diagnostics) &&
        ok;
   for (std::size_t i = 0; i < declaration.contextualParameters.size(); ++i) {

@@ -79,6 +79,8 @@ struct TypedDeclaration {
   std::vector<std::string> parameters;
   std::vector<TypeInfo> parameterTypes;
   std::vector<bool> contextualParameters;
+  std::vector<std::size_t> parameterClauseSizes;
+  std::vector<bool> contextualParameterClauses;
   std::vector<std::string> accessorParameters;
   std::string declaredType;
   std::string lowerBound;
@@ -168,6 +170,8 @@ struct SymbolInfo {
   std::vector<std::string> parameters;
   std::vector<TypeInfo> parameterTypes;
   std::vector<bool> contextualParameters;
+  std::vector<std::size_t> parameterClauseSizes;
+  std::vector<bool> contextualParameterClauses;
   bool hasImplementation = true;
   bool isGiven = false;
   bool isAnonymousGiven = false;

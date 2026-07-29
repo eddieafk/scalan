@@ -56,6 +56,24 @@ object Selectors {
 
   inline def inferredFromContext[A]()(using named: Named[A]): String =
     prefix + named.label()
+
+  inline def curried[A](first: String)(second: String): String =
+    summonFrom {
+      case found: Named[A] =>
+        prefix + found.label() + ":" + first + ":" + first + ":" + second + ":" + second
+      case _ => "curried-fallback"
+    }
+
+  inline def nestedCurried[A](first: String)(second: String): String =
+    "nested-curried:" + curried[A](first)(second)
+
+  inline def curriedContextual[A](first: String)(second: String)(
+      using named: Named[A]): String =
+    prefix + named.label() + ":" + first + ":" + second
+
+  inline def inferredCurried[A](value: A)(suffix: String)(
+      using named: Named[A]): String =
+    prefix + named.label() + ":" + suffix
 }
 
 class InstanceSelectors(val instancePrefix: String) {
@@ -74,6 +92,10 @@ class InstanceSelectors(val instancePrefix: String) {
   inline def inferred[A](value: A): String = instancePrefix + "inferred"
 
   inline def thisPrefix[A](): String = this.instancePrefix
+
+  inline def curried[A](first: String)(second: String)(
+      using named: Named[A]): String =
+    instancePrefix + named.label() + ":" + first + ":" + second
 }
 
 trait TraitInstanceSelectors {
@@ -171,6 +193,16 @@ object Main {
     new TraitInstanceSelectorsValue("effectful-trait:")
   }
 
+  def nextFirst(): String = {
+    println("first-effect")
+    "first"
+  }
+
+  def nextSecond(): String = {
+    println("second-effect")
+    "second"
+  }
+
   def main(args: Array[String]): Unit = {
     println(Selectors.selected[Int])
 
@@ -255,5 +287,14 @@ object Main {
     println(new InstanceSelectors("constructed-instance:").selected[Int]())
     println(instanceHolder.value.selected[Int]())
     println(nextTraitInstances().traitSelected[Int]())
+    println(Selectors.curried[Int](nextFirst())(nextSecond()))
+    println(Selectors.nestedCurried[Int]("left")("right"))
+    println(
+      Selectors.curriedContextual[Int]("context-first")("context-second"))
+    println(
+      Selectors.curriedContextual[String]("explicit-first")("explicit-second")(using
+        new NamedValue[String]("explicit-curried")))
+    println(Selectors.inferredCurried(21)("inferred-second"))
+    println(nextInstances().curried[Int](nextFirst())(nextSecond()))
   }
 }

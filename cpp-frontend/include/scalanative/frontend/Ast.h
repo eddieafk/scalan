@@ -91,6 +91,7 @@ struct AstExpression {
   bool isGiven = false;
   bool isLegacyImplicit = false;
   bool isAnonymousGiven = false;
+  bool isFlattenedCall = false;
 };
 
 struct AstClassBodyItem {
@@ -111,6 +112,8 @@ struct AstDeclaration {
   std::vector<AstTypeParameter> typeParameters;
   std::vector<std::string> parameters;
   std::vector<bool> contextualParameters;
+  std::vector<std::size_t> parameterClauseSizes;
+  std::vector<bool> contextualParameterClauses;
   std::string declaredType;
   std::string lowerBound;
   std::string upperBound;

@@ -1640,6 +1640,9 @@ TypedDeclaration Typechecker::typecheckDeclaration(const AstDeclaration& declara
                                         &typed.parameterTypes, &declaration.span);
   typed.contextualParameters = declaration.contextualParameters;
   typed.contextualParameters.resize(typed.parameters.size(), false);
+  typed.parameterClauseSizes = declaration.parameterClauseSizes;
+  typed.contextualParameterClauses =
+      declaration.contextualParameterClauses;
   if (typed.isInline) {
     if (typed.typeParameters.empty()) {
       diagnostics_.error(
@@ -1791,6 +1794,9 @@ TypedDeclaration Typechecker::typecheckDeclaration(const AstDeclaration& declara
       imported.parameters = symbol.parameters;
       imported.parameterTypes = symbol.parameterTypes;
       imported.contextualParameters = symbol.contextualParameters;
+      imported.parameterClauseSizes = symbol.parameterClauseSizes;
+      imported.contextualParameterClauses =
+          symbol.contextualParameterClauses;
       imported.isGiven = symbol.isGiven;
       imported.isAnonymousGiven = symbol.isAnonymousGiven;
       typed.members.push_back(std::move(imported));
@@ -1827,6 +1833,8 @@ TypedDeclaration Typechecker::typecheckDeclaration(const AstDeclaration& declara
     symbol.parameters = typed.parameters;
     symbol.parameterTypes = typed.parameterTypes;
     symbol.contextualParameters = typed.contextualParameters;
+    symbol.parameterClauseSizes = declaration.parameterClauseSizes;
+    symbol.contextualParameterClauses = declaration.contextualParameterClauses;
     symbol.isGiven = typed.isGiven;
     symbol.isAnonymousGiven = typed.isAnonymousGiven;
     symbol.isTransparent = declaration.isTransparent;
@@ -2088,6 +2096,9 @@ TypedDeclaration Typechecker::typecheckDeclaration(const AstDeclaration& declara
     updated.parameters = typedMember.parameters;
     updated.parameterTypes = typedMember.parameterTypes;
     updated.contextualParameters = typedMember.contextualParameters;
+    updated.parameterClauseSizes = typedMember.parameterClauseSizes;
+    updated.contextualParameterClauses =
+        typedMember.contextualParameterClauses;
     updated.isGiven = typedMember.isGiven;
     updated.isInline = typedMember.isInline;
     if (typedMember.isInline) {
@@ -2638,6 +2649,8 @@ void Typechecker::collectDeclaration(const AstDeclaration& declaration,
   symbol.parameters = declaration.parameters;
   symbol.contextualParameters = declaration.contextualParameters;
   symbol.contextualParameters.resize(declaration.parameters.size(), false);
+  symbol.parameterClauseSizes = declaration.parameterClauseSizes;
+  symbol.contextualParameterClauses = declaration.contextualParameterClauses;
   symbol.isGiven = declaration.isGiven;
   symbol.isAnonymousGiven = declaration.isAnonymousGiven;
   symbol.isTransparent = declaration.isTransparent;
@@ -5016,65 +5029,152 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
     if (expression.children.empty()) {
       return TypeInfo{SimpleTypeKind::Unknown, "Unknown"};
     }
-    const AstExpression& firstClause = expression.children.front();
-    if (firstClause.kind == AstExpressionKind::Call &&
-        !firstClause.children.empty()) {
-      const AstExpression* targetExpression = &firstClause.children.front();
-      if (targetExpression->kind == AstExpressionKind::TypeApply &&
-          targetExpression->children.size() == 1) {
-        targetExpression = &targetExpression->children.front();
+    std::vector<const AstExpression*> callClauses;
+    const AstExpression* rootCallee = &expression;
+    while (rootCallee->kind == AstExpressionKind::Call &&
+           !rootCallee->children.empty()) {
+      callClauses.push_back(rootCallee);
+      rootCallee = &rootCallee->children.front();
+    }
+    const AstExpression* targetExpression = rootCallee;
+    if (targetExpression->kind == AstExpressionKind::TypeApply &&
+        targetExpression->children.size() == 1) {
+      targetExpression = &targetExpression->children.front();
+    }
+
+    const SymbolInfo* multiClauseTarget = nullptr;
+    if (targetExpression->kind == AstExpressionKind::Identifier) {
+      if (auto found = scope.find(targetExpression->text); found != scope.end()) {
+        multiClauseTarget = &found->second;
+      }
+    } else if (targetExpression->kind == AstExpressionKind::Select &&
+               targetExpression->children.size() == 1) {
+      const AstExpression& receiverExpression =
+          targetExpression->children.front();
+      if (receiverExpression.kind == AstExpressionKind::Identifier) {
+        if (auto found = scope.find(receiverExpression.text);
+            found != scope.end()) {
+          multiClauseTarget =
+              knownMemberForReceiverType(found->second.type,
+                                         targetExpression->text);
+        }
+      } else {
+        const TypeInfo receiver =
+            inferExpressionType(receiverExpression, scope);
+        multiClauseTarget =
+            knownMemberForReceiverType(receiver, targetExpression->text);
+      }
+    } else if (targetExpression->kind == AstExpressionKind::New) {
+      multiClauseTarget = qualifiedPathSymbol(targetExpression->text, &scope);
+    }
+
+    std::vector<std::size_t> sourceClauseSizes;
+    sourceClauseSizes.reserve(callClauses.size());
+    for (auto clause = callClauses.rbegin(); clause != callClauses.rend();
+         ++clause) {
+      sourceClauseSizes.push_back((*clause)->children.size() - 1);
+    }
+    const auto matchesDeclaredClauses = [&] {
+      if (multiClauseTarget == nullptr ||
+          multiClauseTarget->parameterClauseSizes.empty() ||
+          multiClauseTarget->parameterClauseSizes.size() !=
+              multiClauseTarget->contextualParameterClauses.size()) {
+        return true;
       }
 
-      const SymbolInfo* explicitContextTarget = nullptr;
-      if (targetExpression->kind == AstExpressionKind::Identifier) {
-        if (auto found = scope.find(targetExpression->text); found != scope.end()) {
-          explicitContextTarget = &found->second;
-        }
-      } else if (targetExpression->kind == AstExpressionKind::Select &&
-                 targetExpression->children.size() == 1) {
-        const AstExpression& receiverExpression =
-            targetExpression->children.front();
-        if (receiverExpression.kind == AstExpressionKind::Identifier) {
-          if (auto found = scope.find(receiverExpression.text);
-              found != scope.end()) {
-            explicitContextTarget =
-                knownMemberForReceiverType(found->second.type,
-                                           targetExpression->text);
-          }
+      std::vector<std::size_t> ordinaryClauseSizes;
+      std::size_t contextualArgumentCount = 0;
+      for (std::size_t index = 0;
+           index < multiClauseTarget->parameterClauseSizes.size(); ++index) {
+        if (multiClauseTarget->contextualParameterClauses[index]) {
+          contextualArgumentCount +=
+              multiClauseTarget->parameterClauseSizes[index];
         } else {
-          const TypeInfo receiver =
-              inferExpressionType(receiverExpression, scope);
-          explicitContextTarget =
-              knownMemberForReceiverType(receiver, targetExpression->text);
+          ordinaryClauseSizes.push_back(
+              multiClauseTarget->parameterClauseSizes[index]);
         }
-      } else if (targetExpression->kind == AstExpressionKind::New) {
-        explicitContextTarget =
-            qualifiedPathSymbol(targetExpression->text, &scope);
       }
 
-      if (explicitContextTarget != nullptr) {
-        const auto firstContext =
-            std::find(explicitContextTarget->contextualParameters.begin(),
-                      explicitContextTarget->contextualParameters.end(), true);
-        const std::size_t firstContextIndex = static_cast<std::size_t>(
-            std::distance(explicitContextTarget->contextualParameters.begin(),
-                          firstContext));
-        const bool hasTrailingContextClause =
-            firstContext != explicitContextTarget->contextualParameters.end() &&
-            std::all_of(firstContext,
-                        explicitContextTarget->contextualParameters.end(),
-                        [](bool contextual) { return contextual; });
-        if (hasTrailingContextClause &&
-            firstClause.children.size() - 1 == firstContextIndex &&
-            expression.children.size() - 1 ==
-                explicitContextTarget->parameterTypes.size() - firstContextIndex) {
-          AstExpression flattened = firstClause;
-          flattened.span = expression.span;
-          flattened.children.insert(flattened.children.end(),
-                                    expression.children.begin() + 1,
-                                    expression.children.end());
-          return inferExpressionType(flattened, scope, expectedType);
+      if (sourceClauseSizes == ordinaryClauseSizes ||
+          sourceClauseSizes == multiClauseTarget->parameterClauseSizes) {
+        return true;
+      }
+      if (contextualArgumentCount != 0 && !ordinaryClauseSizes.empty() &&
+          sourceClauseSizes.size() == ordinaryClauseSizes.size()) {
+        for (std::size_t index = 0;
+             index + 1 < ordinaryClauseSizes.size(); ++index) {
+          if (sourceClauseSizes[index] != ordinaryClauseSizes[index]) {
+            return false;
+          }
         }
+        return sourceClauseSizes.back() ==
+               ordinaryClauseSizes.back() + contextualArgumentCount;
+      }
+      return false;
+    };
+
+    if (!expression.isFlattenedCall && multiClauseTarget != nullptr &&
+        multiClauseTarget->isInline &&
+        !matchesDeclaredClauses()) {
+      const auto clauseShape = [](const std::vector<std::size_t>& sizes) {
+        std::string result;
+        for (std::size_t size : sizes) {
+          result += "(" + std::to_string(size) + ")";
+        }
+        return result;
+      };
+      diagnostics_.error(
+          expression.span,
+          "inline call to " + multiClauseTarget->name +
+              " must preserve its declared ordinary argument clauses; found " +
+              clauseShape(sourceClauseSizes) + " but expected " +
+              clauseShape(multiClauseTarget->parameterClauseSizes));
+      return multiClauseTarget->type;
+    }
+
+    if (callClauses.size() > 1 && multiClauseTarget != nullptr) {
+      const auto firstContext =
+          std::find(multiClauseTarget->contextualParameters.begin(),
+                    multiClauseTarget->contextualParameters.end(), true);
+      const std::size_t firstContextIndex = static_cast<std::size_t>(
+          std::distance(multiClauseTarget->contextualParameters.begin(),
+                        firstContext));
+      const bool hasTrailingContextClause =
+          firstContext != multiClauseTarget->contextualParameters.end() &&
+          std::all_of(firstContext,
+                      multiClauseTarget->contextualParameters.end(),
+                      [](bool contextual) { return contextual; });
+
+      std::size_t sourceArgumentCount = 0;
+      for (const AstExpression* clause : callClauses) {
+        sourceArgumentCount += clause->children.size() - 1;
+      }
+      const std::size_t parameterCount = multiClauseTarget->parameterTypes.size();
+      const bool completeInlineApplication =
+          multiClauseTarget->isInline &&
+          (sourceArgumentCount == parameterCount ||
+           (hasTrailingContextClause &&
+            sourceArgumentCount == firstContextIndex));
+      const AstExpression& firstClause = *callClauses.back();
+      const bool explicitTrailingContextApplication =
+          callClauses.size() == 2 && hasTrailingContextClause &&
+          firstClause.children.size() - 1 == firstContextIndex &&
+          expression.children.size() - 1 ==
+              parameterCount - firstContextIndex;
+      if (completeInlineApplication ||
+          explicitTrailingContextApplication) {
+        AstExpression flattened;
+        flattened.kind = AstExpressionKind::Call;
+        flattened.span = expression.span;
+        flattened.isFlattenedCall = true;
+        flattened.children.push_back(*rootCallee);
+        for (auto clause = callClauses.rbegin(); clause != callClauses.rend();
+             ++clause) {
+          flattened.children.insert(flattened.children.end(),
+                                    (*clause)->children.begin() + 1,
+                                    (*clause)->children.end());
+        }
+        return inferExpressionType(flattened, scope, expectedType);
       }
     }
     if (isZoneScopedCall(expression)) {

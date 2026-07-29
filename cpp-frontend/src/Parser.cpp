@@ -136,6 +136,8 @@ void appendContextBoundParameters(AstDeclaration& declaration) {
   declaration.contextualParameters.insert(declaration.contextualParameters.begin() +
                                               insertionIndex,
                                           contextParameters.size(), true);
+  declaration.parameterClauseSizes.clear();
+  declaration.contextualParameterClauses.clear();
 }
 
 AstExpression makeFormatExpression(AstExpression value, std::string target,
@@ -298,7 +300,7 @@ AstDeclaration Parser::parseDeclaration() {
       synchronize();
       return {};
     }
-    AstDeclaration declaration = parseDef(previous());
+    AstDeclaration declaration = parseDef(previous(), true);
     declaration.isInline = true;
     declaration.span = modifier.span;
     return declaration;
@@ -443,6 +445,8 @@ AstDeclaration Parser::parseObjectLike(AstDeclarationKind kind, const Token& key
                                   parameters.end());
     declaration.contextualParameters.insert(declaration.contextualParameters.end(),
                                             parameters.size(), contextualClause);
+    declaration.parameterClauseSizes.push_back(parameters.size());
+    declaration.contextualParameterClauses.push_back(contextualClause);
     sawParameterClause = true;
     sawContextualClause = sawContextualClause || contextualClause;
   }
@@ -700,7 +704,8 @@ AstDeclaration Parser::parseType(const Token& keyword) {
   return declaration;
 }
 
-AstDeclaration Parser::parseDef(const Token& keyword) {
+AstDeclaration Parser::parseDef(const Token& keyword,
+                                bool allowMultipleOrdinaryClauses) {
   AstDeclaration declaration;
   declaration.kind = AstDeclarationKind::Def;
   declaration.span = keyword.span;
@@ -724,7 +729,8 @@ AstDeclaration Parser::parseDef(const Token& keyword) {
     if (sawContextualClause && !contextualClause) {
       diagnostics_.error(keyword.span,
                          "ordinary parameter clauses cannot follow a using clause");
-    } else if (sawParameterClause && !contextualClause) {
+    } else if (sawParameterClause && !contextualClause &&
+               !allowMultipleOrdinaryClauses) {
       diagnostics_.error(keyword.span,
                          "multiple ordinary parameter clauses are not supported; "
                          "a trailing using clause is supported");
@@ -733,6 +739,8 @@ AstDeclaration Parser::parseDef(const Token& keyword) {
                                   parameters.end());
     declaration.contextualParameters.insert(declaration.contextualParameters.end(),
                                             parameters.size(), contextualClause);
+    declaration.parameterClauseSizes.push_back(parameters.size());
+    declaration.contextualParameterClauses.push_back(contextualClause);
     sawParameterClause = true;
     sawContextualClause = sawContextualClause || contextualClause;
   }

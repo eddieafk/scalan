@@ -33,7 +33,8 @@ private:
   [[nodiscard]] AstDeclaration parseImport(const Token& keyword);
   [[nodiscard]] AstDeclaration parseOverride(const Token& keyword);
   [[nodiscard]] AstDeclaration parseType(const Token& keyword);
-  [[nodiscard]] AstDeclaration parseDef(const Token& keyword);
+  [[nodiscard]] AstDeclaration
+  parseDef(const Token& keyword, bool allowMultipleOrdinaryClauses = false);
   [[nodiscard]] AstDeclaration parseGiven(const Token& keyword);
   [[nodiscard]] AstDeclaration parseImplicit(const Token& keyword);
   [[nodiscard]] AstDeclaration parseValOrVar(AstDeclarationKind kind,

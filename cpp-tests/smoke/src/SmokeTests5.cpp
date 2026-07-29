@@ -107,6 +107,24 @@ object Selectors {
 
   inline def inferredFromContext[A]()(using named: Named[A]): String =
     prefix + named.label()
+
+  inline def curried[A](first: String)(second: String): String =
+    summonFrom {
+      case found: Named[A] =>
+        prefix + found.label() + ":" + first + ":" + first + ":" + second + ":" + second
+      case _ => "curried-fallback"
+    }
+
+  inline def nestedCurried[A](first: String)(second: String): String =
+    "nested-curried:" + curried[A](first)(second)
+
+  inline def curriedContextual[A](first: String)(second: String)(
+      using named: Named[A]): String =
+    prefix + named.label() + ":" + first + ":" + second
+
+  inline def inferredCurried[A](value: A)(suffix: String)(
+      using named: Named[A]): String =
+    prefix + named.label() + ":" + suffix
 }
 
 class InstanceSelectors(val instancePrefix: String) {
@@ -125,6 +143,10 @@ class InstanceSelectors(val instancePrefix: String) {
   inline def inferred[A](value: A): String = instancePrefix + "inferred"
 
   inline def thisPrefix[A](): String = this.instancePrefix
+
+  inline def curried[A](first: String)(second: String)(
+      using named: Named[A]): String =
+    instancePrefix + named.label() + ":" + first + ":" + second
 }
 
 trait TraitInstanceSelectors {
@@ -222,6 +244,16 @@ object Main {
     new TraitInstanceSelectorsValue("effectful-trait:")
   }
 
+  def nextFirst(): String = {
+    println("first-effect")
+    "first"
+  }
+
+  def nextSecond(): String = {
+    println("second-effect")
+    "second"
+  }
+
   def intSelected: String = Selectors.selected[Int]
 
   def localSelected: String = {
@@ -311,6 +343,19 @@ object Main {
     instanceHolder.value.selected[Int]()
   def effectfulTraitReceiverSelected: String =
     nextTraitInstances().traitSelected[Int]()
+  def curriedSelected: String =
+    Selectors.curried[Int](nextFirst())(nextSecond())
+  def nestedCurriedSelected: String =
+    Selectors.nestedCurried[Int]("left")("right")
+  def curriedContextualSelected: String =
+    Selectors.curriedContextual[Int]("context-first")("context-second")
+  def explicitCurriedContextual: String =
+    Selectors.curriedContextual[String]("explicit-first")("explicit-second")(using
+      new NamedValue[String]("explicit-curried"))
+  def inferredCurriedSelected: String =
+    Selectors.inferredCurried(21)("inferred-second")
+  def effectfulReceiverCurried: String =
+    nextInstances().curried[Int](nextFirst())(nextSecond())
 
   def main(args: Array[String]): Unit = {
     println(intSelected)
@@ -354,6 +399,12 @@ object Main {
     println(constructedReceiverSelected)
     println(selectedReceiverSelected)
     println(effectfulTraitReceiverSelected)
+    println(curriedSelected)
+    println(nestedCurriedSelected)
+    println(curriedContextualSelected)
+    println(explicitCurriedContextual)
+    println(inferredCurriedSelected)
+    println(effectfulReceiverCurried)
   }
 }
 )";
@@ -369,6 +420,8 @@ object Main {
   def unsupportedMissingContext: String = missingContext[Int]()
   inline def noInference[A](value: String): String = value
   def unsupportedInference: String = noInference("value")
+  inline def curried[A](first: String)(second: String): String = first + second
+  def flattenedCurried: String = curried[Int]("first", "second")
   inline def missingBody[A]: String
   inline def recursive[A]: String = recursive[A]
   inline val unsupported: String = "value"
@@ -493,6 +546,18 @@ object Main {
       functionText(result.nirText, "demo.inlinecalls.Main.selectedReceiverSelected");
   const std::string_view effectfulTraitReceiverSelected = functionText(
       result.nirText, "demo.inlinecalls.Main.effectfulTraitReceiverSelected");
+  const std::string_view curriedSelected =
+      functionText(result.nirText, "demo.inlinecalls.Main.curriedSelected");
+  const std::string_view nestedCurriedSelected =
+      functionText(result.nirText, "demo.inlinecalls.Main.nestedCurriedSelected");
+  const std::string_view curriedContextualSelected =
+      functionText(result.nirText, "demo.inlinecalls.Main.curriedContextualSelected");
+  const std::string_view explicitCurriedContextual =
+      functionText(result.nirText, "demo.inlinecalls.Main.explicitCurriedContextual");
+  const std::string_view inferredCurriedSelected =
+      functionText(result.nirText, "demo.inlinecalls.Main.inferredCurriedSelected");
+  const std::string_view effectfulReceiverCurried =
+      functionText(result.nirText, "demo.inlinecalls.Main.effectfulReceiverCurried");
 
   const bool valid =
       status == 0 &&
@@ -526,7 +591,15 @@ object Main {
               "effectful-instance:member-int:member-int:"
               "instance-value:instance-value\n"
               "constructed-instance:member-int\nheld-instance:member-int\n"
-              "trait-receiver-effect\neffectful-trait:member-int\n" &&
+              "trait-receiver-effect\neffectful-trait:member-int\n"
+              "first-effect\nsecond-effect\n"
+              "selected:member-int:first:first:second:second\n"
+              "nested-curried:selected:member-int:left:left:right:right\n"
+              "selected:member-int:context-first:context-second\n"
+              "selected:explicit-curried:explicit-first:explicit-second\n"
+              "selected:member-int:inferred-second\n"
+              "receiver-effect\nfirst-effect\nsecond-effect\n"
+              "effectful-instance:member-int:first:second\n" &&
       !invalid.ok &&
       contains(invalid.diagnosticsText,
                "inline call-site specialization currently requires a generic "
@@ -536,6 +609,9 @@ object Main {
       contains(invalid.diagnosticsText, "required by missingContext") &&
       contains(invalid.diagnosticsText,
                "cannot infer type argument A for noInference from value arguments") &&
+      contains(invalid.diagnosticsText,
+               "inline call to curried must preserve its declared ordinary "
+               "argument clauses") &&
       contains(invalid.diagnosticsText, "inline method requires an implementation") &&
       contains(invalid.diagnosticsText,
                "recursive inline call-site specialization is not supported yet") &&
@@ -705,66 +781,107 @@ object Main {
       countOccurrences(effectfulTraitReceiverSelected, "nextTraitInstances") == 1 &&
       countOccurrences(effectfulTraitReceiverSelected, "Main.intNamed") == 1 &&
       !contains(effectfulTraitReceiverSelected,
-                "%demo.inlinecalls.TraitInstanceSelectors.traitSelected");
+                "%demo.inlinecalls.TraitInstanceSelectors.traitSelected") &&
+      contains(curriedSelected, "let %first : String") &&
+      contains(curriedSelected, "let %second : String") &&
+      countOccurrences(curriedSelected, "nextFirst") == 1 &&
+      countOccurrences(curriedSelected, "nextSecond") == 1 &&
+      curriedSelected.find("nextFirst") < curriedSelected.find("nextSecond") &&
+      countOccurrences(curriedSelected, "Main.intNamed") == 1 &&
+      !contains(curriedSelected, "%demo.inlinecalls.Selectors.curried") &&
+      contains(nestedCurriedSelected, "\"nested-curried:\"") &&
+      countOccurrences(nestedCurriedSelected, "Main.intNamed") == 1 &&
+      !contains(nestedCurriedSelected, "%demo.inlinecalls.Selectors.nestedCurried") &&
+      !contains(nestedCurriedSelected, "%demo.inlinecalls.Selectors.curried") &&
+      countOccurrences(curriedContextualSelected, "Main.intNamed") == 1 &&
+      !contains(curriedContextualSelected,
+                "%demo.inlinecalls.Selectors.curriedContextual") &&
+      contains(explicitCurriedContextual, "explicit-curried") &&
+      !contains(explicitCurriedContextual, "Main.intNamed") &&
+      !contains(explicitCurriedContextual,
+                "%demo.inlinecalls.Selectors.curriedContextual") &&
+      countOccurrences(inferredCurriedSelected, "Main.intNamed") == 1 &&
+      !contains(inferredCurriedSelected,
+                "%demo.inlinecalls.Selectors.inferredCurried") &&
+      countOccurrences(effectfulReceiverCurried, "nextInstances") == 1 &&
+      countOccurrences(effectfulReceiverCurried, "nextFirst") == 1 &&
+      countOccurrences(effectfulReceiverCurried, "nextSecond") == 1 &&
+      effectfulReceiverCurried.find("nextInstances") <
+          effectfulReceiverCurried.find("nextFirst") &&
+      effectfulReceiverCurried.find("nextFirst") <
+          effectfulReceiverCurried.find("nextSecond") &&
+      countOccurrences(effectfulReceiverCurried, "Main.intNamed") == 1 &&
+      !contains(effectfulReceiverCurried,
+                "%demo.inlinecalls.InstanceSelectors.curried");
   return valid
              ? 0
-             : fail("inline summonFrom smoke test failed (output='" + text +
-                    "', diagnostics='" + result.diagnosticsText +
-                    "', invalid-diagnostics='" + invalid.diagnosticsText +
-                    "', int-selected='" + std::string(intSelected) +
-                    "', local-selected='" + std::string(localSelected) +
-                    "', fallback-selected='" + std::string(fallbackSelected) +
-                    "', nested-selected='" + std::string(nestedSelected) +
-                    "', value-selected='" + std::string(valueSelected) +
-                    "', value-fallback='" + std::string(valueFallback) +
-                    "', nested-value-selected='" + std::string(nestedValueSelected) +
-                    "', passed-int='" + std::string(passedInt) + "', passed-string='" +
-                    std::string(passedString) + "', inferred-int='" +
-                    std::string(inferredInt) + "', inferred-fallback='" +
-                    std::string(inferredFallback) + "', inferred-local='" +
-                    std::string(inferredLocal) + "', inferred-passed-int='" +
-                    std::string(inferredPassedInt) + "', inferred-passed-string='" +
-                    std::string(inferredPassedString) + "', inferred-null-string='" +
-                    std::string(inferredNullString) + "', contextual-selected='" +
-                    std::string(contextualSelected) + "', contextual-local='" +
-                    std::string(contextualLocal) + "', contextual-value-selected='" +
-                    std::string(contextualValueSelected) + "', explicit-contextual='" +
-                    std::string(explicitContextual) + "', nested-contextual='" +
-                    std::string(nestedContextualSelected) + "', inferred-contextual='" +
-                    std::string(inferredContextualSelected) +
-                    "', inferred-context-only='" + std::string(inferredContextOnly) +
-                    "', instance-selected='" + std::string(instanceSelected) +
-                    "', instance-fallback='" + std::string(instanceFallback) +
-                    "', instance-contextual-value='" +
-                    std::string(instanceContextualValue) +
-                    "', instance-explicit-context='" +
-                    std::string(instanceExplicitContext) +
-                    "', instance-nested-contextual='" +
-                    std::string(instanceNestedContextual) + "', instance-inferred='" +
-                    std::string(instanceInferred) + "', instance-this-prefix='" +
-                    std::string(instanceThisPrefix) + "', local-instance-selected='" +
-                    std::string(localInstanceSelected) +
-                    "', trait-instance-selected='" +
-                    std::string(traitInstanceSelected) +
-                    "', generic-instance-selected='" +
-                    std::string(genericInstanceSelected) +
-                    "', generic-instance-contextual='" +
-                    std::string(genericInstanceContextual) +
-                    "', generic-owner-passed='" + std::string(genericOwnerPassed) +
-                    "', generic-trait-instance-selected='" +
-                    std::string(genericTraitInstanceSelected) +
-                    "', inherited-generic-trait-selected='" +
-                    std::string(inheritedGenericTraitSelected) +
-                    "', effectful-receiver-selected='" +
-                    std::string(effectfulReceiverSelected) +
-                    "', effectful-receiver-contextual='" +
-                    std::string(effectfulReceiverContextual) +
-                    "', constructed-receiver-selected='" +
-                    std::string(constructedReceiverSelected) +
-                    "', selected-receiver-selected='" +
-                    std::string(selectedReceiverSelected) +
-                    "', effectful-trait-receiver-selected='" +
-                    std::string(effectfulTraitReceiverSelected) + "')");
+             : fail(
+                   "inline summonFrom smoke test failed (output='" + text +
+                   "', diagnostics='" + result.diagnosticsText +
+                   "', invalid-diagnostics='" + invalid.diagnosticsText +
+                   "', int-selected='" + std::string(intSelected) +
+                   "', local-selected='" + std::string(localSelected) +
+                   "', fallback-selected='" + std::string(fallbackSelected) +
+                   "', nested-selected='" + std::string(nestedSelected) +
+                   "', value-selected='" + std::string(valueSelected) +
+                   "', value-fallback='" + std::string(valueFallback) +
+                   "', nested-value-selected='" + std::string(nestedValueSelected) +
+                   "', passed-int='" + std::string(passedInt) + "', passed-string='" +
+                   std::string(passedString) + "', inferred-int='" +
+                   std::string(inferredInt) + "', inferred-fallback='" +
+                   std::string(inferredFallback) + "', inferred-local='" +
+                   std::string(inferredLocal) + "', inferred-passed-int='" +
+                   std::string(inferredPassedInt) + "', inferred-passed-string='" +
+                   std::string(inferredPassedString) + "', inferred-null-string='" +
+                   std::string(inferredNullString) + "', contextual-selected='" +
+                   std::string(contextualSelected) + "', contextual-local='" +
+                   std::string(contextualLocal) + "', contextual-value-selected='" +
+                   std::string(contextualValueSelected) + "', explicit-contextual='" +
+                   std::string(explicitContextual) + "', nested-contextual='" +
+                   std::string(nestedContextualSelected) + "', inferred-contextual='" +
+                   std::string(inferredContextualSelected) +
+                   "', inferred-context-only='" + std::string(inferredContextOnly) +
+                   "', instance-selected='" + std::string(instanceSelected) +
+                   "', instance-fallback='" + std::string(instanceFallback) +
+                   "', instance-contextual-value='" +
+                   std::string(instanceContextualValue) +
+                   "', instance-explicit-context='" +
+                   std::string(instanceExplicitContext) +
+                   "', instance-nested-contextual='" +
+                   std::string(instanceNestedContextual) + "', instance-inferred='" +
+                   std::string(instanceInferred) + "', instance-this-prefix='" +
+                   std::string(instanceThisPrefix) + "', local-instance-selected='" +
+                   std::string(localInstanceSelected) + "', trait-instance-selected='" +
+                   std::string(traitInstanceSelected) +
+                   "', generic-instance-selected='" +
+                   std::string(genericInstanceSelected) +
+                   "', generic-instance-contextual='" +
+                   std::string(genericInstanceContextual) +
+                   "', generic-owner-passed='" + std::string(genericOwnerPassed) +
+                   "', generic-trait-instance-selected='" +
+                   std::string(genericTraitInstanceSelected) +
+                   "', inherited-generic-trait-selected='" +
+                   std::string(inheritedGenericTraitSelected) +
+                   "', effectful-receiver-selected='" +
+                   std::string(effectfulReceiverSelected) +
+                   "', effectful-receiver-contextual='" +
+                   std::string(effectfulReceiverContextual) +
+                   "', constructed-receiver-selected='" +
+                   std::string(constructedReceiverSelected) +
+                   "', selected-receiver-selected='" +
+                   std::string(selectedReceiverSelected) +
+                   "', effectful-trait-receiver-selected='" +
+                   std::string(effectfulTraitReceiverSelected) +
+                   "', curried-selected='" + std::string(curriedSelected) +
+                   "', nested-curried-selected='" + std::string(nestedCurriedSelected) +
+                   "', curried-contextual-selected='" +
+                   std::string(curriedContextualSelected) +
+                   "', explicit-curried-contextual='" +
+                   std::string(explicitCurriedContextual) +
+                   "', inferred-curried-selected='" +
+                   std::string(inferredCurriedSelected) +
+                   "', effectful-receiver-curried='" +
+                   std::string(effectfulReceiverCurried) + "')");
 }
 
 } // namespace

@@ -1000,21 +1000,23 @@ Current scaffold status:
   applied generic parent recovered from a concrete subclass.
   Explicit type applications and unambiguous ordinary
   argument/expected-result inference are supported, along with parameterless
-  methods, a directly applied ordinary value-parameter list, and one trailing
-  contextual `using` list. Contextual arguments may be resolved from the caller
-  or supplied explicitly, and their evidence can complete generic inference.
+  methods, one or more ordinary value-parameter clauses, and one trailing
+  contextual `using` clause. Each call must preserve its declaration's ordinary
+  clause shape before the complete application is flattened to the existing NIR
+  method ABI. Contextual arguments may be resolved from the caller or supplied
+  explicitly, and their evidence can complete generic inference.
   The frontend rechecks each inline body with its concrete method and owner type
   arguments, specialized parameter types and definition-owner members, bound
   receiver, and caller contextual scope, retaining isolated expression,
   contextual-argument, and nested-inline metadata for that application. NIR
-  evaluates the receiver first, then ordinary and contextual arguments in
-  declaration order into local bindings before expanding the recorded body,
-  preserving single evaluation even when a receiver or parameter is referenced
-  repeatedly.
+  evaluates the receiver first, then ordinary arguments clause by clause and
+  contextual arguments in declaration order into local bindings before
+  expanding the recorded body, preserving single evaluation even when a
+  receiver or parameter is referenced repeatedly.
   `summonFrom` may therefore select a different branch at each call and no call
-  to the inline method remains. Recursive expansion is diagnosed. Additional
-  ordinary application clauses, `transparent inline`, and the remaining Scala
-  3 inline surface stay future milestones.
+  to the inline method remains. Recursive expansion is diagnosed. Partially
+  applied calls, `transparent inline`, and the remaining Scala 3 inline surface
+  stay future milestones.
   Focused native coverage exercises ordered
   search, wildcard fallback, pattern-bound contextual evidence, recursive
   generic factories, lexical definition-owner values, member and nearest local
@@ -1026,7 +1028,9 @@ Current scaffold status:
   explicit and inferred scalar/reference parameter and result types,
   ordinary/expected-result/context-only inference, inferred call-site
   contextual selection, nested parameterized inline expansion, dead-branch
-  elimination, malformed cases, unmatched search, ambiguity propagation, and
+  elimination, explicit/inferred curried calls, contextual and nested curried
+  forwarding, effect ordering across receiver and ordinary clauses, malformed
+  clause shapes, malformed cases, unmatched search, ambiguity propagation, and
   unsupported inline forms.
 - Anonymous givens and block-local named or anonymous givens now use the same
   typed evidence model. Lexical depth is retained during search, so the
@@ -1311,7 +1315,7 @@ Current scaffold status:
   synthesized result, stable values, applied generic members, incompatible
   parameter lists, and invalid one-sided implementations.
 - Full inline call-site specialization beyond the current fully applied-owner,
-  bounded ordinary parameter list with a trailing contextual list, and
+  complete ordinary-clause application with a trailing contextual clause, and
   generic-inference slice remains a later milestone.
 - Postfix type application now supports typed `value.isInstanceOf[Target]` and
   checked `value.asInstanceOf[Target]` for known classes, traits, and objects.

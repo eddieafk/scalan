@@ -83,7 +83,28 @@ void writeDeclaration(std::ostringstream& out, const AstDeclaration& declaration
     }
     out << ']';
   }
-  if (!declaration.parameters.empty()) {
+  if (!declaration.parameterClauseSizes.empty() &&
+      declaration.parameterClauseSizes.size() ==
+          declaration.contextualParameterClauses.size()) {
+    std::size_t parameterIndex = 0;
+    for (std::size_t clauseIndex = 0;
+         clauseIndex < declaration.parameterClauseSizes.size(); ++clauseIndex) {
+      out << '(';
+      if (declaration.contextualParameterClauses[clauseIndex]) {
+        out << "using ";
+      }
+      for (std::size_t index = 0;
+           index < declaration.parameterClauseSizes[clauseIndex] &&
+           parameterIndex < declaration.parameters.size();
+           ++index, ++parameterIndex) {
+        if (index != 0) {
+          out << ", ";
+        }
+        out << declaration.parameters[parameterIndex];
+      }
+      out << ')';
+    }
+  } else if (!declaration.parameters.empty()) {
     bool contextualClause = false;
     out << '(';
     for (std::size_t i = 0; i < declaration.parameters.size(); ++i) {
