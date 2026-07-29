@@ -995,9 +995,9 @@ Current scaffold status:
   to use evidence visible at the definition's lexical typechecking site.
   Scala 3's soft `inline def` modifier now enables a bounded call-site
   specialization path for generic top-level, object, and instance methods.
-  Instance methods are bounded to stable identifier or `this` receivers;
-  non-generic and fully applied generic class or trait owners are supported,
-  including an applied generic parent recovered from a concrete subclass.
+  Instance methods accept arbitrary typed receiver expressions; non-generic
+  and fully applied generic class or trait owners are supported, including an
+  applied generic parent recovered from a concrete subclass.
   Explicit type applications and unambiguous ordinary
   argument/expected-result inference are supported, along with parameterless
   methods, a directly applied ordinary value-parameter list, and one trailing
@@ -1012,22 +1012,22 @@ Current scaffold status:
   preserving single evaluation even when a receiver or parameter is referenced
   repeatedly.
   `summonFrom` may therefore select a different branch at each call and no call
-  to the inline method remains. Recursive expansion is diagnosed. Effectful
-  receiver expressions, additional ordinary application clauses,
-  `transparent inline`, and the remaining Scala 3 inline surface stay future
-  milestones.
+  to the inline method remains. Recursive expansion is diagnosed. Additional
+  ordinary application clauses, `transparent inline`, and the remaining Scala
+  3 inline surface stay future milestones.
   Focused native coverage exercises ordered
   search, wildcard fallback, pattern-bound contextual evidence, recursive
   generic factories, lexical definition-owner values, member and nearest local
-  caller evidence, stable class and trait receivers, applied generic owner and
-  inherited-parent substitution, owner-typed parameters/results,
-  receiver-member and explicit-`this` access, receiver/ordinary/contextual
-  argument single evaluation, synthesized and explicit `using` values, nested
-  contextual and instance forwarding, explicit and inferred scalar/reference
-  parameter and result types, ordinary/expected-result/context-only inference,
-  inferred call-site contextual selection, nested parameterized inline
-  expansion, dead-branch elimination, malformed cases, unmatched search,
-  ambiguity propagation, and unsupported inline forms.
+  caller evidence, stable, selected, constructed, and effectful class and trait
+  receivers, applied generic owner and inherited-parent substitution,
+  owner-typed parameters/results, receiver-member and explicit-`this` access,
+  receiver-first ordinary/contextual argument single evaluation, synthesized
+  and explicit `using` values, nested contextual and instance forwarding,
+  explicit and inferred scalar/reference parameter and result types,
+  ordinary/expected-result/context-only inference, inferred call-site
+  contextual selection, nested parameterized inline expansion, dead-branch
+  elimination, malformed cases, unmatched search, ambiguity propagation, and
+  unsupported inline forms.
 - Anonymous givens and block-local named or anonymous givens now use the same
   typed evidence model. Lexical depth is retained during search, so the
   innermost matching local given wins while equally nested matches remain
@@ -1310,9 +1310,9 @@ Current scaffold status:
   member. Optimized runtime and NIR coverage verifies chained selection from the
   synthesized result, stable values, applied generic members, incompatible
   parameter lists, and invalid one-sided implementations.
-- Full inline call-site specialization beyond stable receivers on fully applied
-  owners, the bounded ordinary parameter list with a trailing contextual list,
-  and the generic-inference slice remains a later milestone.
+- Full inline call-site specialization beyond the current fully applied-owner,
+  bounded ordinary parameter list with a trailing contextual list, and
+  generic-inference slice remains a later milestone.
 - Postfix type application now supports typed `value.isInstanceOf[Target]` and
   checked `value.asInstanceOf[Target]` for known classes, traits, and objects.
   NIR uses dedicated `is-instance-of[T]` and `as-instance-of[T]` values; verification

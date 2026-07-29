@@ -89,9 +89,9 @@ build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
   cpp-examples/ContextualAbstractions.scala
 
 # Compile generic `inline def` call-site specialization with explicit or
-# inferred type arguments, ordinary and contextual `using` parameters, stable
-# applied generic class/trait instance receivers, and per-call `summonFrom`
-# reduction.
+# inferred type arguments, ordinary and contextual `using` parameters,
+# single-evaluation class/trait instance receiver expressions, and per-call
+# `summonFrom` reduction.
 build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
   --output /tmp/inline-summon-from \
   cpp-examples/InlineSummonFrom.scala

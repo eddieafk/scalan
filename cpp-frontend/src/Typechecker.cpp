@@ -4493,14 +4493,6 @@ void Typechecker::recordInlineApplication(
       (receiver == nullptr || receiverType == nullptr)) {
     return;
   }
-  if (symbol.isInstanceMember && receiver->kind != AstExpressionKind::Identifier &&
-      receiver->kind != AstExpressionKind::This) {
-    diagnostics_.error(
-        expression.span,
-        "inline instance method specialization requires a stable identifier or "
-        "this receiver");
-    return;
-  }
   const std::string definitionOwner = ownerNameOf(symbol.symbolName);
   std::optional<TypeInfo> ownerReceiverType;
   if (symbol.isInstanceMember) {

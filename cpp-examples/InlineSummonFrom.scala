@@ -130,6 +130,8 @@ class GenericTraitInstanceSelectorsValue(val value: String)
   def genericTraitPrefix(): String = value
 }
 
+class InstanceHolder(val value: InstanceSelectors)
+
 object Main {
   given intNamed: Named[Int] = new NamedValue[Int]("member-int")
   val instances: InstanceSelectors = new InstanceSelectors("instance:")
@@ -141,6 +143,8 @@ object Main {
     new GenericTraitInstanceSelectorsValue("generic-trait:")
   val inheritedGenericTraitInstances: GenericTraitInstanceSelectorsValue =
     new GenericTraitInstanceSelectorsValue("inherited-trait:")
+  val instanceHolder: InstanceHolder =
+    new InstanceHolder(new InstanceSelectors("held-instance:"))
 
   def nextValue(): String = {
     println("effect")
@@ -155,6 +159,16 @@ object Main {
   def nextInstanceValue(): String = {
     println("instance-effect")
     "instance-value"
+  }
+
+  def nextInstances(): InstanceSelectors = {
+    println("receiver-effect")
+    new InstanceSelectors("effectful-instance:")
+  }
+
+  def nextTraitInstances(): TraitInstanceSelectors = {
+    println("trait-receiver-effect")
+    new TraitInstanceSelectorsValue("effectful-trait:")
   }
 
   def main(args: Array[String]): Unit = {
@@ -235,5 +249,11 @@ object Main {
         new NamedValue[String]("inherited-owner")
       println(inheritedGenericTraitInstances.selected[Int]())
     }
+
+    println(nextInstances().selected[Int]())
+    println(nextInstances().contextualValue[Int](nextInstanceValue()))
+    println(new InstanceSelectors("constructed-instance:").selected[Int]())
+    println(instanceHolder.value.selected[Int]())
+    println(nextTraitInstances().traitSelected[Int]())
   }
 }

@@ -181,6 +181,8 @@ class GenericTraitInstanceSelectorsValue(val value: String)
   def genericTraitPrefix(): String = value
 }
 
+class InstanceHolder(val value: InstanceSelectors)
+
 object Main {
   given intNamed: Named[Int] = new NamedValue[Int]("member-int")
   val instances: InstanceSelectors = new InstanceSelectors("instance:")
@@ -192,6 +194,8 @@ object Main {
     new GenericTraitInstanceSelectorsValue("generic-trait:")
   val inheritedGenericTraitInstances: GenericTraitInstanceSelectorsValue =
     new GenericTraitInstanceSelectorsValue("inherited-trait:")
+  val instanceHolder: InstanceHolder =
+    new InstanceHolder(new InstanceSelectors("held-instance:"))
 
   def nextValue(): String = {
     println("effect")
@@ -206,6 +210,16 @@ object Main {
   def nextInstanceValue(): String = {
     println("instance-effect")
     "instance-value"
+  }
+
+  def nextInstances(): InstanceSelectors = {
+    println("receiver-effect")
+    new InstanceSelectors("effectful-instance:")
+  }
+
+  def nextTraitInstances(): TraitInstanceSelectors = {
+    println("trait-receiver-effect")
+    new TraitInstanceSelectorsValue("effectful-trait:")
   }
 
   def intSelected: String = Selectors.selected[Int]
@@ -287,6 +301,16 @@ object Main {
       new NamedValue[String]("inherited-owner")
     inheritedGenericTraitInstances.selected[Int]()
   }
+  def effectfulReceiverSelected: String =
+    nextInstances().selected[Int]()
+  def effectfulReceiverContextual: String =
+    nextInstances().contextualValue[Int](nextInstanceValue())
+  def constructedReceiverSelected: String =
+    new InstanceSelectors("constructed-instance:").selected[Int]()
+  def selectedReceiverSelected: String =
+    instanceHolder.value.selected[Int]()
+  def effectfulTraitReceiverSelected: String =
+    nextTraitInstances().traitSelected[Int]()
 
   def main(args: Array[String]): Unit = {
     println(intSelected)
@@ -325,6 +349,11 @@ object Main {
     println(genericOwnerPassed)
     println(genericTraitInstanceSelected)
     println(inheritedGenericTraitSelected)
+    println(effectfulReceiverSelected)
+    println(effectfulReceiverContextual)
+    println(constructedReceiverSelected)
+    println(selectedReceiverSelected)
+    println(effectfulTraitReceiverSelected)
   }
 }
 )";
@@ -340,16 +369,11 @@ object Main {
   def unsupportedMissingContext: String = missingContext[Int]()
   inline def noInference[A](value: String): String = value
   def unsupportedInference: String = noInference("value")
-  def unsupportedReceiver: String =
-    new EffectfulInstance().value[Int]()
   inline def missingBody[A]: String
   inline def recursive[A]: String = recursive[A]
   inline val unsupported: String = "value"
 }
 
-class EffectfulInstance {
-  inline def value[A](): String = "instance"
-}
 )";
 
   const std::filesystem::path temporary = std::filesystem::temp_directory_path();
@@ -459,6 +483,16 @@ class EffectfulInstance {
       result.nirText, "demo.inlinecalls.Main.genericTraitInstanceSelected");
   const std::string_view inheritedGenericTraitSelected = functionText(
       result.nirText, "demo.inlinecalls.Main.inheritedGenericTraitSelected");
+  const std::string_view effectfulReceiverSelected =
+      functionText(result.nirText, "demo.inlinecalls.Main.effectfulReceiverSelected");
+  const std::string_view effectfulReceiverContextual =
+      functionText(result.nirText, "demo.inlinecalls.Main.effectfulReceiverContextual");
+  const std::string_view constructedReceiverSelected =
+      functionText(result.nirText, "demo.inlinecalls.Main.constructedReceiverSelected");
+  const std::string_view selectedReceiverSelected =
+      functionText(result.nirText, "demo.inlinecalls.Main.selectedReceiverSelected");
+  const std::string_view effectfulTraitReceiverSelected = functionText(
+      result.nirText, "demo.inlinecalls.Main.effectfulTraitReceiverSelected");
 
   const bool valid =
       status == 0 &&
@@ -486,7 +520,13 @@ class EffectfulInstance {
               "generic:owner-string:member-int\n"
               "generic:owner-string:member-int\nowner-value\n"
               "generic-trait:trait-owner:member-int\n"
-              "inherited-trait:inherited-owner:member-int\n" &&
+              "inherited-trait:inherited-owner:member-int\n"
+              "receiver-effect\neffectful-instance:member-int\n"
+              "receiver-effect\ninstance-effect\n"
+              "effectful-instance:member-int:member-int:"
+              "instance-value:instance-value\n"
+              "constructed-instance:member-int\nheld-instance:member-int\n"
+              "trait-receiver-effect\neffectful-trait:member-int\n" &&
       !invalid.ok &&
       contains(invalid.diagnosticsText,
                "inline call-site specialization currently requires a generic "
@@ -499,9 +539,6 @@ class EffectfulInstance {
       contains(invalid.diagnosticsText, "inline method requires an implementation") &&
       contains(invalid.diagnosticsText,
                "recursive inline call-site specialization is not supported yet") &&
-      contains(invalid.diagnosticsText,
-               "inline instance method specialization requires a stable identifier "
-               "or this receiver") &&
       contains(invalid.diagnosticsText,
                "'inline' must modify a def in this milestone") &&
       contains(intSelected, "call %demo.inlinecalls.Main.intNamed()") &&
@@ -643,7 +680,32 @@ class EffectfulInstance {
                        "Main.inheritedGenericTraitInstances") == 1 &&
       countOccurrences(inheritedGenericTraitSelected, "Main.intNamed") == 1 &&
       !contains(inheritedGenericTraitSelected,
-                "%demo.inlinecalls.GenericTraitInstanceSelectors.selected");
+                "%demo.inlinecalls.GenericTraitInstanceSelectors.selected") &&
+      contains(effectfulReceiverSelected,
+               "let %this : demo.inlinecalls.InstanceSelectors") &&
+      countOccurrences(effectfulReceiverSelected, "nextInstances") == 1 &&
+      countOccurrences(effectfulReceiverSelected, "Main.intNamed") == 1 &&
+      !contains(effectfulReceiverSelected,
+                "%demo.inlinecalls.InstanceSelectors.selected") &&
+      countOccurrences(effectfulReceiverContextual, "nextInstances") == 1 &&
+      countOccurrences(effectfulReceiverContextual, "nextInstanceValue") == 1 &&
+      effectfulReceiverContextual.find("nextInstances") <
+          effectfulReceiverContextual.find("nextInstanceValue") &&
+      countOccurrences(effectfulReceiverContextual, "Main.intNamed") == 1 &&
+      !contains(effectfulReceiverContextual,
+                "%demo.inlinecalls.InstanceSelectors.contextualValue") &&
+      contains(constructedReceiverSelected, "constructed-instance:") &&
+      countOccurrences(constructedReceiverSelected, "Main.intNamed") == 1 &&
+      !contains(constructedReceiverSelected,
+                "%demo.inlinecalls.InstanceSelectors.selected") &&
+      countOccurrences(selectedReceiverSelected, "Main.instanceHolder") == 1 &&
+      countOccurrences(selectedReceiverSelected, "Main.intNamed") == 1 &&
+      !contains(selectedReceiverSelected,
+                "%demo.inlinecalls.InstanceSelectors.selected") &&
+      countOccurrences(effectfulTraitReceiverSelected, "nextTraitInstances") == 1 &&
+      countOccurrences(effectfulTraitReceiverSelected, "Main.intNamed") == 1 &&
+      !contains(effectfulTraitReceiverSelected,
+                "%demo.inlinecalls.TraitInstanceSelectors.traitSelected");
   return valid
              ? 0
              : fail("inline summonFrom smoke test failed (output='" + text +
@@ -692,7 +754,17 @@ class EffectfulInstance {
                     "', generic-trait-instance-selected='" +
                     std::string(genericTraitInstanceSelected) +
                     "', inherited-generic-trait-selected='" +
-                    std::string(inheritedGenericTraitSelected) + "')");
+                    std::string(inheritedGenericTraitSelected) +
+                    "', effectful-receiver-selected='" +
+                    std::string(effectfulReceiverSelected) +
+                    "', effectful-receiver-contextual='" +
+                    std::string(effectfulReceiverContextual) +
+                    "', constructed-receiver-selected='" +
+                    std::string(constructedReceiverSelected) +
+                    "', selected-receiver-selected='" +
+                    std::string(selectedReceiverSelected) +
+                    "', effectful-trait-receiver-selected='" +
+                    std::string(effectfulTraitReceiverSelected) + "')");
 }
 
 } // namespace
