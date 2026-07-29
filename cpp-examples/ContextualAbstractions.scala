@@ -11,6 +11,7 @@ class TypeName[A](val name: String)
 trait PreferredTypeName
 infix trait ImportRelation[A, B]
 trait *:[A, B]
+infix type ImportedAs[A, B] = *:[A, B]
 class PreferredDogTypeName(name: String)
     extends TypeName[Dog](name)
     with PreferredTypeName
@@ -210,7 +211,7 @@ object LegacyContextualImports {
   val ordinaryLabel: String = "not-contextual"
 }
 
-import LegacyContextualImports.given (Dog ImportRelation PreferredTypeName) & Dog *: PreferredTypeName & TypeName[? <: ContextualImportTarget] & PreferredTypeName
+import LegacyContextualImports.given (Dog ImportRelation PreferredTypeName) & (Dog ImportedAs PreferredTypeName) & TypeName[? <: ContextualImportTarget] & PreferredTypeName
 
 object ContextualAbstractions {
   given dogShow: Show[Dog] = new DogShow("dog:")

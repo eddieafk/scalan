@@ -151,10 +151,12 @@ bool AstValidator::validateDeclaration(const AstDeclaration& declaration,
   if (!declaration.typeParameters.empty() &&
       declaration.kind != AstDeclarationKind::Class &&
       declaration.kind != AstDeclarationKind::Trait &&
+      declaration.kind != AstDeclarationKind::Type &&
       declaration.kind != AstDeclarationKind::Def) {
     diagnostics.error(
         declaration.span,
-        "type parameters are only supported on classes, traits, and methods");
+        "type parameters are only supported on classes, traits, types, and "
+        "methods");
     ok = false;
   }
   if (!declaration.derivedTypes.empty() &&
@@ -281,9 +283,9 @@ bool AstValidator::validateDeclaration(const AstDeclaration& declaration,
     ok = validateScope(declaration.members, diagnostics, false, false) && ok;
     break;
   case AstDeclarationKind::Type:
-    if (isTopLevel) {
+    if (isTopLevel && !declaration.hasInitializer) {
       diagnostics.error(declaration.span,
-                        "type declarations are only supported as members");
+                        "top-level type declaration requires an alias target");
       ok = false;
     }
     if (declaration.hasInitializer && declaration.declaredType.empty()) {

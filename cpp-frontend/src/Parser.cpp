@@ -200,7 +200,8 @@ bool Parser::isDeclarationStart() const {
   if (peek().kind == TokenKind::Identifier && peek().text == "infix" &&
       current_ + 1 < tokens_.size() &&
       (tokens_[current_ + 1].kind == TokenKind::KeywordClass ||
-       tokens_[current_ + 1].kind == TokenKind::KeywordTrait)) {
+       tokens_[current_ + 1].kind == TokenKind::KeywordTrait ||
+       tokens_[current_ + 1].kind == TokenKind::KeywordType)) {
     return true;
   }
   switch (peek().kind) {
@@ -277,17 +278,21 @@ AstDeclaration Parser::parseDeclaration() {
       declaration = parseObjectLike(AstDeclarationKind::Class, previous());
     } else if (match(TokenKind::KeywordTrait)) {
       declaration = parseObjectLike(AstDeclarationKind::Trait, previous());
+    } else if (match(TokenKind::KeywordType)) {
+      declaration = parseType(previous());
     } else {
       diagnostics_.error(peek().span,
-                         "'infix' must modify a class or trait in this milestone");
+                         "'infix' must modify a class, trait, or type");
       synchronize();
       return {};
     }
     declaration.span = modifier.span;
     if (declaration.typeParameters.size() != 2) {
-      diagnostics_.error(
-          modifier.span,
-          "infix class or trait requires exactly two type parameters");
+      diagnostics_.error(modifier.span,
+                         declaration.kind == AstDeclarationKind::Type
+                             ? "infix type requires exactly two type parameters"
+                             : "infix class or trait requires exactly two type "
+                               "parameters");
     }
     return declaration;
   }
@@ -597,12 +602,16 @@ AstDeclaration Parser::parseType(const Token& keyword) {
   declaration.kind = AstDeclarationKind::Type;
   declaration.span = keyword.span;
 
-  if (!match(TokenKind::Identifier)) {
+  if (!match(TokenKind::Identifier) && !match(TokenKind::Operator)) {
     diagnostics_.error(peek().span, "expected type member name");
     synchronize();
     return declaration;
   }
   declaration.name = previous().text;
+
+  if (check(TokenKind::LeftBracket)) {
+    declaration.typeParameters = parseTypeParameterList();
+  }
 
   if (check(TokenKind::Operator) && peek().text == ">") {
     advance();

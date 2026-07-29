@@ -1216,8 +1216,16 @@ Current scaffold status:
   preserved through collision-safe LLVM identifier escaping. Runtime and NIR
   coverage verifies left and right chains, both mixed-precedence directions,
   explicit grouping, non-selected exclusion, and malformed associativity.
-  Generic infix type aliases and whole-program intersection/union type
-  representation remain later type-system slices.
+- Generic alphanumeric and symbolic type aliases now accept type-parameter
+  clauses, including Scala 3's soft `infix` modifier for two-parameter aliases.
+  Alias applications are specialized through their target types and expanded
+  structurally in given-import filters, preserving wildcard operands,
+  associativity, operator precedence, and alias-to-alias chains. Top-level type
+  aliases are accepted as compile-time-only declarations and omitted from NIR,
+  while abstract type declarations remain member-only. Runtime and NIR coverage
+  verifies exact, wildcard, right-chain, chained-alias, non-selected, invalid
+  arity, and missing top-level target cases. Whole-program
+  intersection/union type representation remains a later type-system slice.
 - Full inline call-site specialization remains a later milestone.
 - Postfix type application now supports typed `value.isInstanceOf[Target]` and
   checked `value.asInstanceOf[Target]` for known classes, traits, and objects.

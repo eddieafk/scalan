@@ -3635,10 +3635,43 @@ std::string Typechecker::desugarGivenImportUserInfix(
     const SymbolInfo* symbol = typeSymbolForDeclaredName(name, &scope);
     return symbol != nullptr &&
            (symbol->kind == AstDeclarationKind::Class ||
-            symbol->kind == AstDeclarationKind::Trait) &&
+            symbol->kind == AstDeclarationKind::Trait ||
+            (symbol->kind == AstDeclarationKind::Type &&
+             symbol->hasImplementation)) &&
            symbol->typeParameters.size() == 2;
   };
 
+  std::function<std::string(
+      const TypeInfo&, const std::unordered_map<std::string, std::string>&)>
+      renderAliasType;
+  renderAliasType =
+      [&](const TypeInfo& type,
+          const std::unordered_map<std::string, std::string>& substitutions) {
+        if (type.typeParameter) {
+          auto replacement =
+              substitutions.find(type.typeParameterSymbolName);
+          if (replacement != substitutions.end()) {
+            return replacement->second;
+          }
+        }
+        const std::string& constructorName =
+            !type.typeConstructorName.empty() ? type.typeConstructorName
+                                              : type.runtimeName;
+        if (!constructorName.empty() && !type.typeArguments.empty()) {
+          std::string rendered = constructorName + "[";
+          for (std::size_t i = 0; i < type.typeArguments.size(); ++i) {
+            if (i != 0) {
+              rendered += ",";
+            }
+            rendered += renderAliasType(type.typeArguments[i], substitutions);
+          }
+          rendered += "]";
+          return rendered;
+        }
+        return type.name;
+      };
+
+  std::unordered_set<std::string> expandingAliases;
   std::function<std::string(std::string)> desugar;
   desugar = [&](std::string source) -> std::string {
     source = trim(source);
@@ -3740,7 +3773,7 @@ std::string Typechecker::desugarGivenImportUserInfix(
         continue;
       }
       const std::size_t after = nextNonSpace(source, i);
-      if (start == 0 && after < source.size() && source[after] == '[') {
+      if (after < source.size() && source[after] == '[') {
         continue;
       }
       operators.push_back(OperatorToken{start, i, name, precedence(name),
@@ -3788,7 +3821,8 @@ std::string Typechecker::desugarGivenImportUserInfix(
       if (operation.builtIn) {
         return desugar(left) + operation.name + desugar(right);
       }
-      return operation.name + "[" + desugar(left) + "," + desugar(right) + "]";
+      return desugar(operation.name + "[" + desugar(left) + "," +
+                     desugar(right) + "]");
     }
 
     std::size_t open = std::string::npos;
@@ -3828,12 +3862,41 @@ std::string Typechecker::desugarGivenImportUserInfix(
     }
     arguments.push_back(
         source.substr(argumentStart, source.size() - argumentStart - 1));
-    std::string rewritten = trim(source.substr(0, open)) + "[";
-    for (std::size_t i = 0; i < arguments.size(); ++i) {
+    std::vector<std::string> rewrittenArguments;
+    rewrittenArguments.reserve(arguments.size());
+    for (const std::string& argument : arguments) {
+      rewrittenArguments.push_back(desugar(argument));
+    }
+
+    const std::string constructorName = trim(source.substr(0, open));
+    const SymbolInfo* constructor =
+        typeSymbolForDeclaredName(constructorName, &scope);
+    if (constructor != nullptr &&
+        constructor->kind == AstDeclarationKind::Type &&
+        constructor->hasImplementation &&
+        constructor->typeParameters.size() == rewrittenArguments.size()) {
+      if (!expandingAliases.insert(constructor->symbolName).second) {
+        *malformed = true;
+        return source;
+      }
+      std::unordered_map<std::string, std::string> substitutions;
+      for (std::size_t i = 0; i < rewrittenArguments.size(); ++i) {
+        substitutions[constructor->typeParameters[i].symbolName] =
+            rewrittenArguments[i];
+      }
+      const std::string expanded =
+          renderAliasType(constructor->type, substitutions);
+      const std::string rewritten = desugar(expanded);
+      expandingAliases.erase(constructor->symbolName);
+      return rewritten;
+    }
+
+    std::string rewritten = constructorName + "[";
+    for (std::size_t i = 0; i < rewrittenArguments.size(); ++i) {
       if (i != 0) {
         rewritten += ",";
       }
-      rewritten += desugar(arguments[i]);
+      rewritten += rewrittenArguments[i];
     }
     rewritten += "]";
     return rewritten;
@@ -3946,6 +4009,13 @@ bool Typechecker::givenImportTypeMatches(const std::string& filter,
 
     const SymbolInfo* constructor =
         typeSymbolForDeclaredName(applied.constructor, &scope);
+    if (constructor != nullptr &&
+        constructor->kind == AstDeclarationKind::Type &&
+        constructor->hasImplementation) {
+      const TypeInfo expected = typeFromDeclaredName(pattern, &scope);
+      return expected.kind != SimpleTypeKind::Unknown &&
+             isAssignable(expected, value);
+    }
     if (constructor == nullptr ||
         (constructor->kind != AstDeclarationKind::Class &&
          constructor->kind != AstDeclarationKind::Trait) ||
@@ -4118,7 +4188,9 @@ bool Typechecker::validateGivenImportFilter(
           typeSymbolForDeclaredName(applied.constructor, &scope);
       if (constructor == nullptr ||
           (constructor->kind != AstDeclarationKind::Class &&
-           constructor->kind != AstDeclarationKind::Trait)) {
+           constructor->kind != AstDeclarationKind::Trait &&
+           !(constructor->kind == AstDeclarationKind::Type &&
+             constructor->hasImplementation))) {
         diagnostics_.error(span, "unresolved generic type constructor: " +
                                      applied.constructor);
         return false;
@@ -8736,8 +8808,13 @@ TypeInfo Typechecker::typeFromDeclaredName(const std::string& name, const Scope*
     }
     const SymbolInfo* constructor =
         typeSymbolForDeclaredName(applied.constructor, scope);
-    if (constructor == nullptr || (constructor->kind != AstDeclarationKind::Class &&
-                                   constructor->kind != AstDeclarationKind::Trait)) {
+    const bool supportedConstructor =
+        constructor != nullptr &&
+        (constructor->kind == AstDeclarationKind::Class ||
+         constructor->kind == AstDeclarationKind::Trait ||
+         (constructor->kind == AstDeclarationKind::Type &&
+          constructor->hasImplementation));
+    if (!supportedConstructor) {
       if (span != nullptr) {
         diagnostics_.error(*span, "unresolved generic type constructor: " +
                                       applied.constructor);

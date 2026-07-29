@@ -10841,10 +10841,8 @@ type Element = Int
   scalanative::support::DiagnosticEngine topLevelTypeDiagnostics;
   scalanative::tools::build::BuildResult topLevelType = driver.buildSource(
       "TopLevelType.scala", topLevelTypeSource, {}, topLevelTypeDiagnostics);
-  if (int code = expect(!topLevelType.ok &&
-                            contains(topLevelType.diagnosticsText,
-                                     "type declarations are only supported as members"),
-                        "top-level type alias escaped the member-only MVP boundary")) {
+  if (int code = expect(topLevelType.ok,
+                        "top-level type alias did not pass validation")) {
     return code;
   }
 

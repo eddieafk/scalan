@@ -208,6 +208,9 @@ infix trait Relates[A, B] {
   val label: String
 }
 class RelatesValue[A, B](val label: String) extends Relates[A, B]
+infix type AliasRelates[A, B] = Relates[A, B]
+infix type AliasAgain[A, B] = AliasRelates[A, B]
+type ~:[A, B] = Relates[A, B]
 
 trait +>[A, B] {
   val label: String
@@ -218,6 +221,7 @@ trait *:[A, B] {
   val label: String
 }
 class StarColonValue[A, B](val label: String) extends *:[A, B]
+infix type AliasStar[A, B] = *:[A, B]
 
 trait PairNamed[A, B] {
   val name: String
@@ -408,6 +412,34 @@ object SymbolicInfixGivenImportProviders {
       ImportDog]("must-not-import")
 }
 
+object AliasInfixGivenImportProviders {
+  given alphaExact: Relates[ImportAnimal, ImportCat] =
+    new RelatesValue[
+      ImportAnimal,
+      ImportCat]("alias-infix")
+  given alphaWildcard: Relates[ImportRock, ImportDog] =
+    new RelatesValue[
+      ImportRock,
+      ImportDog]("alias-infix-wildcard")
+  given symbolicRight:
+      Relates[ImportAnimal, Relates[ImportRock, ImportCat]] =
+    new RelatesValue[
+      ImportAnimal,
+      Relates[ImportRock, ImportCat]]("alias-infix-right-chain")
+  given chained: Relates[ImportRock, ImportAnimal] =
+    new RelatesValue[
+      ImportRock,
+      ImportAnimal]("alias-infix-chained")
+  given symbolicTarget: *:[ImportAnimal, ImportRock] =
+    new StarColonValue[
+      ImportAnimal,
+      ImportRock]("alias-symbolic-target")
+  given reversed: Relates[ImportCat, ImportAnimal] =
+    new RelatesValue[
+      ImportCat,
+      ImportAnimal]("must-not-import")
+}
+
 import GivenImportProviders.given
 import StarImportProviders.*
 import CombinedImportProviders.{given, *}
@@ -436,6 +468,13 @@ import SymbolicInfixGivenImportProviders.{
   given ImportDog +> ImportCat *: ImportAnimal,
   given ImportDog *: ImportCat +> ImportAnimal,
   given (ImportDog *: ImportCat) *: ImportAnimal
+}
+import AliasInfixGivenImportProviders.{
+  given ImportAnimal AliasRelates ImportCat,
+  given ? AliasRelates ImportDog,
+  given ImportAnimal ~: ImportRock ~: ImportCat,
+  given ImportRock AliasAgain ImportAnimal,
+  given ImportAnimal AliasStar ImportRock
 }
 
 object Main {
@@ -805,6 +844,13 @@ object Main {
     println(starColonOperatorName[
       *:[ImportDog, ImportCat],
       ImportAnimal]())
+    println(userInfixName[ImportAnimal, ImportCat]())
+    println(userInfixName[ImportRock, ImportDog]())
+    println(userInfixName[
+      ImportAnimal,
+      Relates[ImportRock, ImportCat]]())
+    println(userInfixName[ImportRock, ImportAnimal]())
+    println(starColonOperatorName[ImportAnimal, ImportRock]())
     println(contextName())
     println(forwardedContextName[Int]())
     println(repeatedContextName())
@@ -1007,6 +1053,7 @@ class Sibling extends Parent
 trait Marker[A]
 infix trait Relation[A, B]
 infix trait UnaryRelation[A]
+infix type UnaryAlias[A] = Relation[A, A]
 trait +[A, B]
 trait +:[A, B]
 object Providers {
@@ -1027,6 +1074,17 @@ object Main {
   val includedParent = requireMarker[Parent]()
   val excludedSibling = requireMarker[Sibling]()
 }
+)";
+  constexpr const char* invalidGenericAliasSource =
+      R"(package demo.invalidgenericalias
+
+trait Relation[A, B]
+infix type BrokenAlias[A, B] = Relation[A]
+)";
+  constexpr const char* invalidTopLevelAbstractTypeSource =
+      R"(package demo.invalidtoplevelabstracttype
+
+type AbstractTopLevel
 )";
   constexpr const char* invalidNestedDerivationSource =
       R"(package demo.invalidnestedderivation
@@ -1115,6 +1173,15 @@ object Main {
       driver.buildSource("InvalidFilteredGivenImport.scala",
                          invalidFilteredGivenImportSource, {},
                          invalidFilteredGivenImportDiagnostics);
+  scalanative::support::DiagnosticEngine invalidGenericAliasDiagnostics;
+  const scalanative::tools::build::BuildResult invalidGenericAlias =
+      driver.buildSource("InvalidGenericAlias.scala", invalidGenericAliasSource,
+                         {}, invalidGenericAliasDiagnostics);
+  scalanative::support::DiagnosticEngine invalidTopLevelAbstractTypeDiagnostics;
+  const scalanative::tools::build::BuildResult invalidTopLevelAbstractType =
+      driver.buildSource("InvalidTopLevelAbstractType.scala",
+                         invalidTopLevelAbstractTypeSource, {},
+                         invalidTopLevelAbstractTypeDiagnostics);
   scalanative::support::DiagnosticEngine invalidNestedDerivationDiagnostics;
   const scalanative::tools::build::BuildResult invalidNestedDerivation =
       driver.buildSource("InvalidNestedDerivation.scala", invalidNestedDerivationSource,
@@ -1165,6 +1232,9 @@ object Main {
               "symbolic-left-chain\nsymbolic-right-chain\n"
               "symbolic-precedence-right\nsymbolic-precedence-left\n"
               "symbolic-grouped\n"
+              "alias-infix\nalias-infix-wildcard\n"
+              "alias-infix-right-chain\nalias-infix-chained\n"
+              "alias-symbolic-target\n"
               "context-int\n"
               "context-int\ncontext-int:context-int\ncontext-int-string\n"
               "context-int-string\nexpected-context\ncontext-int-string\n"
@@ -1258,6 +1328,14 @@ object Main {
                "Child + Parent +: Sibling") &&
       contains(invalidFilteredGivenImport.diagnosticsText,
                "infix class or trait requires exactly two type parameters") &&
+      contains(invalidFilteredGivenImport.diagnosticsText,
+               "infix type requires exactly two type parameters") &&
+      !invalidGenericAlias.ok &&
+      contains(invalidGenericAlias.diagnosticsText,
+               "type application to Relation has 1 arguments but expected 2") &&
+      !invalidTopLevelAbstractType.ok &&
+      contains(invalidTopLevelAbstractType.diagnosticsText,
+               "top-level type declaration requires an alias target") &&
       !invalidNestedDerivation.ok &&
       contains(invalidNestedDerivation.diagnosticsText,
                "derives declarations nested in classes or traits are not "
@@ -1517,6 +1595,29 @@ object Main {
       !contains(result.nirText,
                 "call %demo.qualifiedcases."
                 "SymbolicInfixGivenImportProviders.reversed()") &&
+      contains(result.nirText,
+               "call %userInfixName(call "
+               "%demo.qualifiedcases.AliasInfixGivenImportProviders."
+               "alphaExact())") &&
+      contains(result.nirText,
+               "call %userInfixName(call "
+               "%demo.qualifiedcases.AliasInfixGivenImportProviders."
+               "alphaWildcard())") &&
+      contains(result.nirText,
+               "call %userInfixName(call "
+               "%demo.qualifiedcases.AliasInfixGivenImportProviders."
+               "symbolicRight())") &&
+      contains(result.nirText,
+               "call %userInfixName(call "
+               "%demo.qualifiedcases.AliasInfixGivenImportProviders."
+               "chained())") &&
+      contains(result.nirText,
+               "call %starColonOperatorName(call "
+               "%demo.qualifiedcases.AliasInfixGivenImportProviders."
+               "symbolicTarget())") &&
+      !contains(result.nirText,
+                "call %demo.qualifiedcases."
+                "AliasInfixGivenImportProviders.reversed()") &&
       contains(result.nirText, "define @demo.qualifiedcases.Main.contextName : "
                                "(demo.qualifiedcases.Named)String") &&
       contains(result.nirText, "ret String call %contextName(%named)") &&
@@ -1693,6 +1794,10 @@ object Main {
                       invalidGivenImport.diagnosticsText +
                       "', invalid-filtered-given-import-diagnostics='" +
                       invalidFilteredGivenImport.diagnosticsText +
+                      "', invalid-generic-alias-diagnostics='" +
+                      invalidGenericAlias.diagnosticsText +
+                      "', invalid-top-level-abstract-type-diagnostics='" +
+                      invalidTopLevelAbstractType.diagnosticsText +
                       "', invalid-nested-derivation-diagnostics='" +
                       invalidNestedDerivation.diagnosticsText +
                       "', invalid-context-bound-diagnostics='" +

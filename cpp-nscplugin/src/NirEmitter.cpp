@@ -4241,6 +4241,8 @@ void NirEmitter::emitDeclaration(
     std::map<std::string, std::string>* runtimeArrayDeclarations) {
   if (declaration.kind == frontend::AstDeclarationKind::Package ||
       declaration.kind == frontend::AstDeclarationKind::Import ||
+      (declaration.kind == frontend::AstDeclarationKind::Type &&
+       ownerKind == frontend::AstDeclarationKind::Package) ||
       declaration.name.empty()) {
     return;
   }
