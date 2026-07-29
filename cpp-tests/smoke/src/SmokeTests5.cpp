@@ -89,6 +89,24 @@ object Selectors {
     }
 
   inline def inferredNull[A](): A = null
+
+  inline def contextual[A]()(using named: Named[A]): String =
+    summonFrom {
+      case found: Named[A] => prefix + found.label()
+      case _ => "contextual-fallback"
+    }
+
+  inline def contextualValue[A](value: String)(using named: Named[A]): String =
+    prefix + named.label() + ":" + named.label() + ":" + value + ":" + value
+
+  inline def nestedContextual[A](value: String)(using named: Named[A]): String =
+    "nested-context:" + contextualValue[A](value)
+
+  inline def inferredContextual[A](value: A)(using named: Named[A]): String =
+    prefix + named.label()
+
+  inline def inferredFromContext[A]()(using named: Named[A]): String =
+    prefix + named.label()
 }
 
 object Main {
@@ -97,6 +115,11 @@ object Main {
   def nextValue(): String = {
     println("effect")
     "value"
+  }
+
+  def nextContextValue(): String = {
+    println("context-effect")
+    "context-value"
   }
 
   def intSelected: String = Selectors.selected[Int]
@@ -124,6 +147,21 @@ object Main {
   def inferredPassedInt: Int = Selectors.passed(43)
   def inferredPassedString: String = Selectors.passed("forty-three")
   def inferredNullString: String = Selectors.inferredNull()
+  def contextualSelected: String = Selectors.contextual[Int]()
+  def contextualLocal: String = {
+    given contextualString: Named[String] =
+      new NamedValue[String]("contextual-local")
+    Selectors.contextual[String]()
+  }
+  def contextualValueSelected: String =
+    Selectors.contextualValue[Int](nextContextValue())
+  def explicitContextual: String =
+    Selectors.contextual[String]()(using
+      new NamedValue[String]("explicit-context"))
+  def nestedContextualSelected: String =
+    Selectors.nestedContextual[Int]("nested")
+  def inferredContextualSelected: String = Selectors.inferredContextual(9)
+  def inferredContextOnly: String = Selectors.inferredFromContext()
 
   def main(args: Array[String]): Unit = {
     println(intSelected)
@@ -141,6 +179,13 @@ object Main {
     println(inferredPassedInt)
     println(inferredPassedString)
     println(inferredNullString == null)
+    println(contextualSelected)
+    println(contextualLocal)
+    println(contextualValueSelected)
+    println(explicitContextual)
+    println(nestedContextualSelected)
+    println(inferredContextualSelected)
+    println(inferredContextOnly)
   }
 }
 )";
@@ -148,8 +193,12 @@ object Main {
       R"(package demo.invalidinlinecalls
 
 object Main {
+  trait Missing[A]
+
   inline def nonGeneric: String = "non-generic"
-  inline def withContext[A](using value: A): String = "context-parameter"
+  inline def missingContext[A]()(using value: Missing[A]): String =
+    "missing-context"
+  def unsupportedMissingContext: String = missingContext[Int]()
   inline def noInference[A](value: String): String = value
   def unsupportedInference: String = noInference("value")
   inline def missingBody[A]: String
@@ -227,6 +276,20 @@ class Instance {
       functionText(result.nirText, "demo.inlinecalls.Main.inferredPassedString");
   const std::string_view inferredNullString =
       functionText(result.nirText, "demo.inlinecalls.Main.inferredNullString");
+  const std::string_view contextualSelected =
+      functionText(result.nirText, "demo.inlinecalls.Main.contextualSelected");
+  const std::string_view contextualLocal =
+      functionText(result.nirText, "demo.inlinecalls.Main.contextualLocal");
+  const std::string_view contextualValueSelected =
+      functionText(result.nirText, "demo.inlinecalls.Main.contextualValueSelected");
+  const std::string_view explicitContextual =
+      functionText(result.nirText, "demo.inlinecalls.Main.explicitContextual");
+  const std::string_view nestedContextualSelected =
+      functionText(result.nirText, "demo.inlinecalls.Main.nestedContextualSelected");
+  const std::string_view inferredContextualSelected =
+      functionText(result.nirText, "demo.inlinecalls.Main.inferredContextualSelected");
+  const std::string_view inferredContextOnly =
+      functionText(result.nirText, "demo.inlinecalls.Main.inferredContextOnly");
 
   const bool valid =
       status == 0 &&
@@ -237,14 +300,20 @@ class Instance {
               "nested-value:selected:member-int:nested:nested\n"
               "42\nforty-two\n"
               "selected:member-int\ninferred-fallback\n"
-              "selected:inferred-local\n43\nforty-three\ntrue\n" &&
+              "selected:inferred-local\n43\nforty-three\ntrue\n"
+              "selected:member-int\nselected:contextual-local\n"
+              "context-effect\n"
+              "selected:member-int:member-int:context-value:context-value\n"
+              "selected:explicit-context\n"
+              "nested-context:selected:member-int:member-int:nested:nested\n"
+              "selected:member-int\nselected:member-int\n" &&
       !invalid.ok &&
       contains(invalid.diagnosticsText,
                "inline call-site specialization currently requires a generic "
                "method") &&
       contains(invalid.diagnosticsText,
-               "inline call-site specialization does not support contextual "
-               "parameters yet") &&
+               "no given value found for context parameter value of type") &&
+      contains(invalid.diagnosticsText, "required by missingContext") &&
       contains(invalid.diagnosticsText,
                "cannot infer type argument A for noInference from value arguments") &&
       contains(invalid.diagnosticsText, "inline method requires an implementation") &&
@@ -294,7 +363,32 @@ class Instance {
       contains(inferredPassedString, "let %value : String = \"forty-three\"") &&
       !contains(inferredPassedString, "%demo.inlinecalls.Selectors.passed") &&
       contains(inferredNullString, "ret String null") &&
-      !contains(inferredNullString, "%demo.inlinecalls.Selectors.inferredNull");
+      !contains(inferredNullString, "%demo.inlinecalls.Selectors.inferredNull") &&
+      contains(contextualSelected, "let %named : demo.inlinecalls.Named") &&
+      countOccurrences(contextualSelected, "Main.intNamed") == 1 &&
+      !contains(contextualSelected, "%demo.inlinecalls.Selectors.contextual") &&
+      contains(contextualLocal, "contextual-local") &&
+      !contains(contextualLocal, "%demo.inlinecalls.Selectors.contextual") &&
+      contains(contextualValueSelected, "let %value : String") &&
+      contains(contextualValueSelected, "let %named : demo.inlinecalls.Named") &&
+      countOccurrences(contextualValueSelected, "nextContextValue") == 1 &&
+      countOccurrences(contextualValueSelected, "Main.intNamed") == 1 &&
+      !contains(contextualValueSelected,
+                "%demo.inlinecalls.Selectors.contextualValue") &&
+      contains(explicitContextual, "explicit-context") &&
+      !contains(explicitContextual, "Main.intNamed") &&
+      !contains(explicitContextual, "%demo.inlinecalls.Selectors.contextual") &&
+      contains(nestedContextualSelected, "\"nested-context:\"") &&
+      countOccurrences(nestedContextualSelected, "Main.intNamed") == 1 &&
+      !contains(nestedContextualSelected,
+                "%demo.inlinecalls.Selectors.nestedContextual") &&
+      !contains(nestedContextualSelected,
+                "%demo.inlinecalls.Selectors.contextualValue") &&
+      countOccurrences(inferredContextualSelected, "Main.intNamed") == 1 &&
+      !contains(inferredContextualSelected,
+                "%demo.inlinecalls.Selectors.inferredContextual") &&
+      countOccurrences(inferredContextOnly, "Main.intNamed") == 1 &&
+      !contains(inferredContextOnly, "%demo.inlinecalls.Selectors.inferredFromContext");
   return valid
              ? 0
              : fail("inline summonFrom smoke test failed (output='" + text +
@@ -314,7 +408,15 @@ class Instance {
                     std::string(inferredLocal) + "', inferred-passed-int='" +
                     std::string(inferredPassedInt) + "', inferred-passed-string='" +
                     std::string(inferredPassedString) + "', inferred-null-string='" +
-                    std::string(inferredNullString) + "')");
+                    std::string(inferredNullString) + "', contextual-selected='" +
+                    std::string(contextualSelected) + "', contextual-local='" +
+                    std::string(contextualLocal) + "', contextual-value-selected='" +
+                    std::string(contextualValueSelected) + "', explicit-contextual='" +
+                    std::string(explicitContextual) + "', nested-contextual='" +
+                    std::string(nestedContextualSelected) + "', inferred-contextual='" +
+                    std::string(inferredContextualSelected) +
+                    "', inferred-context-only='" + std::string(inferredContextOnly) +
+                    "')");
 }
 
 } // namespace

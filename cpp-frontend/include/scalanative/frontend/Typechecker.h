@@ -137,6 +137,7 @@ struct TypedInlineApplication {
   std::vector<std::string> parameterNames;
   std::vector<TypeInfo> parameterTypes;
   std::vector<AstExpression> arguments;
+  std::vector<TypedContextArgument> contextualArguments;
   std::vector<TypedExpressionInfo> expressionTypes;
   std::vector<TypedContextApplication> contextApplications;
   std::vector<TypedInlineApplication> inlineApplications;
@@ -332,12 +333,15 @@ private:
                                const SymbolInfo& symbol,
                                const std::vector<TypeInfo>& typeArguments,
                                const std::vector<AstExpression>& arguments,
+                               const std::vector<TypedContextArgument>&
+                                   contextualArguments,
                                Scope& scope, const TypeInfo* expectedType);
   [[nodiscard]] std::vector<SymbolInfo> inferContextualTypeApplications(
       const SymbolInfo& symbol, const std::vector<TypeInfo>& inferredTypeArguments,
       std::size_t firstContextParameter, Scope& scope, const support::SourceSpan& span,
       bool reportDiagnostics = true,
-      std::unordered_set<std::string>* expandingGenericEvidence = nullptr) const;
+      std::unordered_set<std::string>* expandingGenericEvidence = nullptr,
+      std::vector<TypeInfo>* resolvedTypeArguments = nullptr) const;
   [[nodiscard]] bool isAbstractTypeMember(const TypeInfo& type) const;
   [[nodiscard]] bool runtimeSignatureUsesAbstractType(const SymbolInfo& member) const;
   [[nodiscard]] TypeInfo

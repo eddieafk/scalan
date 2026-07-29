@@ -1993,30 +1993,60 @@ nir::Value inlineApplicationValueFor(
     const frontend::TypedInlineApplication& application,
     const ValueContext& callSiteContext) {
   ValueContext inlineContext = inlineContextFor(application, callSiteContext);
-  if (application.arguments.empty()) {
+  if (application.arguments.empty() &&
+      application.contextualArguments.empty()) {
     return scopedBodyValueFor(application.body, inlineContext);
   }
 
   std::vector<nir::Value> values;
-  values.reserve(application.arguments.size() + 1);
-  for (std::size_t index = 0; index < application.arguments.size(); ++index) {
-    const frontend::AstExpression& argument = application.arguments[index];
+  values.reserve(application.parameterNames.size() + 1);
+  std::size_t sourceArgumentIndex = 0;
+  for (std::size_t parameterIndex = 0;
+       parameterIndex < application.parameterNames.size(); ++parameterIndex) {
     const std::string name =
-        index < application.parameterNames.size()
-            ? application.parameterNames[index]
-            : "inline$argument" + std::to_string(index);
+        application.parameterNames[parameterIndex].empty()
+            ? "inline$argument" + std::to_string(parameterIndex)
+            : application.parameterNames[parameterIndex];
     const frontend::TypeInfo type =
-        index < application.parameterTypes.size()
-            ? application.parameterTypes[index]
+        parameterIndex < application.parameterTypes.size()
+            ? application.parameterTypes[parameterIndex]
             : frontend::TypeInfo{frontend::SimpleTypeKind::Unknown, "Unknown"};
     const std::string runtimeType = runtimeTypeName(type);
-    nir::Value value = expressionValueFor(argument, callSiteContext);
-    value = boxForObjectStorage(std::move(value), runtimeType, argument,
-                                callSiteContext);
-    value = narrowCompositeValue(std::move(value), type, argument,
-                                 callSiteContext);
-    values.push_back(
-        nir::localLetValue(name, runtimeType, std::move(value), argument.span));
+    const auto contextual = std::find_if(
+        application.contextualArguments.begin(),
+        application.contextualArguments.end(),
+        [&](const frontend::TypedContextArgument& argument) {
+          return argument.parameterIndex == parameterIndex;
+        });
+    nir::Value value;
+    support::SourceSpan argumentSpan = application.span;
+    if (contextual != application.contextualArguments.end()) {
+      frontend::AstExpression contextExpression;
+      contextExpression.span = application.span;
+      value =
+          materializeContextArgument(*contextual, contextExpression, callSiteContext);
+      if (runtimeType == "Object") {
+        if (const std::string primitive =
+                boxedObjectTypeName(contextual->type.kind);
+            !primitive.empty()) {
+          value =
+              nir::boxValue(primitive, std::move(value), application.span);
+        }
+      }
+    } else if (sourceArgumentIndex < application.arguments.size()) {
+      const frontend::AstExpression& argument =
+          application.arguments[sourceArgumentIndex++];
+      argumentSpan = argument.span;
+      value = expressionValueFor(argument, callSiteContext);
+      value = boxForObjectStorage(std::move(value), runtimeType, argument,
+                                  callSiteContext);
+      value = narrowCompositeValue(std::move(value), type, argument,
+                                   callSiteContext);
+    } else {
+      value = nir::unknownValue("<missing-inline-argument>", application.span);
+    }
+    values.push_back(nir::localLetValue(name, runtimeType, std::move(value),
+                                        argumentSpan));
     inlineContext.localNames.insert(name);
   }
   values.push_back(scopedBodyValueFor(application.body, inlineContext));

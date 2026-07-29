@@ -1646,14 +1646,6 @@ TypedDeclaration Typechecker::typecheckDeclaration(const AstDeclaration& declara
           declaration.span,
           "inline call-site specialization currently requires a generic method");
     }
-    if (std::any_of(typed.contextualParameters.begin(),
-                    typed.contextualParameters.end(),
-                    [](bool contextual) { return contextual; })) {
-      diagnostics_.error(
-          declaration.span,
-          "inline call-site specialization does not support contextual "
-          "parameters yet");
-    }
     if (!typed.hasInitializer) {
       diagnostics_.error(declaration.span,
                          "inline method requires an implementation");
@@ -4482,12 +4474,27 @@ TypeInfo Typechecker::inferExpressionType(const AstExpression& expression, Scope
 void Typechecker::recordInlineApplication(
     const AstExpression& expression, const SymbolInfo& symbol,
     const std::vector<TypeInfo>& typeArguments,
-    const std::vector<AstExpression>& arguments, Scope& scope,
+    const std::vector<AstExpression>& arguments,
+    const std::vector<TypedContextArgument>& contextualArguments, Scope& scope,
     const TypeInfo* expectedType) {
+  const std::size_t contextualParameterCount = static_cast<std::size_t>(
+      std::count(symbol.contextualParameters.begin(),
+                 symbol.contextualParameters.end(), true));
+  const bool hasExplicitContextArguments =
+      contextualArguments.empty() && arguments.size() == symbol.parameters.size();
+  const bool hasMaterializedContextArguments =
+      contextualArguments.size() == contextualParameterCount &&
+      arguments.size() + contextualArguments.size() == symbol.parameters.size() &&
+      std::all_of(contextualArguments.begin(), contextualArguments.end(),
+                  [&](const TypedContextArgument& argument) {
+                    return argument.parameterIndex <
+                               symbol.contextualParameters.size() &&
+                           symbol.contextualParameters[argument.parameterIndex];
+                  });
   if (!symbol.isInline || !symbol.hasImplementation ||
       symbol.inlineBody.kind == AstExpressionKind::Empty ||
       symbol.typeParameters.size() != typeArguments.size() ||
-      symbol.parameters.size() != arguments.size()) {
+      (!hasExplicitContextArguments && !hasMaterializedContextArguments)) {
     return;
   }
   if (!expandingInlineApplications_.insert(symbol.symbolName).second) {
@@ -4533,6 +4540,9 @@ void Typechecker::recordInlineApplication(
     parameter.name = name;
     parameter.symbolName = qualify(symbol.symbolName, name);
     parameter.type = type;
+    parameter.isContextParameter =
+        index < symbol.contextualParameters.size() &&
+        symbol.contextualParameters[index];
     parameter.isLexicalValue = true;
     inlineScope[name] = std::move(parameter);
     parameterNames.push_back(name);
@@ -4559,6 +4569,7 @@ void Typechecker::recordInlineApplication(
   application.parameterNames = std::move(parameterNames);
   application.parameterTypes = std::move(parameterTypes);
   application.arguments = arguments;
+  application.contextualArguments = contextualArguments;
   application.expressionTypes = std::move(expressionTypes_);
   application.contextApplications = std::move(contextApplications_);
   application.inlineApplications = std::move(inlineApplications_);
@@ -4878,7 +4889,7 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
           resolvedArguments.push_back(
               typeFromDeclaredName(argument, &scope));
         }
-        recordInlineApplication(expression, target, resolvedArguments, {}, scope,
+        recordInlineApplication(expression, target, resolvedArguments, {}, {}, scope,
                                 expectedType);
       }
       return specialized.type;
@@ -5795,15 +5806,19 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
         const std::size_t ordinaryParameterCount =
             inferenceTarget.parameterTypes.size() - contextualParameterCount;
         std::vector<SymbolInfo> contextualApplications;
+        std::vector<TypeInfo> contextuallyInferredTypeArguments;
         if (!inferenceConflict &&
             firstContextParameter < inferenceTarget.parameterTypes.size() &&
             argumentTypes.size() == ordinaryParameterCount) {
           contextualApplications = inferContextualTypeApplications(
               inferenceTarget, inferredTypeArguments, firstContextParameter, scope,
-              expression.span);
+              expression.span, true, nullptr,
+              &contextuallyInferredTypeArguments);
         }
         if (contextualApplications.size() == 1) {
           specializedCallee = std::move(contextualApplications.front());
+          inferredTypeArguments =
+              std::move(contextuallyInferredTypeArguments);
         } else if (contextualApplications.size() > 1) {
           diagnostics_.error(expression.span,
                              "ambiguous contextual type inference for " +
@@ -5833,6 +5848,7 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
       calleeType = inferExpressionType(callee, scope);
     }
 
+    std::vector<TypedContextArgument> inlineContextArguments;
     if (calleeSymbol != nullptr && calleeSymbol->typeParameters.empty()) {
       const std::size_t contextualParameterCount = static_cast<std::size_t>(
           std::count(calleeSymbol->contextualParameters.begin(),
@@ -5849,6 +5865,7 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
               std::min(argument.parameterIndex, argumentTypes.size());
           argumentTypes.insert(argumentTypes.begin() + insertionIndex, argument.type);
         }
+        inlineContextArguments = contextArguments;
         recordContextApplication(expression.span, std::move(contextArguments));
         materializedContextArguments = true;
       }
@@ -5892,31 +5909,38 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
         }
       }
     }
+    const auto hasSupportedInlineArguments =
+        [&](const SymbolInfo& target) {
+          const std::size_t sourceArgumentCount =
+              expression.children.size() - 1;
+          if (inlineContextArguments.empty()) {
+            return sourceArgumentCount == target.parameters.size();
+          }
+          const std::size_t contextualParameterCount =
+              static_cast<std::size_t>(std::count(
+                  target.contextualParameters.begin(),
+                  target.contextualParameters.end(), true));
+          return inlineContextArguments.size() == contextualParameterCount &&
+                 sourceArgumentCount + contextualParameterCount ==
+                     target.parameters.size();
+        };
     if (explicitInlineTarget.has_value() && calleeSymbol != nullptr &&
         calleeSymbol->typeParameters.empty() &&
-        explicitInlineTarget->parameters.size() + 1 ==
-            expression.children.size() &&
-        std::none_of(explicitInlineTarget->contextualParameters.begin(),
-                     explicitInlineTarget->contextualParameters.end(),
-                     [](bool contextual) { return contextual; })) {
+        hasSupportedInlineArguments(*explicitInlineTarget)) {
       std::vector<AstExpression> inlineArguments(expression.children.begin() + 1,
                                                  expression.children.end());
       recordInlineApplication(expression, *explicitInlineTarget,
-                              explicitInlineTypeArguments, inlineArguments, scope,
-                              expectedType);
+                              explicitInlineTypeArguments, inlineArguments,
+                              inlineContextArguments, scope, expectedType);
     }
     if (inferredInlineTarget.has_value() && calleeSymbol != nullptr &&
         calleeSymbol->typeParameters.empty() &&
-        inferredInlineTarget->parameters.size() + 1 ==
-            expression.children.size() &&
-        std::none_of(inferredInlineTarget->contextualParameters.begin(),
-                     inferredInlineTarget->contextualParameters.end(),
-                     [](bool contextual) { return contextual; })) {
+        hasSupportedInlineArguments(*inferredInlineTarget)) {
       std::vector<AstExpression> inlineArguments(expression.children.begin() + 1,
                                                  expression.children.end());
       recordInlineApplication(expression, *inferredInlineTarget,
-                              inferredInlineTypeArguments, inlineArguments, scope,
-                              expectedType);
+                              inferredInlineTypeArguments, inlineArguments,
+                              inlineContextArguments, scope, expectedType);
     }
     return calleeSymbol == nullptr ? calleeType
                                    : staticExpressionType(std::move(calleeType));
@@ -8914,7 +8938,8 @@ std::vector<SymbolInfo> Typechecker::inferContextualTypeApplications(
     const SymbolInfo& symbol, const std::vector<TypeInfo>& inferredTypeArguments,
     std::size_t firstContextParameter, Scope& scope, const support::SourceSpan& span,
     bool reportDiagnostics,
-    std::unordered_set<std::string>* expandingGenericEvidence) const {
+    std::unordered_set<std::string>* expandingGenericEvidence,
+    std::vector<TypeInfo>* resolvedTypeArguments) const {
   using InferenceState = std::unordered_map<std::string, TypeInfo>;
 
   const auto isApplicationTypeParameter = [&](const TypeInfo& type) {
@@ -9163,6 +9188,13 @@ std::vector<SymbolInfo> Typechecker::inferContextualTypeApplications(
   if (reportDiagnostics && viable.size() == 1) {
     viable.front() =
         specializeResolvedTypeApplication(symbol, viableArguments.front(), span, true);
+  }
+  if (resolvedTypeArguments != nullptr) {
+    if (viable.size() == 1) {
+      *resolvedTypeArguments = viableArguments.front();
+    } else {
+      resolvedTypeArguments->clear();
+    }
   }
   return viable;
 }
