@@ -134,6 +134,9 @@ struct TypedInlineApplication {
   std::string symbolName;
   std::string ownerName;
   AstExpression body;
+  std::vector<std::string> parameterNames;
+  std::vector<TypeInfo> parameterTypes;
+  std::vector<AstExpression> arguments;
   std::vector<TypedExpressionInfo> expressionTypes;
   std::vector<TypedContextApplication> contextApplications;
   std::vector<TypedInlineApplication> inlineApplications;
@@ -328,6 +331,7 @@ private:
   void recordInlineApplication(const AstExpression& expression,
                                const SymbolInfo& symbol,
                                const std::vector<TypeInfo>& typeArguments,
+                               const std::vector<AstExpression>& arguments,
                                Scope& scope, const TypeInfo* expectedType);
   [[nodiscard]] std::vector<SymbolInfo> inferContextualTypeApplications(
       const SymbolInfo& symbol, const std::vector<TypeInfo>& inferredTypeArguments,

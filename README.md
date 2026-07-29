@@ -88,8 +88,8 @@ build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
   --output /tmp/contextual-abstractions \
   cpp-examples/ContextualAbstractions.scala
 
-# Compile parameterless generic `inline def` call-site specialization with
-# explicit type arguments and per-call `summonFrom` reduction.
+# Compile generic `inline def` call-site specialization with explicit type
+# arguments, ordinary value parameters, and per-call `summonFrom` reduction.
 build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
   --output /tmp/inline-summon-from \
   cpp-examples/InlineSummonFrom.scala

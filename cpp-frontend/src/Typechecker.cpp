@@ -1646,11 +1646,13 @@ TypedDeclaration Typechecker::typecheckDeclaration(const AstDeclaration& declara
           declaration.span,
           "inline call-site specialization currently requires a generic method");
     }
-    if (!typed.parameterTypes.empty()) {
+    if (std::any_of(typed.contextualParameters.begin(),
+                    typed.contextualParameters.end(),
+                    [](bool contextual) { return contextual; })) {
       diagnostics_.error(
           declaration.span,
-          "inline call-site specialization currently requires a parameterless "
-          "method");
+          "inline call-site specialization does not support contextual "
+          "parameters yet");
     }
     if (!typed.hasInitializer) {
       diagnostics_.error(declaration.span,
@@ -4479,11 +4481,13 @@ TypeInfo Typechecker::inferExpressionType(const AstExpression& expression, Scope
 
 void Typechecker::recordInlineApplication(
     const AstExpression& expression, const SymbolInfo& symbol,
-    const std::vector<TypeInfo>& typeArguments, Scope& scope,
+    const std::vector<TypeInfo>& typeArguments,
+    const std::vector<AstExpression>& arguments, Scope& scope,
     const TypeInfo* expectedType) {
   if (!symbol.isInline || !symbol.hasImplementation ||
       symbol.inlineBody.kind == AstExpressionKind::Empty ||
-      symbol.typeParameters.size() != typeArguments.size()) {
+      symbol.typeParameters.size() != typeArguments.size() ||
+      symbol.parameters.size() != arguments.size()) {
     return;
   }
   if (!expandingInlineApplications_.insert(symbol.symbolName).second) {
@@ -4499,8 +4503,10 @@ void Typechecker::recordInlineApplication(
       members != memberScopes_.end()) {
     mergeScope(inlineScope, members->second);
   }
+  std::unordered_map<std::string, TypeInfo> substitutions;
   for (std::size_t index = 0; index < typeArguments.size(); ++index) {
     const TypeParameterInfo& parameter = symbol.typeParameters[index];
+    substitutions[parameter.symbolName] = typeArguments[index];
     SymbolInfo concreteType;
     concreteType.kind = AstDeclarationKind::Type;
     concreteType.name = parameter.name;
@@ -4510,6 +4516,27 @@ void Typechecker::recordInlineApplication(
     concreteType.upperBound = typeArguments[index];
     concreteType.hasImplementation = true;
     inlineScope[parameter.name] = std::move(concreteType);
+  }
+
+  std::vector<std::string> parameterNames;
+  std::vector<TypeInfo> parameterTypes;
+  parameterNames.reserve(symbol.parameters.size());
+  parameterTypes.reserve(symbol.parameters.size());
+  for (std::size_t index = 0; index < symbol.parameters.size(); ++index) {
+    const std::string name = parameterName(symbol.parameters[index]);
+    TypeInfo type =
+        index < symbol.parameterTypes.size()
+            ? substituteTypeParameters(symbol.parameterTypes[index], substitutions)
+            : TypeInfo{SimpleTypeKind::Unknown, "Unknown"};
+    SymbolInfo parameter;
+    parameter.kind = parameterDeclarationKind(symbol.parameters[index]);
+    parameter.name = name;
+    parameter.symbolName = qualify(symbol.symbolName, name);
+    parameter.type = type;
+    parameter.isLexicalValue = true;
+    inlineScope[name] = std::move(parameter);
+    parameterNames.push_back(name);
+    parameterTypes.push_back(std::move(type));
   }
 
   std::vector<TypedExpressionInfo> outerExpressionTypes =
@@ -4529,6 +4556,9 @@ void Typechecker::recordInlineApplication(
   application.symbolName = symbol.symbolName;
   application.ownerName = definitionOwner;
   application.body = symbol.inlineBody;
+  application.parameterNames = std::move(parameterNames);
+  application.parameterTypes = std::move(parameterTypes);
+  application.arguments = arguments;
   application.expressionTypes = std::move(expressionTypes_);
   application.contextApplications = std::move(contextApplications_);
   application.inlineApplications = std::move(inlineApplications_);
@@ -4848,7 +4878,7 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
           resolvedArguments.push_back(
               typeFromDeclaredName(argument, &scope));
         }
-        recordInlineApplication(expression, target, resolvedArguments, scope,
+        recordInlineApplication(expression, target, resolvedArguments, {}, scope,
                                 expectedType);
       }
       return specialized.type;
@@ -5682,6 +5712,8 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
 
     const SymbolInfo* calleeSymbol = nullptr;
     SymbolInfo specializedCallee;
+    std::optional<SymbolInfo> explicitInlineTarget;
+    std::vector<TypeInfo> explicitInlineTypeArguments;
     if (callee.kind == AstExpressionKind::Identifier) {
       auto found = scope.find(callee.text);
       if (found != scope.end()) {
@@ -5716,6 +5748,16 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
         }
       }
       if (rawTarget != nullptr) {
+        if (rawTarget->isInline && rawTarget->kind == AstDeclarationKind::Def) {
+          explicitInlineTarget = *rawTarget;
+          const std::vector<std::string> explicitArguments =
+              typeArgumentsFor(callee);
+          explicitInlineTypeArguments.reserve(explicitArguments.size());
+          for (const std::string& argument : explicitArguments) {
+            explicitInlineTypeArguments.push_back(
+                typeFromDeclaredName(argument, &scope));
+          }
+        }
         specializedCallee = specializeTypeApplication(
             *rawTarget, typeArgumentsFor(callee), scope, callee.span, false);
         calleeSymbol = &specializedCallee;
@@ -5730,6 +5772,12 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
     if (calleeSymbol != nullptr && callee.kind != AstExpressionKind::TypeApply &&
         !calleeSymbol->typeParameters.empty()) {
       const SymbolInfo inferenceTarget = *calleeSymbol;
+      if (inferenceTarget.isInline) {
+        diagnostics_.error(
+            expression.span,
+            "inline call-site specialization currently requires explicit type "
+            "arguments");
+      }
       std::vector<TypeInfo> inferredTypeArguments;
       bool inferenceConflict = false;
       specializedCallee = inferTypeApplication(
@@ -5837,6 +5885,19 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
           ++sourceArgumentIndex;
         }
       }
+    }
+    if (explicitInlineTarget.has_value() && calleeSymbol != nullptr &&
+        calleeSymbol->typeParameters.empty() &&
+        explicitInlineTarget->parameters.size() + 1 ==
+            expression.children.size() &&
+        std::none_of(explicitInlineTarget->contextualParameters.begin(),
+                     explicitInlineTarget->contextualParameters.end(),
+                     [](bool contextual) { return contextual; })) {
+      std::vector<AstExpression> inlineArguments(expression.children.begin() + 1,
+                                                 expression.children.end());
+      recordInlineApplication(expression, *explicitInlineTarget,
+                              explicitInlineTypeArguments, inlineArguments, scope,
+                              expectedType);
     }
     return calleeSymbol == nullptr ? calleeType
                                    : staticExpressionType(std::move(calleeType));

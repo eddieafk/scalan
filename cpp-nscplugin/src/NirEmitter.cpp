@@ -1989,6 +1989,40 @@ nir::Value expressionValueFor(const frontend::AstExpression& expression,
   return valueFor(expression, context, preserveCallable);
 }
 
+nir::Value inlineApplicationValueFor(
+    const frontend::TypedInlineApplication& application,
+    const ValueContext& callSiteContext) {
+  ValueContext inlineContext = inlineContextFor(application, callSiteContext);
+  if (application.arguments.empty()) {
+    return scopedBodyValueFor(application.body, inlineContext);
+  }
+
+  std::vector<nir::Value> values;
+  values.reserve(application.arguments.size() + 1);
+  for (std::size_t index = 0; index < application.arguments.size(); ++index) {
+    const frontend::AstExpression& argument = application.arguments[index];
+    const std::string name =
+        index < application.parameterNames.size()
+            ? application.parameterNames[index]
+            : "inline$argument" + std::to_string(index);
+    const frontend::TypeInfo type =
+        index < application.parameterTypes.size()
+            ? application.parameterTypes[index]
+            : frontend::TypeInfo{frontend::SimpleTypeKind::Unknown, "Unknown"};
+    const std::string runtimeType = runtimeTypeName(type);
+    nir::Value value = expressionValueFor(argument, callSiteContext);
+    value = boxForObjectStorage(std::move(value), runtimeType, argument,
+                                callSiteContext);
+    value = narrowCompositeValue(std::move(value), type, argument,
+                                 callSiteContext);
+    values.push_back(
+        nir::localLetValue(name, runtimeType, std::move(value), argument.span));
+    inlineContext.localNames.insert(name);
+  }
+  values.push_back(scopedBodyValueFor(application.body, inlineContext));
+  return nir::blockValue(std::move(values), application.span);
+}
+
 void appendExpressionSetup(const frontend::AstExpression& expression,
                            nir::FunctionBodyBuilder& body,
                            const ValueContext& context) {
@@ -2534,8 +2568,7 @@ nir::Value valueFor(const frontend::AstExpression& expression,
     }
     if (const frontend::TypedInlineApplication* application =
             inlineApplicationFor(expression, context)) {
-      ValueContext inlineContext = inlineContextFor(*application, context);
-      return scopedBodyValueFor(application->body, inlineContext);
+      return inlineApplicationValueFor(*application, context);
     }
     const frontend::AstExpression& callee = expression.children.front();
     const bool isArrayEmpty =
@@ -2609,6 +2642,10 @@ nir::Value valueFor(const frontend::AstExpression& expression,
     if (expression.children.empty()) {
       return nir::unknownValue("call <empty>", expression.span);
     }
+    if (const frontend::TypedInlineApplication* application =
+            inlineApplicationFor(expression, context)) {
+      return inlineApplicationValueFor(*application, context);
+    }
     const frontend::AstExpression& firstClause = expression.children.front();
     if (firstClause.kind == AstExpressionKind::TypeApply) {
       if (const frontend::TypedInlineApplication* application =
@@ -2617,8 +2654,7 @@ nir::Value valueFor(const frontend::AstExpression& expression,
           return nir::unknownValue("<inline-arguments-unsupported>",
                                    expression.span);
         }
-        ValueContext inlineContext = inlineContextFor(*application, context);
-        return scopedBodyValueFor(application->body, inlineContext);
+        return inlineApplicationValueFor(*application, context);
       }
     }
     if (firstClause.kind == AstExpressionKind::Call &&

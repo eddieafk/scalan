@@ -20,6 +20,16 @@ bool contains(std::string_view haystack, std::string_view needle) {
   return haystack.find(needle) != std::string_view::npos;
 }
 
+std::size_t countOccurrences(std::string_view haystack, std::string_view needle) {
+  std::size_t count = 0;
+  std::size_t offset = 0;
+  while ((offset = haystack.find(needle, offset)) != std::string_view::npos) {
+    ++count;
+    offset += needle.size();
+  }
+  return count;
+}
+
 std::string readTextFile(const std::filesystem::path& path) {
   std::ifstream input(path, std::ios::binary);
   std::ostringstream contents;
@@ -59,10 +69,27 @@ object Selectors {
     }
 
   inline def nested[A]: String = "nested:" + selected[A]
+
+  inline def decorated[A](value: String): String =
+    summonFrom {
+      case found: Named[A] =>
+        prefix + found.label() + ":" + value + ":" + value
+      case _ => "fallback:" + value + ":" + value
+    }
+
+  inline def nestedValue[A](value: String): String =
+    "nested-value:" + decorated[A](value)
+
+  inline def passed[A](value: A): A = value
 }
 
 object Main {
   given intNamed: Named[Int] = new NamedValue[Int]("member-int")
+
+  def nextValue(): String = {
+    println("effect")
+    "value"
+  }
 
   def intSelected: String = Selectors.selected[Int]
 
@@ -74,12 +101,22 @@ object Main {
 
   def fallbackSelected: String = Selectors.selected[Boolean]
   def nestedSelected: String = Selectors.nested[Int]
+  def valueSelected: String = Selectors.decorated[Int](nextValue())
+  def valueFallback: String = Selectors.decorated[Boolean]("bool")
+  def nestedValueSelected: String = Selectors.nestedValue[Int]("nested")
+  def passedInt: Int = Selectors.passed[Int](42)
+  def passedString: String = Selectors.passed[String]("forty-two")
 
   def main(args: Array[String]): Unit = {
     println(intSelected)
     println(localSelected)
     println(fallbackSelected)
     println(nestedSelected)
+    println(valueSelected)
+    println(valueFallback)
+    println(nestedValueSelected)
+    println(passedInt)
+    println(passedString)
   }
 }
 )";
@@ -88,7 +125,9 @@ object Main {
 
 object Main {
   inline def nonGeneric: String = "non-generic"
-  inline def withValue[A](value: A): String = "value-parameter"
+  inline def withContext[A](using value: A): String = "context-parameter"
+  inline def inferred[A](value: A): A = value
+  def unsupportedInference: Int = inferred(1)
   inline def missingBody[A]: String
   inline def recursive[A]: String = recursive[A]
   inline val unsupported: String = "value"
@@ -142,18 +181,35 @@ class Instance {
       functionText(result.nirText, "demo.inlinecalls.Main.fallbackSelected");
   const std::string_view nestedSelected =
       functionText(result.nirText, "demo.inlinecalls.Main.nestedSelected");
+  const std::string_view valueSelected =
+      functionText(result.nirText, "demo.inlinecalls.Main.valueSelected");
+  const std::string_view valueFallback =
+      functionText(result.nirText, "demo.inlinecalls.Main.valueFallback");
+  const std::string_view nestedValueSelected =
+      functionText(result.nirText, "demo.inlinecalls.Main.nestedValueSelected");
+  const std::string_view passedInt =
+      functionText(result.nirText, "demo.inlinecalls.Main.passedInt");
+  const std::string_view passedString =
+      functionText(result.nirText, "demo.inlinecalls.Main.passedString");
 
   const bool valid =
       status == 0 &&
       text == "selected:member-int\nselected:local-string\nfallback\n"
-              "nested:selected:member-int\n" &&
+              "nested:selected:member-int\n"
+              "effect\nselected:member-int:value:value\n"
+              "fallback:bool:bool\n"
+              "nested-value:selected:member-int:nested:nested\n"
+              "42\nforty-two\n" &&
       !invalid.ok &&
       contains(invalid.diagnosticsText,
                "inline call-site specialization currently requires a generic "
                "method") &&
       contains(invalid.diagnosticsText,
-               "inline call-site specialization currently requires a "
-               "parameterless method") &&
+               "inline call-site specialization does not support contextual "
+               "parameters yet") &&
+      contains(invalid.diagnosticsText,
+               "inline call-site specialization currently requires explicit type "
+               "arguments") &&
       contains(invalid.diagnosticsText, "inline method requires an implementation") &&
       contains(invalid.diagnosticsText,
                "recursive inline call-site specialization is not supported yet") &&
@@ -174,7 +230,21 @@ class Instance {
       contains(nestedSelected, "\"nested:\"") &&
       contains(nestedSelected, "call %demo.inlinecalls.Selectors.prefix()") &&
       !contains(nestedSelected, "%demo.inlinecalls.Selectors.nested") &&
-      !contains(nestedSelected, "%demo.inlinecalls.Selectors.selected");
+      !contains(nestedSelected, "%demo.inlinecalls.Selectors.selected") &&
+      contains(valueSelected, "let %value : String") &&
+      countOccurrences(valueSelected, "nextValue") == 1 &&
+      contains(valueSelected, "call %demo.inlinecalls.Selectors.prefix()") &&
+      !contains(valueSelected, "%demo.inlinecalls.Selectors.decorated") &&
+      contains(valueFallback, "\"fallback:\"") &&
+      !contains(valueFallback, "%demo.inlinecalls.Selectors.prefix") &&
+      !contains(valueFallback, "%demo.inlinecalls.Selectors.decorated") &&
+      contains(nestedValueSelected, "\"nested-value:\"") &&
+      !contains(nestedValueSelected, "%demo.inlinecalls.Selectors.nestedValue") &&
+      !contains(nestedValueSelected, "%demo.inlinecalls.Selectors.decorated") &&
+      contains(passedInt, "let %value : Int = 42") &&
+      !contains(passedInt, "%demo.inlinecalls.Selectors.passed") &&
+      contains(passedString, "let %value : String = \"forty-two\"") &&
+      !contains(passedString, "%demo.inlinecalls.Selectors.passed");
   return valid ? 0
                : fail("inline summonFrom smoke test failed (output='" + text +
                       "', diagnostics='" + result.diagnosticsText +
@@ -182,7 +252,12 @@ class Instance {
                       "', int-selected='" + std::string(intSelected) +
                       "', local-selected='" + std::string(localSelected) +
                       "', fallback-selected='" + std::string(fallbackSelected) +
-                      "', nested-selected='" + std::string(nestedSelected) + "')");
+                      "', nested-selected='" + std::string(nestedSelected) +
+                      "', value-selected='" + std::string(valueSelected) +
+                      "', value-fallback='" + std::string(valueFallback) +
+                      "', nested-value-selected='" + std::string(nestedValueSelected) +
+                      "', passed-int='" + std::string(passedInt) +
+                      "', passed-string='" + std::string(passedString) + "')");
 }
 
 } // namespace
