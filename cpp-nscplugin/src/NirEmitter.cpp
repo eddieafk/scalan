@@ -766,6 +766,11 @@ std::string parameterTypeName(const std::string& parameter,
 
 std::string localDeclaredTypeName(const frontend::AstExpression& expression,
                                   const ValueContext& context) {
+  if (expression.kind == frontend::AstExpressionKind::LocalDeclaration) {
+    if (const frontend::TypeInfo* type = annotatedTypeFor(expression, context)) {
+      return runtimeTypeName(*type);
+    }
+  }
   if (expression.declaredType.empty()) {
     return {};
   }
@@ -1765,6 +1770,19 @@ nir::Value boxForObjectStorage(nir::Value value, const std::string& targetType,
                            : nir::boxValue(primitive, std::move(value), source.span);
 }
 
+nir::Value narrowCompositeValue(
+    nir::Value value, const frontend::TypeInfo& targetType,
+    const frontend::AstExpression& source, const ValueContext& context) {
+  const frontend::TypeInfo* sourceType = annotatedTypeFor(source, context);
+  const std::string targetRuntime = runtimeTypeName(targetType);
+  if (sourceType == nullptr ||
+      sourceType->compositeKind == frontend::CompositeTypeKind::None ||
+      runtimeTypeName(*sourceType) != "Object" || targetRuntime == "Object") {
+    return value;
+  }
+  return nir::asInstanceOfValue(targetRuntime, std::move(value), source.span);
+}
+
 bool hasObjectRuntimeType(const frontend::AstExpression& expression,
                           const ValueContext& context) {
   const frontend::TypeInfo* type = annotatedTypeFor(expression, context);
@@ -1816,6 +1834,12 @@ nir::Value scopedBodyValueFor(const frontend::AstExpression& expression,
     if (!child.children.empty()) {
       initializer = boxForObjectStorage(std::move(initializer), type,
                                         child.children.front(), blockContext);
+      if (const frontend::TypeInfo* targetType =
+              annotatedTypeFor(child, blockContext)) {
+        initializer = narrowCompositeValue(
+            std::move(initializer), *targetType, child.children.front(),
+            blockContext);
+      }
     }
     if (child.mutableLocal) {
       values.push_back(
@@ -1858,6 +1882,12 @@ void appendExpressionSetup(const frontend::AstExpression& expression,
           nir::Value initializer =
               boxForObjectStorage(valueFor(child.children.front(), blockContext),
                                   declaredType, child.children.front(), blockContext);
+          if (const frontend::TypeInfo* targetType =
+                  annotatedTypeFor(child, blockContext)) {
+            initializer = narrowCompositeValue(
+                std::move(initializer), *targetType, child.children.front(),
+                blockContext);
+          }
           if (child.mutableLocal) {
             (void)body.addVar(child.text, declaredType, std::move(initializer),
                               child.span, blockContext.lexicalScopes);
@@ -1896,6 +1926,12 @@ void appendExpressionSetup(const frontend::AstExpression& expression,
       nir::Value initializer =
           boxForObjectStorage(valueFor(expression.children.front(), context),
                               declaredType, expression.children.front(), context);
+      if (const frontend::TypeInfo* targetType =
+              annotatedTypeFor(expression, context)) {
+        initializer = narrowCompositeValue(
+            std::move(initializer), *targetType, expression.children.front(),
+            context);
+      }
       if (expression.mutableLocal) {
         (void)body.addVar(expression.text, declaredType, std::move(initializer),
                           expression.span, context.lexicalScopes);
@@ -2861,6 +2897,10 @@ nir::Value valueFor(const frontend::AstExpression& expression,
               std::move(argument),
               runtimeTypeName(classDeclaration->parameterTypes[parameterIndex]),
               expression.children[i], context);
+          argument = narrowCompositeValue(
+              std::move(argument),
+              classDeclaration->parameterTypes[parameterIndex],
+              expression.children[i], context);
         }
         arguments.push_back(std::move(argument));
       }
@@ -2926,6 +2966,11 @@ nir::Value valueFor(const frontend::AstExpression& expression,
       if (!boxedPrimitive.empty()) {
         argument = nir::boxValue(boxedPrimitive, std::move(argument),
                                  expression.children[i].span);
+      }
+      if (target != nullptr && parameterIndex < target->parameterTypes.size()) {
+        argument = narrowCompositeValue(
+            std::move(argument), target->parameterTypes[parameterIndex],
+            expression.children[i], context);
       }
       arguments.push_back(std::move(argument));
     }
@@ -3048,10 +3093,11 @@ nir::Value valueFor(const frontend::AstExpression& expression,
       }
     }
     nir::Value assignedValue = expressionValueFor(expression.children[1], context);
+    const frontend::TypeInfo* targetSemanticType =
+        annotatedTypeFor(expression.children[0], context);
     std::string targetRuntimeType;
-    if (const frontend::TypeInfo* targetType =
-            annotatedTypeFor(expression.children[0], context)) {
-      targetRuntimeType = runtimeTypeName(*targetType);
+    if (targetSemanticType != nullptr) {
+      targetRuntimeType = runtimeTypeName(*targetSemanticType);
     }
     if (expression.children[0].kind == AstExpressionKind::Select) {
       const frontend::TypedDeclaration* selectedDeclaration =
@@ -3064,12 +3110,18 @@ nir::Value valueFor(const frontend::AstExpression& expression,
                                              expression.children[0].text)
               : &selectedDeclaration->inferredType;
       if (erasedSelectedType != nullptr) {
+        targetSemanticType = erasedSelectedType;
         targetRuntimeType = runtimeTypeName(*erasedSelectedType);
       }
     }
     if (!targetRuntimeType.empty()) {
       assignedValue = boxForObjectStorage(std::move(assignedValue), targetRuntimeType,
                                           expression.children[1], context);
+      if (targetSemanticType != nullptr) {
+        assignedValue = narrowCompositeValue(
+            std::move(assignedValue), *targetSemanticType,
+            expression.children[1], context);
+      }
     }
     if (expression.children[0].kind == AstExpressionKind::Identifier &&
         !context.localNames.contains(expression.children[0].text)) {
@@ -3148,6 +3200,8 @@ nir::FunctionBody bodyFor(const frontend::TypedDeclaration& declaration,
                         declaration.span);
     } else if (semanticType != nullptr &&
                semanticType->kind == frontend::SimpleTypeKind::Object &&
+               semanticType->compositeKind ==
+                   frontend::CompositeTypeKind::None &&
                !semanticType->typeParameter && !semanticType->abstractTypeMember &&
                semanticType->typeConstructorName.empty() &&
                runtimeTypeName(*semanticType) != semanticType->name &&
@@ -3197,6 +3251,9 @@ nir::FunctionBody bodyFor(const frontend::TypedDeclaration& declaration,
     result = boxForObjectStorage(std::move(result),
                                  runtimeTypeName(declaration.inferredType),
                                  declaration.initializer, bodyContext);
+    result = narrowCompositeValue(
+        std::move(result), declaration.inferredType, declaration.initializer,
+        bodyContext);
   }
   (void)body.addReturn(runtimeTypeName(declaration.inferredType), std::move(result),
                        declaration.span, std::move(resultContext.lexicalScopes));
@@ -3225,6 +3282,9 @@ void appendClassInitializerItems(const frontend::TypedDeclaration& declaration,
         initializer = boxForObjectStorage(std::move(initializer),
                                           runtimeTypeName(member.inferredType),
                                           member.initializer, bodyContext);
+        initializer = narrowCompositeValue(
+            std::move(initializer), member.inferredType, member.initializer,
+            bodyContext);
       }
       (void)body.addEval(
           nir::assignValue(nir::selectValue(nir::localValue("this", member.span),
@@ -3266,6 +3326,9 @@ void appendModuleInitializerItems(const frontend::TypedDeclaration& declaration,
         initializer = boxForObjectStorage(std::move(initializer),
                                           runtimeTypeName(member.inferredType),
                                           member.initializer, bodyContext);
+        initializer = narrowCompositeValue(
+            std::move(initializer), member.inferredType, member.initializer,
+            bodyContext);
       }
       (void)body.addEval(
           nir::assignValue(nir::selectValue(nir::localValue(moduleName, member.span),
@@ -3323,6 +3386,9 @@ void appendMaterializedTraitInitializerItems(
       initializer = boxForObjectStorage(std::move(initializer),
                                         runtimeTypeName(value->member->inferredType),
                                         value->member->initializer, traitContext);
+      initializer = narrowCompositeValue(
+          std::move(initializer), value->member->inferredType,
+          value->member->initializer, traitContext);
     }
     (void)body.addEval(
         nir::assignValue(
@@ -3362,6 +3428,9 @@ void appendParentInitialization(const frontend::TypedModule& module,
       initializedValue = boxForObjectStorage(std::move(initializedValue),
                                              runtimeTypeName(parent->parameterTypes[i]),
                                              argument, bodyContext);
+      initializedValue = narrowCompositeValue(
+          std::move(initializedValue), parent->parameterTypes[i], argument,
+          bodyContext);
     }
     (void)body.addEval(
         nir::assignValue(

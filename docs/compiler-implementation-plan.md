@@ -1224,8 +1224,24 @@ Current scaffold status:
   aliases are accepted as compile-time-only declarations and omitted from NIR,
   while abstract type declarations remain member-only. Runtime and NIR coverage
   verifies exact, wildcard, right-chain, chained-alias, non-selected, invalid
-  arity, and missing top-level target cases. Whole-program
-  intersection/union type representation remains a later type-system slice.
+  arity, and missing top-level target cases.
+- Explicit Scala 3 intersection and union types now have a structured
+  whole-program `TypeInfo` representation outside import filters. They are
+  accepted in parameters, results, fields, locals, aliases, and nested generic
+  arguments; `&` binds more tightly than `|`, with parentheses available to
+  override precedence, and intersections distribute over nested unions.
+  Conformance follows the Scala 3 component rules:
+  values entering an intersection must conform to every operand, values
+  entering a union may conform to any operand, a union value conforms onward
+  only when every alternative does, and an intersection value can conform
+  through either constituent. Composite storage and signatures erase to
+  `Object`, with checked narrowing when a proven intersection is stored,
+  returned, assigned, or passed as a nominal constituent. A separate
+  incremental smoke translation unit verifies runtime behavior, generic alias
+  substitution, Object ABI lowering,
+  precedence/grouping, distributivity, rejection in both conformance
+  directions, and malformed syntax. Common-member projection and unconstrained
+  union inference remain later type-system slices.
 - Full inline call-site specialization remains a later milestone.
 - Postfix type application now supports typed `value.isInstanceOf[Target]` and
   checked `value.asInstanceOf[Target]` for known classes, traits, and objects.

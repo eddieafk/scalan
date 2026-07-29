@@ -1,7 +1,11 @@
 # SmokeTests.cpp is retained as a broad reference suite. New coverage goes into
 # numbered translation units so incremental builds do not recompile the entire
 # active suite.
-add_executable(cpp-smoke-tests src/SmokeTests2.cpp src/SmokeTests3.cpp)
+add_executable(
+  cpp-smoke-tests
+  src/SmokeTests2.cpp
+  src/SmokeTests3.cpp
+  src/SmokeTests4.cpp)
 
 target_link_libraries(
   cpp-smoke-tests

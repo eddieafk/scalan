@@ -30,6 +30,12 @@ enum class SimpleTypeKind {
   Object
 };
 
+enum class CompositeTypeKind {
+  None,
+  Intersection,
+  Union
+};
+
 struct TypeInfo {
   TypeInfo() = default;
   TypeInfo(SimpleTypeKind typeKind, std::string typeName)
@@ -44,6 +50,8 @@ struct TypeInfo {
   std::string resolvedAliasName;
   std::string typeConstructorName;
   std::vector<TypeInfo> typeArguments;
+  CompositeTypeKind compositeKind = CompositeTypeKind::None;
+  std::vector<TypeInfo> compositeTypes;
   std::string typeParameterSymbolName;
   bool abstractTypeMember = false;
   bool pathDependent = false;

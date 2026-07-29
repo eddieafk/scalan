@@ -99,6 +99,7 @@ bool typesMatchForOverride(const TypeInfo& expected, const TypeInfo& actual) {
 
 TypeInfo staticExpressionType(TypeInfo type) {
   if (!type.typeParameter && !type.abstractTypeMember &&
+      type.compositeKind == CompositeTypeKind::None &&
       type.typeConstructorName.empty() && !type.runtimeName.empty() &&
       type.runtimeName != type.name) {
     type.runtimeName.clear();
@@ -436,10 +437,10 @@ struct WildcardTypeSyntax {
   bool malformed = false;
 };
 
-enum class GivenImportInfixKind { None, Intersection, Union };
+enum class CompositeTypeSyntaxKind { None, Intersection, Union };
 
-struct GivenImportInfixSyntax {
-  GivenImportInfixKind kind = GivenImportInfixKind::None;
+struct CompositeTypeSyntax {
+  CompositeTypeSyntaxKind kind = CompositeTypeSyntaxKind::None;
   std::vector<std::string> operands;
   bool malformed = false;
 };
@@ -492,12 +493,12 @@ std::string normalizeGivenImportType(std::string_view typeName, bool* malformed)
   return normalized;
 }
 
-GivenImportInfixSyntax parseGivenImportInfixSyntax(std::string_view typeName) {
+CompositeTypeSyntax parseCompositeTypeSyntax(std::string_view typeName) {
   const auto split = [&](char operation) {
-    GivenImportInfixSyntax parsed;
+    CompositeTypeSyntax parsed;
     parsed.kind = operation == '|'
-                      ? GivenImportInfixKind::Union
-                      : GivenImportInfixKind::Intersection;
+                      ? CompositeTypeSyntaxKind::Union
+                      : CompositeTypeSyntaxKind::Intersection;
     std::size_t bracketDepth = 0;
     std::size_t parenthesisDepth = 0;
     std::size_t operandStart = 0;
@@ -526,17 +527,91 @@ GivenImportInfixSyntax parseGivenImportInfixSyntax(std::string_view typeName) {
       operandStart = i + 1;
     }
     if (parsed.operands.size() == 1) {
-      parsed.kind = GivenImportInfixKind::None;
+      parsed.kind = CompositeTypeSyntaxKind::None;
       parsed.operands.clear();
     }
     return parsed;
   };
 
-  GivenImportInfixSyntax unionType = split('|');
-  if (unionType.malformed || unionType.kind != GivenImportInfixKind::None) {
+  CompositeTypeSyntax unionType = split('|');
+  if (unionType.malformed ||
+      unionType.kind != CompositeTypeSyntaxKind::None) {
     return unionType;
   }
   return split('&');
+}
+
+std::string compositeTypeName(CompositeTypeKind kind,
+                              const std::vector<TypeInfo>& operands) {
+  const std::string_view operation =
+      kind == CompositeTypeKind::Union ? " | " : " & ";
+  const int precedence = kind == CompositeTypeKind::Union ? 1 : 2;
+  std::string name;
+  for (std::size_t i = 0; i < operands.size(); ++i) {
+    if (i != 0) {
+      name += operation;
+    }
+    const TypeInfo& operand = operands[i];
+    const int operandPrecedence =
+        operand.compositeKind == CompositeTypeKind::Union
+            ? 1
+            : operand.compositeKind == CompositeTypeKind::Intersection ? 2 : 3;
+    const bool parenthesize = operandPrecedence < precedence;
+    if (parenthesize) {
+      name += '(';
+    }
+    name += operand.name;
+    if (parenthesize) {
+      name += ')';
+    }
+  }
+  return name;
+}
+
+TypeInfo makeCompositeType(CompositeTypeKind kind,
+                           std::vector<TypeInfo> operands) {
+  std::vector<TypeInfo> flattened;
+  for (TypeInfo& operand : operands) {
+    if (operand.compositeKind == kind) {
+      flattened.insert(flattened.end(),
+                       std::make_move_iterator(operand.compositeTypes.begin()),
+                       std::make_move_iterator(operand.compositeTypes.end()));
+    } else {
+      flattened.push_back(std::move(operand));
+    }
+  }
+
+  if (kind == CompositeTypeKind::Intersection) {
+    auto unionOperand =
+        std::find_if(flattened.begin(), flattened.end(), [](const TypeInfo& operand) {
+          return operand.compositeKind == CompositeTypeKind::Union;
+        });
+    if (unionOperand != flattened.end()) {
+      std::vector<TypeInfo> alternatives;
+      alternatives.reserve(unionOperand->compositeTypes.size());
+      const std::size_t unionIndex =
+          static_cast<std::size_t>(std::distance(flattened.begin(), unionOperand));
+      for (const TypeInfo& alternative : unionOperand->compositeTypes) {
+        std::vector<TypeInfo> branch = flattened;
+        branch[unionIndex] = alternative;
+        alternatives.push_back(
+            makeCompositeType(CompositeTypeKind::Intersection, std::move(branch)));
+      }
+      return makeCompositeType(CompositeTypeKind::Union,
+                               std::move(alternatives));
+    }
+  }
+
+  if (flattened.size() == 1) {
+    return std::move(flattened.front());
+  }
+  TypeInfo composite{SimpleTypeKind::Object, ""};
+  composite.runtimeName = "Object";
+  composite.compositeKind = kind;
+  composite.compositeTypes = std::move(flattened);
+  composite.name =
+      compositeTypeName(composite.compositeKind, composite.compositeTypes);
+  return composite;
 }
 
 std::size_t findTopLevelTypeBound(std::string_view typeName,
@@ -3654,6 +3729,20 @@ std::string Typechecker::desugarGivenImportUserInfix(
             return replacement->second;
           }
         }
+        if (type.compositeKind != CompositeTypeKind::None) {
+          const char operation =
+              type.compositeKind == CompositeTypeKind::Union ? '|' : '&';
+          std::string rendered{"("};
+          for (std::size_t i = 0; i < type.compositeTypes.size(); ++i) {
+            if (i != 0) {
+              rendered += operation;
+            }
+            rendered +=
+                renderAliasType(type.compositeTypes[i], substitutions);
+          }
+          rendered += ")";
+          return rendered;
+        }
         const std::string& constructorName =
             !type.typeConstructorName.empty() ? type.typeConstructorName
                                               : type.runtimeName;
@@ -3925,19 +4014,19 @@ bool Typechecker::givenImportTypeMatches(const std::string& filter,
     if (malformed) {
       return false;
     }
-    const GivenImportInfixSyntax infix =
-        parseGivenImportInfixSyntax(pattern);
+    const CompositeTypeSyntax infix =
+        parseCompositeTypeSyntax(pattern);
     if (infix.malformed) {
       return false;
     }
-    if (infix.kind == GivenImportInfixKind::Union) {
+    if (infix.kind == CompositeTypeSyntaxKind::Union) {
       return std::all_of(
           infix.operands.begin(), infix.operands.end(),
           [&](const std::string& operand) {
             return patternConformsTo(operand, target);
           });
     }
-    if (infix.kind == GivenImportInfixKind::Intersection) {
+    if (infix.kind == CompositeTypeSyntaxKind::Intersection) {
       return std::any_of(
           infix.operands.begin(), infix.operands.end(),
           [&](const std::string& operand) {
@@ -3984,17 +4073,17 @@ bool Typechecker::givenImportTypeMatches(const std::string& filter,
               matches(wildcard.upperBound, value));
     }
 
-    const GivenImportInfixSyntax infix =
-        parseGivenImportInfixSyntax(pattern);
+    const CompositeTypeSyntax infix =
+        parseCompositeTypeSyntax(pattern);
     if (infix.malformed) {
       return false;
     }
-    if (infix.kind == GivenImportInfixKind::Union) {
+    if (infix.kind == CompositeTypeSyntaxKind::Union) {
       return std::any_of(
           infix.operands.begin(), infix.operands.end(),
           [&](const std::string& operand) { return matches(operand, value); });
     }
-    if (infix.kind == GivenImportInfixKind::Intersection) {
+    if (infix.kind == CompositeTypeSyntaxKind::Intersection) {
       return std::all_of(
           infix.operands.begin(), infix.operands.end(),
           [&](const std::string& operand) { return matches(operand, value); });
@@ -4133,8 +4222,8 @@ bool Typechecker::validateGivenImportFilter(
         const std::string normalized =
             normalizeGivenImportType(bound, &malformedBound);
         return !malformedBound &&
-               parseGivenImportInfixSyntax(normalized).kind !=
-                   GivenImportInfixKind::None;
+               parseCompositeTypeSyntax(normalized).kind !=
+                   CompositeTypeSyntaxKind::None;
       };
       if (containsInfix(wildcard.lowerBound) ||
           containsInfix(wildcard.upperBound)) {
@@ -4164,15 +4253,15 @@ bool Typechecker::validateGivenImportFilter(
       return true;
     }
 
-    const GivenImportInfixSyntax infix =
-        parseGivenImportInfixSyntax(pattern);
+    const CompositeTypeSyntax infix =
+        parseCompositeTypeSyntax(pattern);
     if (infix.malformed) {
       diagnostics_.error(span, "malformed intersection or union type in given "
                                "import filter: " +
                                    patternName);
       return false;
     }
-    if (infix.kind != GivenImportInfixKind::None) {
+    if (infix.kind != CompositeTypeSyntaxKind::None) {
       return std::all_of(infix.operands.begin(), infix.operands.end(),
                          validate);
     }
@@ -5770,6 +5859,21 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
         }
 
         TypeInfo localType = localDeclarationType(local);
+        if (local.span.isValid()) {
+          auto sameSpan = [&](const TypedExpressionInfo& info) {
+            return info.span.source == local.span.source &&
+                   info.span.start == local.span.start &&
+                   info.span.length == local.span.length;
+          };
+          auto existing =
+              std::find_if(expressionTypes_.rbegin(), expressionTypes_.rend(),
+                           sameSpan);
+          if (existing == expressionTypes_.rend()) {
+            expressionTypes_.push_back(TypedExpressionInfo{local.span, localType});
+          } else {
+            existing->type = localType;
+          }
+        }
         SymbolInfo symbol;
         symbol.kind =
             local.mutableLocal ? AstDeclarationKind::Var : AstDeclarationKind::Val;
@@ -8007,6 +8111,13 @@ void Typechecker::validateVariance(const AstDeclaration& declaration,
       return;
     }
 
+    if (type.compositeKind != CompositeTypeKind::None) {
+      for (const TypeInfo& operand : type.compositeTypes) {
+        inspect(operand, position, context);
+      }
+      return;
+    }
+
     if (type.typeConstructorName.empty() || type.typeArguments.empty()) {
       return;
     }
@@ -8142,10 +8253,25 @@ TypeInfo Typechecker::substituteTypeParameters(
     }
   }
 
-  if (type.typeArguments.empty()) {
+  if (type.typeArguments.empty() && type.compositeTypes.empty()) {
     return type;
   }
   TypeInfo substituted = type;
+  for (TypeInfo& operand : substituted.compositeTypes) {
+    operand = substituteTypeParameters(operand, substitutions);
+  }
+  if (substituted.compositeKind != CompositeTypeKind::None) {
+    TypeInfo normalized = makeCompositeType(
+        substituted.compositeKind, std::move(substituted.compositeTypes));
+    normalized.dependentOwnerName = std::move(substituted.dependentOwnerName);
+    normalized.dependentMemberName = std::move(substituted.dependentMemberName);
+    normalized.dependentPathName = std::move(substituted.dependentPathName);
+    normalized.resolvedAliasName = std::move(substituted.resolvedAliasName);
+    normalized.abstractTypeMember = substituted.abstractTypeMember;
+    normalized.pathDependent = substituted.pathDependent;
+    normalized.typeProjection = substituted.typeProjection;
+    return normalized;
+  }
   for (TypeInfo& argument : substituted.typeArguments) {
     argument = substituteTypeParameters(argument, substitutions);
   }
@@ -8471,6 +8597,8 @@ std::vector<SymbolInfo> Typechecker::inferContextualTypeApplications(
   mentionsApplicationTypeParameter = [&](const TypeInfo& type) {
     return isApplicationTypeParameter(type) ||
            std::any_of(type.typeArguments.begin(), type.typeArguments.end(),
+                       mentionsApplicationTypeParameter) ||
+           std::any_of(type.compositeTypes.begin(), type.compositeTypes.end(),
                        mentionsApplicationTypeParameter);
   };
 
@@ -8787,6 +8915,48 @@ TypeInfo Typechecker::typeFromDeclaredName(const std::string& name, const Scope*
   }
   if (normalized == "Null") {
     return TypeInfo{SimpleTypeKind::Null, "Null"};
+  }
+
+  bool malformedComposite = false;
+  const std::string normalizedComposite =
+      normalizeGivenImportType(normalized, &malformedComposite);
+  const CompositeTypeSyntax compositeSyntax =
+      malformedComposite ? CompositeTypeSyntax{}
+                         : parseCompositeTypeSyntax(normalizedComposite);
+  const AppliedTypeSyntax directApplied =
+      parseAppliedTypeSyntax(normalizedComposite);
+  const bool resolvedDirectApplication =
+      directApplied.applied && !directApplied.malformed &&
+      typeSymbolForDeclaredName(directApplied.constructor, scope) != nullptr;
+  const bool symbolicCompositeApplication =
+      normalizedComposite.starts_with("|[") ||
+      normalizedComposite.starts_with("&[") ||
+      (resolvedDirectApplication &&
+       (directApplied.constructor.find('|') != std::string::npos ||
+        directApplied.constructor.find('&') != std::string::npos));
+  if (!symbolicCompositeApplication &&
+      (malformedComposite || compositeSyntax.malformed)) {
+    if (span != nullptr) {
+      diagnostics_.error(*span,
+                         "malformed intersection or union type: " + normalized);
+    }
+    return TypeInfo{SimpleTypeKind::Unknown, normalized};
+  }
+  if (!symbolicCompositeApplication &&
+      compositeSyntax.kind != CompositeTypeSyntaxKind::None) {
+    const CompositeTypeKind kind =
+        compositeSyntax.kind == CompositeTypeSyntaxKind::Union
+            ? CompositeTypeKind::Union
+            : CompositeTypeKind::Intersection;
+    std::vector<TypeInfo> operands;
+    operands.reserve(compositeSyntax.operands.size());
+    for (const std::string& operand : compositeSyntax.operands) {
+      operands.push_back(typeFromDeclaredName(operand, scope, span));
+    }
+    return makeCompositeType(kind, std::move(operands));
+  }
+  if (normalizedComposite != compactTypeName(normalized)) {
+    return typeFromDeclaredName(normalizedComposite, scope, span);
   }
 
   if (const std::string elementName = arrayElementTypeName(normalized);
@@ -9157,6 +9327,34 @@ bool Typechecker::isAssignable(const TypeInfo& expected, const TypeInfo& actual)
     if (value.kind == SimpleTypeKind::Nothing) {
       return true;
     }
+    if (value.compositeKind == CompositeTypeKind::Union) {
+      return std::all_of(
+          value.compositeTypes.begin(), value.compositeTypes.end(),
+          [&](const TypeInfo& operand) {
+            return conforms(target, operand, allowNumericWidening);
+          });
+    }
+    if (target.compositeKind == CompositeTypeKind::Intersection) {
+      return std::all_of(
+          target.compositeTypes.begin(), target.compositeTypes.end(),
+          [&](const TypeInfo& operand) {
+            return conforms(operand, value, allowNumericWidening);
+          });
+    }
+    if (target.compositeKind == CompositeTypeKind::Union) {
+      return std::any_of(
+          target.compositeTypes.begin(), target.compositeTypes.end(),
+          [&](const TypeInfo& operand) {
+            return conforms(operand, value, allowNumericWidening);
+          });
+    }
+    if (value.compositeKind == CompositeTypeKind::Intersection) {
+      return std::any_of(
+          value.compositeTypes.begin(), value.compositeTypes.end(),
+          [&](const TypeInfo& operand) {
+            return conforms(target, operand, allowNumericWidening);
+          });
+    }
     if (target.stringSingleton) {
       return value.stringSingleton && target.name == value.name;
     }
@@ -9392,6 +9590,9 @@ std::vector<TypedContextArgument> Typechecker::resolveContextArguments(
         }
         for (const TypeInfo& argument : type.typeArguments) {
           collectAssociatedTypes(argument);
+        }
+        for (const TypeInfo& operand : type.compositeTypes) {
+          collectAssociatedTypes(operand);
         }
       };
       collectAssociatedTypes(expected);

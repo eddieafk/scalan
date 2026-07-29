@@ -640,7 +640,8 @@ AstDeclaration Parser::parseType(const Token& keyword) {
     }
   } else if (match(TokenKind::Equals)) {
     declaration.hasInitializer = true;
-    declaration.declaredType = parseTypeName();
+    declaration.declaredType =
+        parseTypeName(false, false, false, false, false, true);
     if (declaration.declaredType.empty()) {
       diagnostics_.error(peek().span, "expected type alias target");
     }
@@ -689,7 +690,8 @@ AstDeclaration Parser::parseDef(const Token& keyword) {
   appendContextBoundParameters(declaration);
 
   if (match(TokenKind::Colon)) {
-    declaration.declaredType = parseTypeName();
+    declaration.declaredType =
+        parseTypeName(false, false, false, false, false, true);
   }
 
   if (match(TokenKind::Equals)) {
@@ -768,16 +770,19 @@ AstDeclaration Parser::parseGiven(const Token& keyword) {
       synchronize();
       return declaration;
     }
-    declaration.declaredType = parseTypeName();
+    declaration.declaredType =
+        parseTypeName(false, false, false, false, false, true);
   } else if (named) {
     advance();
     declaration.name = previous().text;
     advance();
-    declaration.declaredType = parseTypeName();
+    declaration.declaredType =
+        parseTypeName(false, false, false, false, false, true);
   } else {
     declaration.isAnonymousGiven = true;
     declaration.name = "given$" + std::to_string(keyword.span.start);
-    declaration.declaredType = parseTypeName();
+    declaration.declaredType =
+        parseTypeName(false, false, false, false, false, true);
   }
   if (declaration.declaredType.empty()) {
     diagnostics_.error(peek().span, "expected given result type");
@@ -831,7 +836,8 @@ AstDeclaration Parser::parseValOrVar(AstDeclarationKind kind, const Token& keywo
   declaration.name = previous().text;
 
   if (match(TokenKind::Colon)) {
-    declaration.declaredType = parseTypeName();
+    declaration.declaredType =
+        parseTypeName(false, false, false, false, false, true);
   }
 
   if (match(TokenKind::Equals)) {
@@ -978,7 +984,8 @@ std::vector<std::string> Parser::parseParameterList(bool allowModifiers,
     std::string parameter =
         modifier.empty() ? previous().text : modifier + " " + previous().text;
     if (match(TokenKind::Colon)) {
-      std::string type = parseTypeName();
+      std::string type =
+          parseTypeName(false, false, false, false, false, true);
       if (!type.empty()) {
         parameter += ": " + type;
       }
@@ -1242,7 +1249,8 @@ AstExpression Parser::parsePostfixExpression() {
       typeApply.span = bracket.span;
       consumeSeparators();
       while (!isAtEnd() && !check(TokenKind::RightBracket)) {
-        std::string typeArgument = parseTypeName(false, true);
+        std::string typeArgument =
+            parseTypeName(false, true, false, false, false, true);
         if (typeArgument.empty()) {
           diagnostics_.error(peek().span, "expected type argument inside brackets");
           break;

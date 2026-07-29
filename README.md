@@ -88,6 +88,12 @@ build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
   --output /tmp/contextual-abstractions \
   cpp-examples/ContextualAbstractions.scala
 
+# Compile explicit Scala 3 union/intersection types across parameters, results,
+# locals, nested generic arguments, and generic type aliases.
+build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
+  --output /tmp/composite-types \
+  cpp-examples/CompositeTypes.scala
+
 # Compile top-level and stable-object-nested product `Mirror` derivation.
 build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
   --output /tmp/product-mirror-derivation \
