@@ -197,11 +197,13 @@ bool Parser::match(TokenKind kind) {
 }
 
 bool Parser::isDeclarationStart() const {
-  if (peek().kind == TokenKind::Identifier && peek().text == "infix" &&
+  if (peek().kind == TokenKind::Identifier &&
+      (peek().text == "infix" || peek().text == "transparent") &&
       current_ + 1 < tokens_.size() &&
       (tokens_[current_ + 1].kind == TokenKind::KeywordClass ||
        tokens_[current_ + 1].kind == TokenKind::KeywordTrait ||
-       tokens_[current_ + 1].kind == TokenKind::KeywordType)) {
+       (peek().text == "infix" &&
+        tokens_[current_ + 1].kind == TokenKind::KeywordType))) {
     return true;
   }
   switch (peek().kind) {
@@ -271,6 +273,23 @@ void Parser::parsePackage(AstModule& module) {
 
 AstDeclaration Parser::parseDeclaration() {
   consumeSeparators();
+  if (check(TokenKind::Identifier) && peek().text == "transparent") {
+    const Token modifier = advance();
+    AstDeclaration declaration;
+    if (match(TokenKind::KeywordClass)) {
+      declaration = parseObjectLike(AstDeclarationKind::Class, previous());
+    } else if (match(TokenKind::KeywordTrait)) {
+      declaration = parseObjectLike(AstDeclarationKind::Trait, previous());
+    } else {
+      diagnostics_.error(peek().span,
+                         "'transparent' must modify a class or trait");
+      synchronize();
+      return {};
+    }
+    declaration.isTransparent = true;
+    declaration.span = modifier.span;
+    return declaration;
+  }
   if (check(TokenKind::Identifier) && peek().text == "infix") {
     const Token modifier = advance();
     AstDeclaration declaration;

@@ -1787,6 +1787,7 @@ TypedDeclaration Typechecker::typecheckDeclaration(const AstDeclaration& declara
     symbol.contextualParameters = typed.contextualParameters;
     symbol.isGiven = typed.isGiven;
     symbol.isAnonymousGiven = typed.isAnonymousGiven;
+    symbol.isTransparent = declaration.isTransparent;
     if (auto enclosing = globalSymbols_.find(owner);
         enclosing != globalSymbols_.end() &&
         enclosing->second.kind == AstDeclarationKind::Object) {
@@ -2589,6 +2590,7 @@ void Typechecker::collectDeclaration(const AstDeclaration& declaration,
   symbol.contextualParameters.resize(declaration.parameters.size(), false);
   symbol.isGiven = declaration.isGiven;
   symbol.isAnonymousGiven = declaration.isAnonymousGiven;
+  symbol.isTransparent = declaration.isTransparent;
   if (auto enclosing = globalSymbols_.find(owner);
       enclosing != globalSymbols_.end() &&
       enclosing->second.kind == AstDeclarationKind::Object) {
@@ -9456,7 +9458,7 @@ TypeInfo Typechecker::widenSoftUnion(const TypeInfo& type) const {
     return type;
   }
 
-  const auto isTransparentBase = [](const std::string& name) {
+  const auto isTransparentBase = [&](const std::string& name) {
     static const std::unordered_set<std::string> transparent{
         "Any",
         "scala.Any",
@@ -9470,7 +9472,11 @@ TypeInfo Typechecker::widenSoftUnion(const TypeInfo& type) const {
         "java.lang.Comparable",
         "java.io.Serializable",
     };
-    return transparent.contains(name);
+    if (transparent.contains(name)) {
+      return true;
+    }
+    auto symbol = globalSymbols_.find(name);
+    return symbol != globalSymbols_.end() && symbol->second.isTransparent;
   };
 
   const std::vector<std::string> commonBases = baseTypeNamesFor(type);

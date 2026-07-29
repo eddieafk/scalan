@@ -151,6 +151,7 @@ struct SymbolInfo {
   bool hasImplementation = true;
   bool isGiven = false;
   bool isAnonymousGiven = false;
+  bool isTransparent = false;
   bool isContextParameter = false;
   bool isModuleMember = false;
   bool isInstanceMember = false;

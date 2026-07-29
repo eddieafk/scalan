@@ -1256,11 +1256,15 @@ Current scaffold status:
   unions. Typed NIR `if` values preserve the widened result contract and box
   scalar alternatives when the retained union erases to `Object`. Native
   coverage verifies shared-trait, shared-intersection, unrelated, scalar,
-  match, explicit-hard-union, and generic-visible-join cases. User-declared
-  `transparent` parents, retained soft unions as unconstrained generic type
-  arguments, parameterized join specialization, and intersection members
-  whose independently declared result types need a synthesized intersection
-  remain later type-system slices.
+  match, explicit-hard-union, and generic-visible-join cases. Scala 3's soft
+  `transparent` modifier is now accepted on user classes and traits and carried
+  in declaration symbols: transparent-only joins retain the original union,
+  while mixed joins discard transparent parents and widen to the remaining
+  visible bases. Runtime and NIR coverage exercises both paths. Retained soft
+  unions as unconstrained generic type arguments, parameterized join
+  specialization, and intersection members whose independently declared
+  result types need a synthesized intersection remain later type-system
+  slices.
 - Full inline call-site specialization remains a later milestone.
 - Postfix type application now supports typed `value.isInstanceOf[Target]` and
   checked `value.asInstanceOf[Target]` for known classes, traits, and objects.

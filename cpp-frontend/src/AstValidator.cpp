@@ -107,6 +107,14 @@ bool AstValidator::validateDeclaration(const AstDeclaration& declaration,
                       "sealed modifier is only supported on classes and traits");
     ok = false;
   }
+  if (declaration.isTransparent &&
+      declaration.kind != AstDeclarationKind::Class &&
+      declaration.kind != AstDeclarationKind::Trait) {
+    diagnostics.error(
+        declaration.span,
+        "transparent modifier is only supported on classes and traits");
+    ok = false;
+  }
   if (declaration.isLegacyImplicit && !declaration.isGiven) {
     diagnostics.error(declaration.span,
                       "legacy-implicit metadata requires a contextual declaration");

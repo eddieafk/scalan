@@ -124,6 +124,7 @@ struct AstDeclaration {
   bool importsWildcard = false;
   bool isOverride = false;
   bool isSealed = false;
+  bool isTransparent = false;
   bool isGiven = false;
   bool isLegacyImplicit = false;
   bool isAnonymousGiven = false;

@@ -48,6 +48,17 @@ trait LeftLabel {
 trait RightLabel {
   def label(): String
 }
+transparent class HiddenBase {
+  def hiddenName(): String = "hidden-base"
+}
+class HiddenLeft extends HiddenBase
+class HiddenRight extends HiddenBase
+transparent trait HiddenMarker {
+  def hiddenMarker(): String
+}
+trait VisibleName {
+  def visibleName(): String
+}
 
 class LeftValue extends Left {
   def commonName(): String = "left-common"
@@ -75,6 +86,14 @@ class LeftLabelValue extends LeftLabel {
 }
 class RightLabelValue extends RightLabel {
   def label(): String = "right-label"
+}
+class VisibleLeft extends VisibleName with HiddenMarker {
+  def visibleName(): String = "visible-left"
+  def hiddenMarker(): String = "hidden-left"
+}
+class VisibleRight extends VisibleName with HiddenMarker {
+  def visibleName(): String = "visible-right"
+  def hiddenMarker(): String = "hidden-right"
 }
 class Box[A](val value: A)
 
@@ -139,6 +158,10 @@ object Main {
       case 0 => new LeftValue
       case _ => new RightValue
     }
+  def inferredTransparentClass(flag: Boolean) =
+    if (flag) new HiddenLeft else new HiddenRight
+  def inferredVisibleWithoutMarker(flag: Boolean) =
+    if (flag) new VisibleLeft else new VisibleRight
   def firstOf[A](left: A, right: A): A = left
   def localWidened(flag: Boolean): String = {
     val inferred =
@@ -207,6 +230,10 @@ object Main {
     println(inferredMatch(0).commonName())
     println(inferredMatch(1).commonName())
     println(genericWidened())
+    println(inferredTransparentClass(true).hiddenName())
+    println(inferredTransparentClass(false).hiddenName())
+    println(inferredVisibleWithoutMarker(true).visibleName())
+    println(inferredVisibleWithoutMarker(false).visibleName())
     println(inferredScalar(true).asInstanceOf[Int])
     println(inferredScalar(false).asInstanceOf[String])
     println(unrelatedName(inferredUnrelated(false)))
@@ -215,6 +242,8 @@ object Main {
 )";
   constexpr const char* invalidSource =
       R"(package demo.invalidcompositetypes
+
+transparent object Unsupported
 
 trait Left {
   def commonSpelling(): String
@@ -312,8 +341,12 @@ object Main {
               "union\nunion\nright\n"
               "left-common\nright-common\nleft-tagged-common\ntagged-right\n"
               "right-common\nleft-common\n"
-              "left-common\nright-common\nleft-common\n7\nseven\nunrelated\n" &&
+              "left-common\nright-common\nleft-common\n"
+              "hidden-base\nhidden-base\nvisible-left\nvisible-right\n"
+              "7\nseven\nunrelated\n" &&
       !invalid.ok &&
+      contains(invalid.diagnosticsText,
+               "'transparent' must modify a class or trait") &&
       contains(invalid.diagnosticsText, "does not conform to declared type "
                                         "demo.invalidcompositetypes.Left | "
                                         "demo.invalidcompositetypes.Right") &&
@@ -380,6 +413,14 @@ object Main {
                "(Boolean)Object") &&
       contains(result.nirText, "define @demo.compositetypes.Main.inferredScalar : "
                                "(Boolean)Object") &&
+      contains(result.nirText,
+               "define @demo.compositetypes.Main.inferredTransparentClass : "
+               "(Boolean)Object") &&
+      contains(result.nirText,
+               "as-instance-of[demo.compositetypes.HiddenBase]") &&
+      contains(result.nirText,
+               "define @demo.compositetypes.Main.inferredVisibleWithoutMarker : "
+               "(Boolean)demo.compositetypes.VisibleName") &&
       contains(result.nirText, "let %inferred : demo.compositetypes.CommonName = "
                                "as-instance-of[demo.compositetypes.CommonName](if(") &&
       contains(result.nirText, "let %explicit : Object = if(") &&

@@ -12,21 +12,22 @@ trait Username extends LookupView {
 trait Audited {
   def auditLabel(): String
 }
+transparent trait RoutingMarker
 
-class RequestIdValue extends RequestId {
+class RequestIdValue extends RequestId with RoutingMarker {
   def display(): String = "request"
   def requestPart(): String = "request-part"
 }
-class UsernameValue extends Username {
+class UsernameValue extends Username with RoutingMarker {
   def display(): String = "username"
   def usernamePart(): String = "username-part"
 }
-class AuditedRequest extends RequestId with Audited {
+class AuditedRequest extends RequestId with Audited with RoutingMarker {
   def display(): String = "audited-request"
   def requestPart(): String = "audited-request-part"
   def auditLabel(): String = "request-audit"
 }
-class AuditedUsername extends Username with Audited {
+class AuditedUsername extends Username with Audited with RoutingMarker {
   def display(): String = "audited-username"
   def usernamePart(): String = "audited-username-part"
   def auditLabel(): String = "username-audit"
