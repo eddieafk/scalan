@@ -106,6 +106,23 @@ object Selectors {
   transparent inline def inferredRefined[A](value: A)(using
       named: Named[A]): TransparentResult =
     new PreciseResult("inferred-transparent:" + named.label())
+
+  inline def nonGenericConstant: String = "non-generic-constant"
+
+  inline def nonGenericDecorated(value: String): String =
+    "non-generic:" + value + ":" + value
+
+  inline def nestedNonGeneric(value: String): String =
+    "nested-" + nonGenericDecorated(value)
+
+  inline def nonGenericContextual()(using named: Named[Int]): String =
+    "non-generic-context:" + named.label()
+
+  inline def nonGenericCurried(first: String)(second: String): String =
+    "non-generic-curried:" + first + ":" + second
+
+  transparent inline def nonGenericRefined(): TransparentResult =
+    new PreciseResult("non-generic-transparent")
 }
 
 class InstanceSelectors(val instancePrefix: String) {
@@ -128,6 +145,11 @@ class InstanceSelectors(val instancePrefix: String) {
   inline def curried[A](first: String)(second: String)(
       using named: Named[A]): String =
     instancePrefix + named.label() + ":" + first + ":" + second
+
+  inline def nonGeneric(value: String): String =
+    instancePrefix + value + ":" + value
+
+  inline def nonGenericConstant: String = instancePrefix + "constant"
 }
 
 trait TraitInstanceSelectors {
@@ -235,6 +257,11 @@ object Main {
     "second"
   }
 
+  def nextNonGeneric(): String = {
+    println("non-generic-effect")
+    "plain"
+  }
+
   def main(args: Array[String]): Unit = {
     println(Selectors.selected[Int])
 
@@ -336,5 +363,13 @@ object Main {
       Selectors.contextualRefined[String]()(using
         new NamedValue[String]("explicit-transparent")).preciseOnly())
     println(Selectors.inferredRefined(22).preciseOnly())
+    println(Selectors.nonGenericConstant)
+    println(Selectors.nonGenericDecorated(nextNonGeneric()))
+    println(Selectors.nestedNonGeneric("nested"))
+    println(Selectors.nonGenericContextual())
+    println(Selectors.nonGenericCurried(nextFirst())(nextSecond()))
+    println(nextInstances().nonGeneric("receiver"))
+    println(nextInstances().nonGenericConstant)
+    println(Selectors.nonGenericRefined().preciseOnly())
   }
 }

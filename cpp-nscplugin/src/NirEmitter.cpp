@@ -660,7 +660,8 @@ inlineApplicationFor(const frontend::AstExpression& expression,
   auto application = std::find_if(
       context.inlineApplications->rbegin(), context.inlineApplications->rend(),
       [&](const frontend::TypedInlineApplication& candidate) {
-        return candidate.span.source == expression.span.source &&
+        return candidate.expressionKind == expression.kind &&
+               candidate.span.source == expression.span.source &&
                candidate.span.start == expression.span.start &&
                candidate.span.length == expression.span.length;
       });
@@ -2168,6 +2169,11 @@ void appendExpressionSetup(const frontend::AstExpression& expression,
 nir::Value valueFor(const frontend::AstExpression& expression,
                     const ValueContext& context, bool preserveCallable) {
   using frontend::AstExpressionKind;
+
+  if (const frontend::TypedInlineApplication* application =
+          inlineApplicationFor(expression, context)) {
+    return inlineApplicationValueFor(*application, context);
+  }
 
   switch (expression.kind) {
   case AstExpressionKind::Empty:

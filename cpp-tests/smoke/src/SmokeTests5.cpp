@@ -157,6 +157,23 @@ object Selectors {
   transparent inline def inferredRefined[A](value: A)(using
       named: Named[A]): TransparentResult =
     new PreciseResult("inferred-transparent:" + named.label())
+
+  inline def nonGenericConstant: String = "non-generic-constant"
+
+  inline def nonGenericDecorated(value: String): String =
+    "non-generic:" + value + ":" + value
+
+  inline def nestedNonGeneric(value: String): String =
+    "nested-" + nonGenericDecorated(value)
+
+  inline def nonGenericContextual()(using named: Named[Int]): String =
+    "non-generic-context:" + named.label()
+
+  inline def nonGenericCurried(first: String)(second: String): String =
+    "non-generic-curried:" + first + ":" + second
+
+  transparent inline def nonGenericRefined(): TransparentResult =
+    new PreciseResult("non-generic-transparent")
 }
 
 class InstanceSelectors(val instancePrefix: String) {
@@ -179,6 +196,11 @@ class InstanceSelectors(val instancePrefix: String) {
   inline def curried[A](first: String)(second: String)(
       using named: Named[A]): String =
     instancePrefix + named.label() + ":" + first + ":" + second
+
+  inline def nonGeneric(value: String): String =
+    instancePrefix + value + ":" + value
+
+  inline def nonGenericConstant: String = instancePrefix + "constant"
 }
 
 trait TraitInstanceSelectors {
@@ -284,6 +306,11 @@ object Main {
   def nextSecond(): String = {
     println("second-effect")
     "second"
+  }
+
+  def nextNonGeneric(): String = {
+    println("non-generic-effect")
+    "plain"
   }
 
   def intSelected: String = Selectors.selected[Int]
@@ -401,6 +428,19 @@ object Main {
       new NamedValue[String]("explicit-transparent")).preciseOnly()
   def inferredTransparentSelected: String =
     Selectors.inferredRefined(22).preciseOnly()
+  def nonGenericConstant: String = Selectors.nonGenericConstant
+  def nonGenericDecorated: String =
+    Selectors.nonGenericDecorated(nextNonGeneric())
+  def nestedNonGeneric: String = Selectors.nestedNonGeneric("nested")
+  def nonGenericContextual: String = Selectors.nonGenericContextual()
+  def nonGenericCurried: String =
+    Selectors.nonGenericCurried(nextFirst())(nextSecond())
+  def effectfulReceiverNonGeneric: String =
+    nextInstances().nonGeneric("receiver")
+  def effectfulReceiverNonGenericConstant: String =
+    nextInstances().nonGenericConstant
+  def nonGenericTransparent: String =
+    Selectors.nonGenericRefined().preciseOnly()
 
   def main(args: Array[String]): Unit = {
     println(intSelected)
@@ -456,6 +496,14 @@ object Main {
     println(contextualTransparentSelected)
     println(explicitTransparentSelected)
     println(inferredTransparentSelected)
+    println(nonGenericConstant)
+    println(nonGenericDecorated)
+    println(nestedNonGeneric)
+    println(nonGenericContextual)
+    println(nonGenericCurried)
+    println(effectfulReceiverNonGeneric)
+    println(effectfulReceiverNonGenericConstant)
+    println(nonGenericTransparent)
   }
 }
 )";
@@ -465,7 +513,6 @@ object Main {
 object Main {
   trait Missing[A]
 
-  inline def nonGeneric: String = "non-generic"
   inline def missingContext[A]()(using value: Missing[A]): String =
     "missing-context"
   def unsupportedMissingContext: String = missingContext[Int]()
@@ -622,6 +669,22 @@ object Main {
       functionText(result.nirText, "demo.inlinecalls.Main.explicitTransparentSelected");
   const std::string_view inferredTransparentSelected =
       functionText(result.nirText, "demo.inlinecalls.Main.inferredTransparentSelected");
+  const std::string_view nonGenericConstant =
+      functionText(result.nirText, "demo.inlinecalls.Main.nonGenericConstant");
+  const std::string_view nonGenericDecorated =
+      functionText(result.nirText, "demo.inlinecalls.Main.nonGenericDecorated");
+  const std::string_view nestedNonGeneric =
+      functionText(result.nirText, "demo.inlinecalls.Main.nestedNonGeneric");
+  const std::string_view nonGenericContextual =
+      functionText(result.nirText, "demo.inlinecalls.Main.nonGenericContextual");
+  const std::string_view nonGenericCurried =
+      functionText(result.nirText, "demo.inlinecalls.Main.nonGenericCurried");
+  const std::string_view effectfulReceiverNonGeneric =
+      functionText(result.nirText, "demo.inlinecalls.Main.effectfulReceiverNonGeneric");
+  const std::string_view effectfulReceiverNonGenericConstant = functionText(
+      result.nirText, "demo.inlinecalls.Main.effectfulReceiverNonGenericConstant");
+  const std::string_view nonGenericTransparent =
+      functionText(result.nirText, "demo.inlinecalls.Main.nonGenericTransparent");
 
   const bool valid =
       status == 0 &&
@@ -668,11 +731,17 @@ object Main {
               "transparent:member-int\n"
               "context-transparent:member-int\n"
               "context-transparent:explicit-transparent\n"
-              "inferred-transparent:member-int\n" &&
+              "inferred-transparent:member-int\n"
+              "non-generic-constant\n"
+              "non-generic-effect\nnon-generic:plain:plain\n"
+              "nested-non-generic:nested:nested\n"
+              "non-generic-context:member-int\n"
+              "first-effect\nsecond-effect\n"
+              "non-generic-curried:first:second\n"
+              "receiver-effect\neffectful-instance:receiver:receiver\n"
+              "receiver-effect\neffectful-instance:constant\n"
+              "non-generic-transparent\n" &&
       !invalid.ok &&
-      contains(invalid.diagnosticsText,
-               "inline call-site specialization currently requires a generic "
-               "method") &&
       contains(invalid.diagnosticsText,
                "no given value found for context parameter value of type") &&
       contains(invalid.diagnosticsText, "required by missingContext") &&
@@ -912,7 +981,32 @@ object Main {
       contains(inferredTransparentSelected, ".preciseOnly") &&
       countOccurrences(inferredTransparentSelected, "Main.intNamed") == 1 &&
       !contains(inferredTransparentSelected,
-                "%demo.inlinecalls.Selectors.inferredRefined");
+                "%demo.inlinecalls.Selectors.inferredRefined") &&
+      contains(nonGenericConstant, "\"non-generic-constant\"") &&
+      !contains(nonGenericConstant, "%demo.inlinecalls.Selectors.nonGenericConstant") &&
+      contains(nonGenericDecorated, "let %value : String") &&
+      countOccurrences(nonGenericDecorated, "nextNonGeneric") == 1 &&
+      !contains(nonGenericDecorated,
+                "%demo.inlinecalls.Selectors.nonGenericDecorated") &&
+      contains(nestedNonGeneric, "\"nested-\"") &&
+      !contains(nestedNonGeneric, "%demo.inlinecalls.Selectors.nestedNonGeneric") &&
+      !contains(nestedNonGeneric, "%demo.inlinecalls.Selectors.nonGenericDecorated") &&
+      countOccurrences(nonGenericContextual, "Main.intNamed") == 1 &&
+      !contains(nonGenericContextual,
+                "%demo.inlinecalls.Selectors.nonGenericContextual") &&
+      countOccurrences(nonGenericCurried, "nextFirst") == 1 &&
+      countOccurrences(nonGenericCurried, "nextSecond") == 1 &&
+      nonGenericCurried.find("nextFirst") < nonGenericCurried.find("nextSecond") &&
+      !contains(nonGenericCurried, "%demo.inlinecalls.Selectors.nonGenericCurried") &&
+      countOccurrences(effectfulReceiverNonGeneric, "nextInstances") == 1 &&
+      !contains(effectfulReceiverNonGeneric,
+                "%demo.inlinecalls.InstanceSelectors.nonGeneric") &&
+      countOccurrences(effectfulReceiverNonGenericConstant, "nextInstances") == 1 &&
+      !contains(effectfulReceiverNonGenericConstant,
+                "%demo.inlinecalls.InstanceSelectors.nonGenericConstant") &&
+      contains(nonGenericTransparent, "demo.inlinecalls.PreciseResult") &&
+      contains(nonGenericTransparent, ".preciseOnly") &&
+      !contains(nonGenericTransparent, "%demo.inlinecalls.Selectors.nonGenericRefined");
   return valid
              ? 0
              : fail(
@@ -991,7 +1085,18 @@ object Main {
                    "', explicit-transparent-selected='" +
                    std::string(explicitTransparentSelected) +
                    "', inferred-transparent-selected='" +
-                   std::string(inferredTransparentSelected) + "')");
+                   std::string(inferredTransparentSelected) +
+                   "', non-generic-constant='" + std::string(nonGenericConstant) +
+                   "', non-generic-decorated='" + std::string(nonGenericDecorated) +
+                   "', nested-non-generic='" + std::string(nestedNonGeneric) +
+                   "', non-generic-contextual='" + std::string(nonGenericContextual) +
+                   "', non-generic-curried='" + std::string(nonGenericCurried) +
+                   "', effectful-receiver-non-generic='" +
+                   std::string(effectfulReceiverNonGeneric) +
+                   "', effectful-receiver-non-generic-constant='" +
+                   std::string(effectfulReceiverNonGenericConstant) +
+                   "', non-generic-transparent='" + std::string(nonGenericTransparent) +
+                   "')");
 }
 
 } // namespace

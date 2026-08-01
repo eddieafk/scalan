@@ -994,7 +994,8 @@ Current scaffold status:
   or dead fallback. Outside a supported inline application, reduction continues
   to use evidence visible at the definition's lexical typechecking site.
   Scala 3's soft `inline def` modifier now enables a bounded call-site
-  specialization path for generic top-level, object, and instance methods.
+  specialization path for generic and non-generic top-level, object, and
+  instance methods.
   Instance methods accept arbitrary typed receiver expressions; non-generic
   and fully applied generic class or trait owners are supported, including an
   applied generic parent recovered from a concrete subclass.
@@ -1021,8 +1022,14 @@ Current scaffold status:
   called directly after expansion, including through nested transparent calls,
   inferred type arguments, contextual evidence, and explicit `using`
   arguments. Expanded block receivers are evaluated once into typed NIR locals
-  before member calls. Recursive expansion is diagnosed. Partially applied
-  calls and the remaining Scala 3 inline surface stay future milestones.
+  before member calls. Non-generic methods use the same specialization model,
+  including bare parameterless methods, ordinary and curried value clauses,
+  contextual arguments, nested expansion, effectful instance receivers, and
+  transparent-result refinement. Inline-application identity includes both
+  source span and expression kind so synthesized contextual expressions cannot
+  alias their enclosing call metadata. Recursive expansion is diagnosed.
+  Partially applied calls and the remaining Scala 3 inline surface stay future
+  milestones.
   Focused native coverage exercises ordered
   search, wildcard fallback, pattern-bound contextual evidence, recursive
   generic factories, lexical definition-owner values, member and nearest local
@@ -1037,8 +1044,10 @@ Current scaffold status:
   elimination, explicit/inferred curried calls, contextual and nested curried
   forwarding, effect ordering across receiver and ordinary clauses,
   precise/fallback transparent-result member selection, nested/contextual/
-  inferred transparent refinement, malformed clause shapes, malformed cases,
-  unmatched search, ambiguity propagation, and unsupported inline forms.
+  inferred transparent refinement, non-generic parameterless/value/contextual/
+  curried/instance/nested/transparent forms, malformed clause shapes,
+  malformed cases, unmatched search, ambiguity propagation, and unsupported
+  inline forms.
 - Anonymous givens and block-local named or anonymous givens now use the same
   typed evidence model. Lexical depth is retained during search, so the
   innermost matching local given wins while equally nested matches remain
@@ -1321,9 +1330,9 @@ Current scaffold status:
   member. Optimized runtime and NIR coverage verifies chained selection from the
   synthesized result, stable values, applied generic members, incompatible
   parameter lists, and invalid one-sided implementations.
-- Full inline call-site specialization beyond the current fully applied-owner,
-  complete ordinary-clause application with a trailing contextual clause, and
-  generic-inference slice remains a later milestone.
+- Full inline call-site specialization beyond the current fully applied-owner
+  and complete ordinary-clause application shapes, or beyond the current
+  generic-inference slice, remains a later milestone.
 - Postfix type application now supports typed `value.isInstanceOf[Target]` and
   checked `value.asInstanceOf[Target]` for known classes, traits, and objects.
   NIR uses dedicated `is-instance-of[T]` and `as-instance-of[T]` values; verification

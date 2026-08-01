@@ -1645,11 +1645,6 @@ TypedDeclaration Typechecker::typecheckDeclaration(const AstDeclaration& declara
   typed.contextualParameterClauses =
       declaration.contextualParameterClauses;
   if (typed.isInline) {
-    if (typed.typeParameters.empty()) {
-      diagnostics_.error(
-          declaration.span,
-          "inline call-site specialization currently requires a generic method");
-    }
     if (!typed.hasInitializer) {
       diagnostics_.error(declaration.span,
                          "inline method requires an implementation");
@@ -4637,6 +4632,7 @@ std::optional<TypeInfo> Typechecker::recordInlineApplication(
 
   TypedInlineApplication application;
   application.span = expression.span;
+  application.expressionKind = expression.kind;
   application.symbolName = symbol.symbolName;
   application.ownerName = definitionOwner;
   application.body = symbol.inlineBody;
@@ -4660,7 +4656,8 @@ std::optional<TypeInfo> Typechecker::recordInlineApplication(
   expandingInlineApplications_.erase(symbol.symbolName);
 
   const auto sameSpan = [&](const TypedInlineApplication& candidate) {
-    return candidate.span.source == expression.span.source &&
+    return candidate.expressionKind == expression.kind &&
+           candidate.span.source == expression.span.source &&
            candidate.span.start == expression.span.start &&
            candidate.span.length == expression.span.length;
   };
@@ -4796,6 +4793,29 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
                          "generic method " + found->second.name + " requires " +
                              std::to_string(found->second.typeParameters.size()) +
                              " explicit type arguments");
+    }
+    if (found->second.kind == AstDeclarationKind::Def &&
+        found->second.isInline && found->second.typeParameters.empty() &&
+        found->second.parameters.empty() &&
+        found->second.parameterClauseSizes.empty()) {
+      std::optional<AstExpression> receiver;
+      std::optional<TypeInfo> receiverType;
+      if (found->second.isInstanceMember) {
+        if (auto thisSymbol = scope.find("this"); thisSymbol != scope.end()) {
+          AstExpression implicitReceiver;
+          implicitReceiver.kind = AstExpressionKind::This;
+          implicitReceiver.span = expression.span;
+          receiver = std::move(implicitReceiver);
+          receiverType = thisSymbol->second.type;
+        }
+      }
+      if (std::optional<TypeInfo> transparentResult = recordInlineApplication(
+              expression, found->second, {}, {}, {},
+              receiver.has_value() ? &*receiver : nullptr,
+              receiverType.has_value() ? &*receiverType : nullptr, scope,
+              expectedType)) {
+        return *transparentResult;
+      }
     }
     return found->second.type;
   }
@@ -5915,6 +5935,7 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
     std::vector<TypeInfo> explicitInlineTypeArguments;
     std::optional<SymbolInfo> inferredInlineTarget;
     std::vector<TypeInfo> inferredInlineTypeArguments;
+    std::optional<SymbolInfo> directInlineTarget;
     std::optional<AstExpression> inlineReceiver;
     std::optional<TypeInfo> inlineReceiverType;
     if (callee.kind == AstExpressionKind::Identifier) {
@@ -5987,6 +6008,12 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
             *rawTarget, typeArgumentsFor(callee), scope, callee.span, false);
         calleeSymbol = &specializedCallee;
       }
+    }
+
+    if (callee.kind != AstExpressionKind::TypeApply && calleeSymbol != nullptr &&
+        calleeSymbol->kind == AstDeclarationKind::Def &&
+        calleeSymbol->isInline && calleeSymbol->typeParameters.empty()) {
+      directInlineTarget = *calleeSymbol;
     }
 
     std::vector<TypeInfo> argumentTypes;
@@ -6137,6 +6164,18 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
                      target.parameters.size();
         };
     std::optional<TypeInfo> transparentInlineResult;
+    if (directInlineTarget.has_value() && calleeSymbol != nullptr &&
+        calleeSymbol->typeParameters.empty() &&
+        hasSupportedInlineArguments(*directInlineTarget)) {
+      std::vector<AstExpression> inlineArguments(expression.children.begin() + 1,
+                                                 expression.children.end());
+      transparentInlineResult = recordInlineApplication(
+          expression, *directInlineTarget, {}, inlineArguments,
+          inlineContextArguments,
+          inlineReceiver.has_value() ? &*inlineReceiver : nullptr,
+          inlineReceiverType.has_value() ? &*inlineReceiverType : nullptr, scope,
+          expectedType);
+    }
     if (explicitInlineTarget.has_value() && calleeSymbol != nullptr &&
         calleeSymbol->typeParameters.empty() &&
         hasSupportedInlineArguments(*explicitInlineTarget)) {
@@ -7579,10 +7618,12 @@ TypeInfo Typechecker::inferSelectType(const AstExpression& expression, Scope& sc
   }
 
   std::optional<SymbolInfo> resolvedMember;
+  std::optional<TypeInfo> selectedReceiverType;
   if (expression.children.size() == 1) {
-    const TypeInfo receiver = inferExpressionType(expression.children.front(), scope);
+    selectedReceiverType =
+        inferExpressionType(expression.children.front(), scope);
     resolvedMember =
-        resolvedMemberForReceiverType(receiver, expression.text);
+        resolvedMemberForReceiverType(*selectedReceiverType, expression.text);
   }
   const SymbolInfo* member =
       resolvedMember.has_value() ? &*resolvedMember
@@ -7593,8 +7634,12 @@ TypeInfo Typechecker::inferSelectType(const AstExpression& expression, Scope& sc
   SymbolInfo specializedMember =
       resolvedMember.has_value() ? *resolvedMember : *member;
   if (!resolvedMember.has_value() && expression.children.size() == 1) {
-    const TypeInfo receiver = inferExpressionType(expression.children.front(), scope);
-    specializedMember = specializeMemberForReceiver(*member, receiver);
+    if (!selectedReceiverType.has_value()) {
+      selectedReceiverType =
+          inferExpressionType(expression.children.front(), scope);
+    }
+    specializedMember =
+        specializeMemberForReceiver(*member, *selectedReceiverType);
   }
   if ((specializedMember.kind == AstDeclarationKind::Class ||
        specializedMember.kind == AstDeclarationKind::Trait) &&
@@ -7609,6 +7654,18 @@ TypeInfo Typechecker::inferSelectType(const AstExpression& expression, Scope& sc
                        "generic method " + specializedMember.name + " requires " +
                            std::to_string(specializedMember.typeParameters.size()) +
                            " explicit type arguments");
+  }
+  if (specializedMember.kind == AstDeclarationKind::Def &&
+      specializedMember.isInline && specializedMember.typeParameters.empty() &&
+      specializedMember.parameters.empty() &&
+      specializedMember.parameterClauseSizes.empty() &&
+      expression.children.size() == 1 && selectedReceiverType.has_value()) {
+    if (std::optional<TypeInfo> transparentResult = recordInlineApplication(
+            expression, specializedMember, {}, {}, {},
+            &expression.children.front(), &*selectedReceiverType, scope,
+            nullptr)) {
+      return *transparentResult;
+    }
   }
   TypeInfo selected = staticExpressionType(specializedMember.type);
   if (expression.children.size() != 1 ||

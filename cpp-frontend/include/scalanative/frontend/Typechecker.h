@@ -134,6 +134,7 @@ struct TypedContextApplication {
 
 struct TypedInlineApplication {
   support::SourceSpan span;
+  AstExpressionKind expressionKind = AstExpressionKind::Empty;
   std::string symbolName;
   std::string ownerName;
   AstExpression body;
