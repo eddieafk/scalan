@@ -2,6 +2,7 @@ package demo.inlineconstant
 
 import scala.compiletime.constValue
 import scala.compiletime.{constValue => constant}
+import scala.compiletime.{error => compiletimeError}
 
 trait ConstantResult {
   def text(): String
@@ -35,6 +36,24 @@ object Constants {
       case 7 => new SevenResult("precise-seven")
       case _ => new OtherResult("precise-other")
     }
+
+  inline def requireSeven[N](inline message: String): String =
+    inline constValue[N] match {
+      case 7 => "accepted-seven"
+      case _ => compiletimeError("requireSeven: " + message)
+    }
+
+  inline def requireTrue[B](inline message: String): String =
+    inline constValue[B] match {
+      case true => "accepted-true"
+      case _ => scala.compiletime.error(message)
+    }
+
+  inline def requireCondition(
+      inline condition: Boolean,
+      inline message: String): String =
+    inline if (condition) "accepted-condition"
+    else compiletimeError(message)
 }
 
 object Main {
@@ -47,5 +66,8 @@ object Main {
     println(Constants.labelOf[9])
     println(Constants.resultFor[7].sevenOnly())
     println(Constants.resultFor[9].otherOnly())
+    println(Constants.requireSeven[7]("not seven"))
+    println(Constants.requireTrue[true]("not true"))
+    println(Constants.requireCondition(true, "condition failed"))
   }
 }

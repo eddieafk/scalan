@@ -196,6 +196,7 @@ struct SymbolInfo {
   std::size_t contextualNestingDepth = 0;
   std::optional<bool> specializedBooleanValue;
   std::optional<std::int64_t> specializedIntegerValue;
+  std::optional<std::string> specializedStringValue;
   std::optional<TypeInfo> specializedStaticType;
   AstExpression inlineBody;
 };
@@ -273,8 +274,12 @@ private:
                                         const Scope& scope) const;
   [[nodiscard]] bool isConstValueExpression(const AstExpression& expression,
                                             const Scope& scope) const;
+  [[nodiscard]] bool isCompiletimeErrorCallee(const AstExpression& expression,
+                                              const Scope& scope) const;
   [[nodiscard]] std::optional<bool>
   constantBooleanValue(const AstExpression& expression, const Scope& scope) const;
+  [[nodiscard]] std::optional<std::string>
+  constantStringValue(const AstExpression& expression, const Scope& scope) const;
   [[nodiscard]] std::optional<TypeInfo>
   specializedStaticType(const AstExpression& expression, const Scope& scope) const;
   [[nodiscard]] std::optional<bool>

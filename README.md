@@ -106,6 +106,10 @@ build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
 # Long, String, and Char singleton types during compilation. Generic inline
 # definitions defer the intrinsic until specialization, so constant inline
 # matches and transparent result refinement emit only the selected result.
+# Compiler-owned `scala.compiletime.error(message)` supports literal, aliased,
+# and concatenated constant String messages. Calls inside inline definitions
+# are deferred to specialization and report only when the selected expansion
+# retains the error branch; successful callers contain no residual intrinsic.
 # Stable top-level and object `inline val` constants, including
 # dependency-ordered aliases of earlier inline values, are substituted directly
 # and can drive branches.

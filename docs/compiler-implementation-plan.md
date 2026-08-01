@@ -1085,6 +1085,18 @@ Current scaffold status:
   comparisons, and unselected branches are absent. Focused runtime,
   diagnostics, import-resolution, transparent-type, and NIR coverage shares
   `SmokeTests6.cpp` with the related `erasedValue` slice.
+  Compiler-owned `scala.compiletime.error(message)` now emits user-defined
+  diagnostics when a call survives inline expansion. Exact imports, aliases,
+  and the qualified spelling resolve to the intrinsic. Literal Strings,
+  validated inline String values, specialized String parameters,
+  `constValue` String results, and compile-time concatenations provide messages;
+  non-constant, non-String, and malformed calls receive focused diagnostics.
+  Calls are deferred while checking an inline definition, including nested
+  inline calls, so an unselected `inline if` or `inline match` branch remains
+  harmless. A selected call reports the decoded user message at its expansion,
+  while successful expanded caller NIR contains neither the intrinsic, its
+  message argument, nor the backend-only scaffold retained for the original
+  generic inline definition. Focused coverage remains in `SmokeTests6.cpp`.
   Constants propagate through nested inline calls and work with generic evidence
   selection, contextual and curried calls, effectful instance receivers, and
   transparent-result refinement. Symbolic Boolean and integer inline parameters

@@ -10,6 +10,9 @@ struct StdNames final {
   inline static constexpr std::string_view ConstValue = "constValue";
   inline static constexpr std::string_view ScalaCompiletimeConstValue =
       "scala.compiletime.constValue";
+  inline static constexpr std::string_view CompiletimeError = "error";
+  inline static constexpr std::string_view ScalaCompiletimeError =
+      "scala.compiletime.error";
   inline static constexpr std::string_view ErasedValue = "erasedValue";
   inline static constexpr std::string_view ScalaCompiletimeErasedValue =
       "scala.compiletime.erasedValue";

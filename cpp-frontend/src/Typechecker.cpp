@@ -167,6 +167,48 @@ std::string stringSingletonType(std::string_view value) {
   return literal;
 }
 
+std::string decodeStringLiteral(std::string_view text) {
+  if (text.starts_with("\"\"\"") && text.ends_with("\"\"\"") &&
+      text.size() >= 6) {
+    return std::string(text.substr(3, text.size() - 6));
+  }
+  if (text.size() < 2 || text.front() != '"' || text.back() != '"') {
+    return std::string(text);
+  }
+
+  std::string decoded;
+  for (std::size_t i = 1; i + 1 < text.size(); ++i) {
+    const char ch = text[i];
+    if (ch != '\\' || i + 2 >= text.size()) {
+      decoded.push_back(ch);
+      continue;
+    }
+
+    ++i;
+    switch (text[i]) {
+    case 'n':
+      decoded.push_back('\n');
+      break;
+    case 'r':
+      decoded.push_back('\r');
+      break;
+    case 't':
+      decoded.push_back('\t');
+      break;
+    case '"':
+      decoded.push_back('"');
+      break;
+    case '\\':
+      decoded.push_back('\\');
+      break;
+    default:
+      decoded.push_back(text[i]);
+      break;
+    }
+  }
+  return decoded;
+}
+
 std::string tupleTypeName(const std::vector<std::string>& elements) {
   if (elements.empty()) {
     return "scala.EmptyTuple";
@@ -1973,6 +2015,11 @@ TypedDeclaration Typechecker::typecheckDeclaration(const AstDeclaration& declara
       symbol.specializedIntegerValue =
           constantIntegerValue(declaration.initializer, signatureScope);
     }
+    if (declaration.isInline && declaration.kind == AstDeclarationKind::Val &&
+        typed.inferredType.kind == SimpleTypeKind::String) {
+      symbol.specializedStringValue =
+          constantStringValue(declaration.initializer, signatureScope);
+    }
     if (auto enclosing = globalSymbols_.find(owner);
         enclosing != globalSymbols_.end() &&
         enclosing->second.kind == AstDeclarationKind::Object) {
@@ -2251,6 +2298,11 @@ TypedDeclaration Typechecker::typecheckDeclaration(const AstDeclaration& declara
       updated.specializedIntegerValue =
           constantIntegerValue(member.initializer, memberScope);
     }
+    if (typedMember.isInline && typedMember.kind == AstDeclarationKind::Val &&
+        typedMember.inferredType.kind == SimpleTypeKind::String) {
+      updated.specializedStringValue =
+          constantStringValue(member.initializer, memberScope);
+    }
     updated.isAnonymousGiven = typedMember.isAnonymousGiven;
     updated.isModuleMember = declaration.kind == AstDeclarationKind::Object &&
                              (typedMember.kind == AstDeclarationKind::Val ||
@@ -2374,6 +2426,20 @@ void Typechecker::addRuntimeBuiltins(Scope& scope) {
   compiletime.type =
       TypeInfo{SimpleTypeKind::Object, compiletime.symbolName};
   globalSymbols_[compiletime.symbolName] = compiletime;
+
+  SymbolInfo compiletimeError;
+  compiletimeError.kind = AstDeclarationKind::Def;
+  compiletimeError.name = std::string(support::StdNames::CompiletimeError);
+  compiletimeError.symbolName =
+      std::string(support::StdNames::ScalaCompiletimeError);
+  compiletimeError.type = TypeInfo{SimpleTypeKind::Nothing, "Nothing"};
+  compiletimeError.parameters = {"msg: String"};
+  compiletimeError.parameterTypes = {
+      TypeInfo{SimpleTypeKind::String, "String"}};
+  compiletimeError.inlineParameters = {true};
+  compiletimeError.parameterClauseSizes = {1};
+  compiletimeError.contextualParameterClauses = {false};
+  globalSymbols_[compiletimeError.symbolName] = std::move(compiletimeError);
 
   SymbolInfo constValue;
   constValue.kind = AstDeclarationKind::Def;
@@ -4776,6 +4842,36 @@ bool Typechecker::isConstValueExpression(const AstExpression& expression,
          isConstValueCallee(expression.children.front(), scope);
 }
 
+bool Typechecker::isCompiletimeErrorCallee(const AstExpression& expression,
+                                           const Scope& scope) const {
+  if (expression.kind == AstExpressionKind::Identifier) {
+    const auto symbol = scope.find(expression.text);
+    return symbol != scope.end() &&
+           symbol->second.symbolName ==
+               support::StdNames::ScalaCompiletimeError;
+  }
+
+  std::function<std::optional<std::string>(const AstExpression&)> qualifiedPath;
+  qualifiedPath = [&](const AstExpression& candidate)
+      -> std::optional<std::string> {
+    if (candidate.kind == AstExpressionKind::Identifier) {
+      return candidate.text;
+    }
+    if (candidate.kind != AstExpressionKind::Select ||
+        candidate.children.size() != 1) {
+      return std::nullopt;
+    }
+    std::optional<std::string> receiver =
+        qualifiedPath(candidate.children.front());
+    return receiver.has_value()
+               ? std::optional<std::string>(*receiver + "." + candidate.text)
+               : std::nullopt;
+  };
+  const std::optional<std::string> path = qualifiedPath(expression);
+  return path.has_value() &&
+         *path == support::StdNames::ScalaCompiletimeError;
+}
+
 std::optional<bool>
 Typechecker::constantBooleanValue(const AstExpression& expression,
                                   const Scope& scope) const {
@@ -4892,6 +4988,68 @@ Typechecker::constantBooleanValue(const AstExpression& expression,
           return *left <= *right;
         }
         return *left >= *right;
+      }
+    }
+    return std::nullopt;
+  default:
+    return std::nullopt;
+  }
+}
+
+std::optional<std::string>
+Typechecker::constantStringValue(const AstExpression& expression,
+                                 const Scope& scope) const {
+  const auto symbolValue = [&](const SymbolInfo& symbol)
+      -> std::optional<std::string> {
+    if (symbol.specializedStringValue.has_value()) {
+      return symbol.specializedStringValue;
+    }
+    if (symbol.kind == AstDeclarationKind::Val && symbol.isInline &&
+        validatedInlineValueSymbols_.contains(symbol.symbolName) &&
+        symbol.inlineBody.kind != AstExpressionKind::Empty) {
+      return constantStringValue(symbol.inlineBody, scope);
+    }
+    return std::nullopt;
+  };
+  switch (expression.kind) {
+  case AstExpressionKind::StringLiteral:
+    return decodeStringLiteral(expression.text);
+  case AstExpressionKind::Identifier:
+    if (auto symbol = scope.find(expression.text); symbol != scope.end()) {
+      return symbolValue(symbol->second);
+    }
+    return std::nullopt;
+  case AstExpressionKind::Select:
+    if (expression.children.size() == 1 &&
+        expression.children.front().kind == AstExpressionKind::Identifier) {
+      if (auto receiver = scope.find(expression.children.front().text);
+          receiver != scope.end()) {
+        if (std::optional<SymbolInfo> member = resolvedMemberForReceiverType(
+                receiver->second.type, expression.text)) {
+          return symbolValue(*member);
+        }
+      }
+    }
+    return std::nullopt;
+  case AstExpressionKind::TypeApply:
+    if (isConstValueExpression(expression, scope) &&
+        typeArgumentsFor(expression).size() == 1) {
+      const TypeInfo constant =
+          typeFromDeclaredName(expression.declaredType, &scope, &expression.span);
+      if (constant.kind == SimpleTypeKind::String &&
+          !constant.singletonLiteral.empty()) {
+        return decodeStringLiteral(constant.singletonLiteral);
+      }
+    }
+    return std::nullopt;
+  case AstExpressionKind::Binary:
+    if (expression.text == "+" && expression.children.size() == 2) {
+      const std::optional<std::string> left =
+          constantStringValue(expression.children.front(), scope);
+      const std::optional<std::string> right =
+          constantStringValue(expression.children.back(), scope);
+      if (left.has_value() && right.has_value()) {
+        return *left + *right;
       }
     }
     return std::nullopt;
@@ -5218,14 +5376,19 @@ std::optional<TypeInfo> Typechecker::recordInlineApplication(
           inlineParameter && parameterKind == SimpleTypeKind::Boolean;
       const bool integerInlineParameter =
           inlineParameter && isIntegerConstantType(parameterKind);
+      const bool stringInlineParameter =
+          inlineParameter && parameterKind == SimpleTypeKind::String;
       const bool hasConstantArgument =
           sourceArgument != nullptr &&
           (booleanInlineParameter
                ? constantBooleanValue(*sourceArgument, scope).has_value()
            : integerInlineParameter
                ? constantIntegerValue(*sourceArgument, scope).has_value()
+           : stringInlineParameter
+               ? constantStringValue(*sourceArgument, scope).has_value()
                : false);
-      if ((!booleanInlineParameter && !integerInlineParameter) ||
+      if ((!booleanInlineParameter && !integerInlineParameter &&
+           !stringInlineParameter) ||
           sourceArgument == nullptr || hasConstantArgument) {
         continue;
       }
@@ -5238,7 +5401,9 @@ std::optional<TypeInfo> Typechecker::recordInlineApplication(
                 return (booleanInlineParameter &&
                         !parameter->second.specializedBooleanValue.has_value()) ||
                        (integerInlineParameter &&
-                        !parameter->second.specializedIntegerValue.has_value());
+                        !parameter->second.specializedIntegerValue.has_value()) ||
+                       (stringInlineParameter &&
+                        !parameter->second.specializedStringValue.has_value());
               }
             }
             return std::any_of(candidate.children.begin(), candidate.children.end(),
@@ -5388,6 +5553,11 @@ std::optional<TypeInfo> Typechecker::recordInlineApplication(
           sourceArgument == nullptr
               ? std::nullopt
               : constantIntegerValue(*sourceArgument, scope);
+    } else if (type.kind == SimpleTypeKind::String) {
+      parameter.specializedStringValue =
+          sourceArgument == nullptr
+              ? std::nullopt
+              : constantStringValue(*sourceArgument, scope);
     }
     parameter.isLexicalValue = true;
     inlineScope[name] = std::move(parameter);
@@ -5898,6 +6068,38 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
   case AstExpressionKind::Call: {
     if (expression.children.empty()) {
       return TypeInfo{SimpleTypeKind::Unknown, "Unknown"};
+    }
+    if (isCompiletimeErrorCallee(expression.children.front(), scope)) {
+      if (expression.children.size() != 2) {
+        diagnostics_.error(
+            expression.span,
+            "compiletime.error requires exactly one String argument");
+        for (std::size_t index = 1; index < expression.children.size(); ++index) {
+          (void)inferExpressionType(expression.children[index], scope);
+        }
+        return TypeInfo{SimpleTypeKind::Nothing, "Nothing"};
+      }
+
+      const AstExpression& messageExpression = expression.children.back();
+      const TypeInfo messageType = inferExpressionType(messageExpression, scope);
+      if (messageType.kind != SimpleTypeKind::String &&
+          messageType.kind != SimpleTypeKind::Unknown) {
+        diagnostics_.error(messageExpression.span,
+                           "compiletime.error message must have type String");
+        return TypeInfo{SimpleTypeKind::Nothing, "Nothing"};
+      }
+      if (inlineDefinitionDepth_ == 0 &&
+          messageType.kind != SimpleTypeKind::Unknown) {
+        if (const std::optional<std::string> message =
+                constantStringValue(messageExpression, scope)) {
+          diagnostics_.error(expression.span, *message);
+        } else {
+          diagnostics_.error(
+              messageExpression.span,
+              "compiletime.error requires a compile-time constant String message");
+        }
+      }
+      return TypeInfo{SimpleTypeKind::Nothing, "Nothing"};
     }
     std::vector<const AstExpression*> callClauses;
     const AstExpression* rootCallee = &expression;

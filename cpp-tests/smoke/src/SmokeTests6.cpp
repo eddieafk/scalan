@@ -55,6 +55,7 @@ import scala.compiletime.erasedValue
 import scala.compiletime.{erasedValue => erased}
 import scala.compiletime.constValue
 import scala.compiletime.{constValue => constant}
+import scala.compiletime.{error => compiletimeError}
 
 trait ErasedResult {
   def text(): String
@@ -99,6 +100,24 @@ object TypeKinds {
       case _ => new FallbackResult("constant-fallback")
     }
 
+  inline def requireSeven[N](inline message: String): String =
+    inline constValue[N] match {
+      case 7 => "accepted-seven"
+      case _ => compiletimeError("requireSeven: " + message)
+    }
+
+  inline def qualifiedRequire[B](inline message: String): String =
+    inline constValue[B] match {
+      case true => "accepted-true"
+      case _ => scala.compiletime.error(message)
+    }
+
+  inline def requireCondition(
+      inline condition: Boolean,
+      inline message: String): String =
+    inline if (condition) "accepted-condition"
+    else compiletimeError(message)
+
   transparent inline def nameOf[T]: String =
     inline erasedValue[T] match {
       case _: String => "string"
@@ -132,6 +151,10 @@ object Main {
   def constantBooleanFalse: String = TypeKinds.booleanChoice[false]
   def constantPrecise: String = TypeKinds.constantResult[true].preciseOnly()
   def constantFallback: String = TypeKinds.constantResult[false].fallbackOnly()
+  def acceptedSeven: String = TypeKinds.requireSeven[7]("ignored-seven")
+  def acceptedTrue: String = TypeKinds.qualifiedRequire[true]("ignored-true")
+  def acceptedCondition: String =
+    TypeKinds.requireCondition(true, "ignored-condition")
   def stringName: String = TypeKinds.nameOf[String]
   def intName: String = TypeKinds.nameOf[Int]
   def longName: String = TypeKinds.nameOf[Long]
@@ -153,6 +176,9 @@ object Main {
     println(constantBooleanFalse)
     println(constantPrecise)
     println(constantFallback)
+    println(acceptedSeven)
+    println(acceptedTrue)
+    println(acceptedCondition)
     println(stringName)
     println(intName)
     println(longName)
@@ -169,8 +195,42 @@ object Main {
 
 import scala.compiletime.erasedValue
 import scala.compiletime.constValue
+import scala.compiletime.error
+import scala.compiletime.{error => compiletimeError}
 
 object Main {
+  inline val errorPrefix = "aliased: "
+
+  inline def fail(inline message: String): Nothing =
+    compiletimeError("failure: " + message)
+
+  inline def failAliased(inline message: String): Nothing =
+    error(errorPrefix + message)
+
+  inline def failOnFalse[B](inline message: String): String =
+    inline constValue[B] match {
+      case true => "ok"
+      case _ => error(message)
+    }
+
+  inline def requireCondition(
+      inline condition: Boolean,
+      inline message: String): String =
+    inline if (condition) "ok"
+    else error(message)
+
+  val selectedError = fail("boom")
+  val selectedAliasedError = failAliased("boom")
+  val selectedMatchError = failOnFalse[false]("false branch")
+  val selectedConditionError = requireCondition(false, "condition failed")
+  val qualifiedError = scala.compiletime.error("direct failure")
+  val constValueError = error(constValue["constant value failure"])
+  val dynamicMessage: String = "dynamic"
+  val nonConstantError = error(dynamicMessage)
+  def dynamicInlineError(message: String) = fail(message)
+  val wrongErrorType = error(1)
+  val malformedError = error()
+
   val nonConstant = constValue[String]
   val malformedConstant = constValue[1, 2]
 
@@ -271,6 +331,12 @@ object Main {
       functionText(result.nirText, "demo.inlineerased.Main.constantPrecise");
   const std::string_view constantFallback =
       functionText(result.nirText, "demo.inlineerased.Main.constantFallback");
+  const std::string_view acceptedSeven =
+      functionText(result.nirText, "demo.inlineerased.Main.acceptedSeven");
+  const std::string_view acceptedTrue =
+      functionText(result.nirText, "demo.inlineerased.Main.acceptedTrue");
+  const std::string_view acceptedCondition =
+      functionText(result.nirText, "demo.inlineerased.Main.acceptedCondition");
   const std::string_view intName =
       functionText(result.nirText, "demo.inlineerased.Main.intName");
   const std::string_view longName =
@@ -289,6 +355,7 @@ object Main {
   const auto fullyReduced = [](std::string_view function) {
     return !function.empty() && !contains(function, "$match") &&
            !contains(function, "is-instance-of") &&
+           !contains(function, "compiletime.error") &&
            !contains(function, "constValue") &&
            !contains(function, "erasedValue") && !contains(function, "TypeKinds.");
   };
@@ -314,14 +381,44 @@ object Main {
       contains(constantFallback, "demo.inlineerased.FallbackResult") &&
       contains(constantFallback, ".fallbackOnly") &&
       !contains(constantFallback, "PreciseResult");
+  const bool compiletimeErrorsErased =
+      fullyReduced(acceptedSeven) &&
+      contains(acceptedSeven, "\"accepted-seven\"") &&
+      !contains(acceptedSeven, "ignored-seven") &&
+      !contains(acceptedSeven, "NotImplementedError") &&
+      fullyReduced(acceptedTrue) &&
+      contains(acceptedTrue, "\"accepted-true\"") &&
+      !contains(acceptedTrue, "ignored-true") &&
+      !contains(acceptedTrue, "NotImplementedError") &&
+      fullyReduced(acceptedCondition) &&
+      contains(acceptedCondition, "\"accepted-condition\"") &&
+      !contains(acceptedCondition, "ignored-condition") &&
+      !contains(acceptedCondition, "NotImplementedError");
   const bool valid =
       status == 0 &&
       outputText == "11\n42\n9000000000\nliteral\ntrue\nx\nconstant-seven\n"
                     "constant-other\nconstant-false\nconstant-precise\n"
-                    "constant-fallback\nstring\nint\nlong\nother\nalias-string\n"
+                    "constant-fallback\naccepted-seven\naccepted-true\n"
+                    "accepted-condition\n"
+                    "string\nint\nlong\nother\nalias-string\n"
                     "alias-other\n"
                     "precise\nfallback\n" &&
       !invalid.ok &&
+      contains(invalid.diagnosticsText, "failure: boom") &&
+      contains(invalid.diagnosticsText, "aliased: boom") &&
+      contains(invalid.diagnosticsText, "false branch") &&
+      contains(invalid.diagnosticsText, "condition failed") &&
+      contains(invalid.diagnosticsText, "direct failure") &&
+      contains(invalid.diagnosticsText, "constant value failure") &&
+      countOccurrences(
+          invalid.diagnosticsText,
+          "compiletime.error requires a compile-time constant String message") ==
+          2 &&
+      contains(invalid.diagnosticsText,
+               "compiletime.error message must have type String") &&
+      contains(invalid.diagnosticsText,
+               "compiletime.error requires exactly one String argument") &&
+      compiletimeErrorsErased &&
       countOccurrences(invalid.diagnosticsText,
                        "constValue requires a constant singleton type") == 3 &&
       contains(invalid.diagnosticsText,
@@ -370,6 +467,10 @@ object Main {
                       std::string(constantBooleanFalse) +
                       "', constant-precise='" + std::string(constantPrecise) +
                       "', constant-fallback='" + std::string(constantFallback) +
+                      "', accepted-seven='" + std::string(acceptedSeven) +
+                      "', accepted-true='" + std::string(acceptedTrue) +
+                      "', accepted-condition='" +
+                      std::string(acceptedCondition) +
                       "', string-name='" + std::string(stringName) + "', int-name='" +
                       std::string(intName) + "', long-name='" + std::string(longName) +
                       "', other-name='" + std::string(otherName) +

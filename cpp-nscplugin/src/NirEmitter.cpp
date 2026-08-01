@@ -836,6 +836,12 @@ bool isConstValueCallee(const frontend::AstExpression& expression,
                              support::StdNames::ScalaCompiletimeConstValue);
 }
 
+bool isCompiletimeErrorCallee(const frontend::AstExpression& expression,
+                              const ValueContext& context) {
+  return isCompiletimeCallee(expression, context,
+                             support::StdNames::ScalaCompiletimeError);
+}
+
 bool isConstValueExpression(const frontend::AstExpression& expression,
                             const ValueContext& context) {
   return expression.kind == frontend::AstExpressionKind::TypeApply &&
@@ -2853,6 +2859,17 @@ nir::Value valueFor(const frontend::AstExpression& expression,
     if (const frontend::TypedInlineApplication* application =
             inlineApplicationFor(expression, context)) {
       return inlineApplicationValueFor(*application, context);
+    }
+    if (isCompiletimeErrorCallee(expression.children.front(), context)) {
+      nir::Value message =
+          expression.children.size() == 2
+              ? expressionValueFor(expression.children.back(), context)
+              : nir::literalValue("\"compile-time error\"", "String",
+                                  expression.span);
+      return nir::throwValue(
+          nir::newValue(std::string(support::StdNames::ScalaNotImplementedError),
+                        {std::move(message)}, expression.span),
+          expression.span);
     }
     const frontend::AstExpression& firstClause = expression.children.front();
     if (firstClause.kind == AstExpressionKind::TypeApply) {
