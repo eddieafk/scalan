@@ -2469,6 +2469,20 @@ void Typechecker::addRuntimeBuiltins(Scope& scope) {
   erasedValue.typeParameters.push_back(std::move(erasedType));
   globalSymbols_[erasedValue.symbolName] = std::move(erasedValue);
 
+  SymbolInfo summonInline;
+  summonInline.kind = AstDeclarationKind::Def;
+  summonInline.name = std::string(support::StdNames::SummonInline);
+  summonInline.symbolName =
+      std::string(support::StdNames::ScalaCompiletimeSummonInline);
+  summonInline.type = TypeInfo{SimpleTypeKind::Object, "Object"};
+  TypeParameterInfo summonedType;
+  summonedType.name = "T";
+  summonedType.symbolName = summonInline.symbolName + ".T";
+  summonedType.lowerBound = TypeInfo{SimpleTypeKind::Nothing, "Nothing"};
+  summonedType.upperBound = TypeInfo{SimpleTypeKind::Object, "Object"};
+  summonInline.typeParameters.push_back(std::move(summonedType));
+  globalSymbols_[summonInline.symbolName] = std::move(summonInline);
+
   SymbolInfo notImplemented;
   notImplemented.kind = AstDeclarationKind::Def;
   notImplemented.name = std::string(support::StdNames::NotImplemented);
@@ -4872,6 +4886,36 @@ bool Typechecker::isCompiletimeErrorCallee(const AstExpression& expression,
          *path == support::StdNames::ScalaCompiletimeError;
 }
 
+bool Typechecker::isSummonInlineCallee(const AstExpression& expression,
+                                       const Scope& scope) const {
+  if (expression.kind == AstExpressionKind::Identifier) {
+    const auto symbol = scope.find(expression.text);
+    return symbol != scope.end() &&
+           symbol->second.symbolName ==
+               support::StdNames::ScalaCompiletimeSummonInline;
+  }
+
+  std::function<std::optional<std::string>(const AstExpression&)> qualifiedPath;
+  qualifiedPath = [&](const AstExpression& candidate)
+      -> std::optional<std::string> {
+    if (candidate.kind == AstExpressionKind::Identifier) {
+      return candidate.text;
+    }
+    if (candidate.kind != AstExpressionKind::Select ||
+        candidate.children.size() != 1) {
+      return std::nullopt;
+    }
+    std::optional<std::string> receiver =
+        qualifiedPath(candidate.children.front());
+    return receiver.has_value()
+               ? std::optional<std::string>(*receiver + "." + candidate.text)
+               : std::nullopt;
+  };
+  const std::optional<std::string> path = qualifiedPath(expression);
+  return path.has_value() &&
+         *path == support::StdNames::ScalaCompiletimeSummonInline;
+}
+
 std::optional<bool>
 Typechecker::constantBooleanValue(const AstExpression& expression,
                                   const Scope& scope) const {
@@ -5834,6 +5878,7 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
                           callee.text == support::StdNames::SizeOf;
     const bool isConstValue = isConstValueCallee(callee, scope);
     const bool isErasedValue = isErasedValueCallee(callee, scope);
+    const bool isSummonInline = isSummonInlineCallee(callee, scope);
     const bool isSummon =
         callee.kind == AstExpressionKind::Identifier &&
         (callee.text == SummonName || callee.text == ImplicitlyName);
@@ -5881,6 +5926,29 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
             "erasedValue may only be used as the selector of an inline match");
       }
       return TypeInfo{SimpleTypeKind::Object, "Object"};
+    }
+    if (isSummonInline) {
+      if (typeArguments.size() != 1) {
+        diagnostics_.error(expression.span,
+                           "summonInline requires exactly one type argument");
+        return TypeInfo{SimpleTypeKind::Unknown, "Unknown"};
+      }
+      const TypeInfo requested =
+          typeFromDeclaredName(expression.declaredType, &scope, &expression.span);
+      if (inlineDefinitionDepth_ != 0) {
+        return requested;
+      }
+      SymbolInfo request;
+      request.kind = AstDeclarationKind::Def;
+      request.name = std::string(support::StdNames::SummonInline);
+      request.type = requested;
+      request.parameters = {"evidence: " + requested.name};
+      request.parameterTypes = {requested};
+      request.contextualParameters = {true};
+      std::vector<TypedContextArgument> arguments =
+          resolveContextArguments(request, 0, scope, expression.span);
+      recordContextApplication(expression.span, std::move(arguments));
+      return requested;
     }
     if (isSizeOf) {
       if (typeArguments.size() != 1) {

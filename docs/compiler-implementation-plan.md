@@ -1097,6 +1097,19 @@ Current scaffold status:
   while successful expanded caller NIR contains neither the intrinsic, its
   message argument, nor the backend-only scaffold retained for the original
   generic inline definition. Focused coverage remains in `SmokeTests6.cpp`.
+  Compiler-owned `scala.compiletime.summonInline[T]` now delays contextual
+  search until an inline definition is specialized. Exact imports, aliases,
+  and the qualified spelling resolve to the intrinsic, while a same-named
+  ordinary declaration continues through normal call lowering. Direct calls
+  outside inline definitions resolve immediately. During specialization only a
+  surviving `summonInline` expression searches the caller scope, so an
+  unselected `inline if` branch does not require evidence. Existing contextual
+  ranking, recursive materialization, and missing, ambiguous, or diverging
+  diagnostics are reused. Successful expanded caller NIR materializes the
+  selected given and contains no residual intrinsic; compiler-only null
+  scaffolding is limited to original inline bodies. Focused runtime,
+  diagnostics, branch-selection, shadowing, import-resolution, and NIR coverage
+  shares `SmokeTests6.cpp` without adding another native test build.
   Constants propagate through nested inline calls and work with generic evidence
   selection, contextual and curried calls, effectful instance receivers, and
   transparent-result refinement. Symbolic Boolean and integer inline parameters

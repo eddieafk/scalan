@@ -16,6 +16,9 @@ struct StdNames final {
   inline static constexpr std::string_view ErasedValue = "erasedValue";
   inline static constexpr std::string_view ScalaCompiletimeErasedValue =
       "scala.compiletime.erasedValue";
+  inline static constexpr std::string_view SummonInline = "summonInline";
+  inline static constexpr std::string_view ScalaCompiletimeSummonInline =
+      "scala.compiletime.summonInline";
   inline static constexpr std::string_view JavaLangObject = "java.lang.Object";
   inline static constexpr std::string_view JavaLangThrowable = "java.lang.Throwable";
   inline static constexpr std::string_view JavaLangError = "java.lang.Error";

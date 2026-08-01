@@ -515,6 +515,9 @@ bool isBuiltinTypeName(const std::string& name) {
 const frontend::TypedDeclaration*
 findDeclarationBySymbol(const std::vector<frontend::TypedDeclaration>& declarations,
                         const std::string& symbolName);
+const frontend::TypedDeclaration* findMemberDeclaration(
+    const ValueContext& context, const std::string& ownerName,
+    const std::string& memberName);
 
 std::string qualifyTypeName(const std::string& name, const ValueContext& context) {
   auto imported = context.importAliases.find(name);
@@ -824,6 +827,11 @@ bool isCompiletimeCallee(const frontend::AstExpression& expression,
                          std::string_view symbolName) {
   using frontend::AstExpressionKind;
   if (expression.kind == AstExpressionKind::Identifier) {
+    if (context.localNames.contains(expression.text) ||
+        findMemberDeclaration(context, context.currentOwner, expression.text) !=
+            nullptr) {
+      return false;
+    }
     return resolveIdentifierName(expression.text, context) == symbolName;
   }
   const std::optional<std::string> path = qualifiedCalleePath(expression);
@@ -853,6 +861,12 @@ bool isErasedValueCallee(const frontend::AstExpression& expression,
                          const ValueContext& context) {
   return isCompiletimeCallee(expression, context,
                              support::StdNames::ScalaCompiletimeErasedValue);
+}
+
+bool isSummonInlineCallee(const frontend::AstExpression& expression,
+                          const ValueContext& context) {
+  return isCompiletimeCallee(expression, context,
+                             support::StdNames::ScalaCompiletimeSummonInline);
 }
 
 bool isErasedValueExpression(const frontend::AstExpression& expression,
@@ -2785,6 +2799,24 @@ nir::Value valueFor(const frontend::AstExpression& expression,
     if (isErasedValueCallee(callee, context)) {
       return nir::literalValue("null", "Object", expression.span);
     }
+    if (isSummonInlineCallee(callee, context)) {
+      const frontend::TypedContextApplication* application =
+          contextApplicationFor(expression, context);
+      if (application == nullptr || application->arguments.size() != 1) {
+        nir::Value placeholder =
+            nir::literalValue("null", "Object", expression.span);
+        if (const frontend::TypeInfo* requested =
+                annotatedTypeFor(expression, context);
+            requested != nullptr && runtimeTypeName(*requested) != "Object") {
+          placeholder = nir::asInstanceOfValue(runtimeTypeName(*requested),
+                                               std::move(placeholder),
+                                               expression.span);
+        }
+        return placeholder;
+      }
+      return materializeContextArgument(application->arguments.front(), expression,
+                                        context);
+    }
     const bool isArrayEmpty =
         callee.kind == AstExpressionKind::Select && callee.children.size() == 1 &&
         callee.text == support::StdNames::ArrayEmpty &&
@@ -2821,6 +2853,14 @@ nir::Value valueFor(const frontend::AstExpression& expression,
                                         context);
     }
     if (callee.kind != AstExpressionKind::Select || callee.children.size() != 1) {
+      if (callee.kind == AstExpressionKind::Identifier &&
+          callee.text == support::StdNames::SummonInline) {
+        if (const frontend::TypedDeclaration* shadow = findMemberDeclaration(
+                context, context.currentOwner, callee.text);
+            shadow != nullptr && shadow->kind == frontend::AstDeclarationKind::Def) {
+          return nir::localValue(shadow->symbolName, expression.span);
+        }
+      }
       return expressionValueFor(callee, context, preserveCallable);
     }
     const std::string targetType = localDeclaredTypeName(expression, context);

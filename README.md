@@ -110,6 +110,10 @@ build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
 # and concatenated constant String messages. Calls inside inline definitions
 # are deferred to specialization and report only when the selected expansion
 # retains the error branch; successful callers contain no residual intrinsic.
+# Compiler-owned `scala.compiletime.summonInline[T]` delays contextual search
+# until specialization, so only evidence required by a surviving inline branch
+# is resolved. Canonical, aliased, and qualified calls materialize the selected
+# given directly in caller NIR and report ordinary missing/ambiguous diagnostics.
 # Stable top-level and object `inline val` constants, including
 # dependency-ordered aliases of earlier inline values, are substituted directly
 # and can drive branches.
@@ -124,6 +128,10 @@ build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
 build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
   --output /tmp/compiletime-constants \
   cpp-examples/CompiletimeConstants.scala
+
+build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
+  --output /tmp/compiletime-summon-inline \
+  cpp-examples/CompiletimeSummonInline.scala
 
 # Compile explicit Scala 3 union/intersection types across parameters, results,
 # locals, nested generic arguments, generic type aliases, inferred branch

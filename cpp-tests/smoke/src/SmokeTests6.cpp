@@ -56,6 +56,8 @@ import scala.compiletime.{erasedValue => erased}
 import scala.compiletime.constValue
 import scala.compiletime.{constValue => constant}
 import scala.compiletime.{error => compiletimeError}
+import scala.compiletime.summonInline
+import scala.compiletime.{summonInline => inlineSummon}
 
 trait ErasedResult {
   def text(): String
@@ -72,6 +74,14 @@ class FallbackResult(val value: String) extends ErasedResult {
 }
 
 class Other
+
+trait Named[A] {
+  def label(): String
+}
+
+class NamedValue[A](val value: String) extends Named[A] {
+  def label(): String = value
+}
 
 object TypeKinds {
   transparent inline def valueOf[T] = constValue[T]
@@ -137,9 +147,34 @@ object TypeKinds {
       case _: String => new PreciseResult("precise")
       case _ => new FallbackResult("fallback")
     }
+
+  inline def summoned[A]: String = summonInline[Named[A]].label()
+
+  inline def qualifiedSummoned[A]: String =
+    scala.compiletime.summonInline[Named[A]].label()
+
+  inline def aliasedSummoned[A]: String = inlineSummon[Named[A]].label()
+
+  inline def contextualSummoned[A]()(using named: Named[A]): String =
+    summonInline[Named[A]].label()
+
+  inline def nestedSummoned[A]: String = "nested:" + summoned[A]
+
+  inline def selectedSummoned[A](inline required: Boolean): String =
+    inline if (required) summonInline[Named[A]].label()
+    else "summon-skipped"
+}
+
+object Shadowing {
+  def summonInline[A](): String = "ordinary-shadow"
+  def value: String = summonInline[Int]()
 }
 
 object Main {
+  given intEvidence: Named[Int] = new NamedValue[Int]("summoned-int")
+  given stringEvidence: Named[String] = new NamedValue[String]("summoned-string")
+  given longEvidence: Named[Long] = new NamedValue[Long]("summoned-long")
+
   def directConstant: Int = constValue[11]
   def intConstant: Int = TypeKinds.valueOf[42]
   def longConstant: Long = TypeKinds.qualifiedValueOf[9000000000L]
@@ -163,6 +198,14 @@ object Main {
   def aliasOtherName: String = TypeKinds.aliasNameOf[Other]
   def preciseResult: String = TypeKinds.resultFor[String].preciseOnly()
   def fallbackResult: String = TypeKinds.resultFor[Other].fallbackOnly()
+  def directSummoned: String = summonInline[Named[Int]].label()
+  def inlineSummoned: String = TypeKinds.summoned[Int]
+  def qualifiedSummoned: String = TypeKinds.qualifiedSummoned[String]
+  def aliasedSummoned: String = TypeKinds.aliasedSummoned[Long]
+  def contextualSummoned: String = TypeKinds.contextualSummoned[Int]()
+  def nestedSummoned: String = TypeKinds.nestedSummoned[Int]
+  def selectedSummoned: String = TypeKinds.selectedSummoned[String](true)
+  def skippedSummoned: String = TypeKinds.selectedSummoned[Other](false)
 
   def main(args: Array[String]): Unit = {
     println(directConstant)
@@ -187,6 +230,15 @@ object Main {
     println(aliasOtherName)
     println(preciseResult)
     println(fallbackResult)
+    println(directSummoned)
+    println(inlineSummoned)
+    println(qualifiedSummoned)
+    println(aliasedSummoned)
+    println(contextualSummoned)
+    println(nestedSummoned)
+    println(selectedSummoned)
+    println(skippedSummoned)
+    println(Shadowing.value)
   }
 }
 )";
@@ -197,8 +249,16 @@ import scala.compiletime.erasedValue
 import scala.compiletime.constValue
 import scala.compiletime.error
 import scala.compiletime.{error => compiletimeError}
+import scala.compiletime.summonInline
+import scala.compiletime.{summonInline => inlineSummon}
+
+trait Named[A]
+class NamedValue[A] extends Named[A]
 
 object Main {
+  given firstLongNamed: Named[Long] = new NamedValue[Long]
+  given secondLongNamed: Named[Long] = new NamedValue[Long]
+
   inline val errorPrefix = "aliased: "
 
   inline def fail(inline message: String): Nothing =
@@ -239,6 +299,15 @@ object Main {
   inline def deferredConstant[T] = constValue[T]
 
   def unresolvedConstantCall[A] = deferredConstant[A]
+
+  inline def deferredSummon[A] = summonInline[Named[A]]
+
+  val missingDeferredSummon = deferredSummon[Boolean]
+  val missingDirectSummon = summonInline[Named[String]]
+  val missingAliasedSummon = inlineSummon[Named[Char]]
+  val ambiguousQualifiedSummon =
+    scala.compiletime.summonInline[Named[Long]]
+  val malformedSummon = summonInline[Named[Int], Named[String]]
 
   val escaped = erasedValue[String]
   val qualifiedEscaped = scala.compiletime.erasedValue[Int]
@@ -351,13 +420,30 @@ object Main {
       functionText(result.nirText, "demo.inlineerased.Main.preciseResult");
   const std::string_view fallbackResult =
       functionText(result.nirText, "demo.inlineerased.Main.fallbackResult");
+  const std::string_view directSummoned =
+      functionText(result.nirText, "demo.inlineerased.Main.directSummoned");
+  const std::string_view inlineSummoned =
+      functionText(result.nirText, "demo.inlineerased.Main.inlineSummoned");
+  const std::string_view qualifiedSummoned =
+      functionText(result.nirText, "demo.inlineerased.Main.qualifiedSummoned");
+  const std::string_view aliasedSummoned =
+      functionText(result.nirText, "demo.inlineerased.Main.aliasedSummoned");
+  const std::string_view contextualSummoned =
+      functionText(result.nirText, "demo.inlineerased.Main.contextualSummoned");
+  const std::string_view nestedSummoned =
+      functionText(result.nirText, "demo.inlineerased.Main.nestedSummoned");
+  const std::string_view selectedSummoned =
+      functionText(result.nirText, "demo.inlineerased.Main.selectedSummoned");
+  const std::string_view skippedSummoned =
+      functionText(result.nirText, "demo.inlineerased.Main.skippedSummoned");
 
   const auto fullyReduced = [](std::string_view function) {
     return !function.empty() && !contains(function, "$match") &&
            !contains(function, "is-instance-of") &&
            !contains(function, "compiletime.error") &&
            !contains(function, "constValue") &&
-           !contains(function, "erasedValue") && !contains(function, "TypeKinds.");
+           !contains(function, "erasedValue") &&
+           !contains(function, "summonInline") && !contains(function, "TypeKinds.");
   };
   const bool constantsReduced =
       fullyReduced(directConstant) && contains(directConstant, "11") &&
@@ -394,6 +480,20 @@ object Main {
       contains(acceptedCondition, "\"accepted-condition\"") &&
       !contains(acceptedCondition, "ignored-condition") &&
       !contains(acceptedCondition, "NotImplementedError");
+  const bool summonInlineReduced =
+      fullyReduced(directSummoned) && contains(directSummoned, ".label") &&
+      fullyReduced(inlineSummoned) && contains(inlineSummoned, ".label") &&
+      fullyReduced(qualifiedSummoned) && contains(qualifiedSummoned, ".label") &&
+      fullyReduced(aliasedSummoned) && contains(aliasedSummoned, ".label") &&
+      fullyReduced(contextualSummoned) &&
+      contains(contextualSummoned, ".label") && fullyReduced(nestedSummoned) &&
+      contains(nestedSummoned, "\"nested:\"") &&
+      contains(nestedSummoned, ".label") && fullyReduced(selectedSummoned) &&
+      contains(selectedSummoned, ".label") &&
+      !contains(selectedSummoned, "summon-skipped") &&
+      fullyReduced(skippedSummoned) &&
+      contains(skippedSummoned, "\"summon-skipped\"") &&
+      !contains(skippedSummoned, ".label");
   const bool valid =
       status == 0 &&
       outputText == "11\n42\n9000000000\nliteral\ntrue\nx\nconstant-seven\n"
@@ -402,7 +502,10 @@ object Main {
                     "accepted-condition\n"
                     "string\nint\nlong\nother\nalias-string\n"
                     "alias-other\n"
-                    "precise\nfallback\n" &&
+                    "precise\nfallback\n"
+                    "summoned-int\nsummoned-int\nsummoned-string\n"
+                    "summoned-long\nsummoned-int\nnested:summoned-int\n"
+                    "summoned-string\nsummon-skipped\nordinary-shadow\n" &&
       !invalid.ok &&
       contains(invalid.diagnosticsText, "failure: boom") &&
       contains(invalid.diagnosticsText, "aliased: boom") &&
@@ -419,6 +522,23 @@ object Main {
       contains(invalid.diagnosticsText,
                "compiletime.error requires exactly one String argument") &&
       compiletimeErrorsErased &&
+      countOccurrences(
+          invalid.diagnosticsText,
+          "no given value found for context parameter evidence of type") >= 3 &&
+      contains(invalid.diagnosticsText,
+               "Named [ Boolean ] required by summonInline") &&
+      contains(invalid.diagnosticsText,
+               "Named [ String ] required by summonInline") &&
+      contains(invalid.diagnosticsText,
+               "Named [ Char ] required by summonInline") &&
+      contains(invalid.diagnosticsText,
+               "ambiguous given values for context parameter evidence of type ") &&
+      contains(invalid.diagnosticsText,
+               "Named [ Long ] required by summonInline: firstLongNamed, "
+               "secondLongNamed") &&
+      contains(invalid.diagnosticsText,
+               "summonInline requires exactly one type argument") &&
+      summonInlineReduced &&
       countOccurrences(invalid.diagnosticsText,
                        "constValue requires a constant singleton type") == 3 &&
       contains(invalid.diagnosticsText,

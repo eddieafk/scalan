@@ -276,6 +276,8 @@ private:
                                             const Scope& scope) const;
   [[nodiscard]] bool isCompiletimeErrorCallee(const AstExpression& expression,
                                               const Scope& scope) const;
+  [[nodiscard]] bool isSummonInlineCallee(const AstExpression& expression,
+                                          const Scope& scope) const;
   [[nodiscard]] std::optional<bool>
   constantBooleanValue(const AstExpression& expression, const Scope& scope) const;
   [[nodiscard]] std::optional<std::string>
