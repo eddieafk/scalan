@@ -53,6 +53,8 @@ int smokeInlineErasedValue() {
 
 import scala.compiletime.erasedValue
 import scala.compiletime.{erasedValue => erased}
+import scala.compiletime.constValue
+import scala.compiletime.{constValue => constant}
 
 trait ErasedResult {
   def text(): String
@@ -71,6 +73,32 @@ class FallbackResult(val value: String) extends ErasedResult {
 class Other
 
 object TypeKinds {
+  transparent inline def valueOf[T] = constValue[T]
+
+  transparent inline def qualifiedValueOf[T] =
+    scala.compiletime.constValue[T]
+
+  transparent inline def aliasedValueOf[T] = constant[T]
+
+  transparent inline def integerChoice[N]: String =
+    inline constValue[N] match {
+      case 0 => "constant-zero"
+      case 7 => "constant-seven"
+      case _ => "constant-other"
+    }
+
+  transparent inline def booleanChoice[B]: String =
+    inline constValue[B] match {
+      case true => "constant-true"
+      case _ => "constant-false"
+    }
+
+  transparent inline def constantResult[B]: ErasedResult =
+    inline constValue[B] match {
+      case true => new PreciseResult("constant-precise")
+      case _ => new FallbackResult("constant-fallback")
+    }
+
   transparent inline def nameOf[T]: String =
     inline erasedValue[T] match {
       case _: String => "string"
@@ -93,6 +121,17 @@ object TypeKinds {
 }
 
 object Main {
+  def directConstant: Int = constValue[11]
+  def intConstant: Int = TypeKinds.valueOf[42]
+  def longConstant: Long = TypeKinds.qualifiedValueOf[9000000000L]
+  def stringConstant: String = TypeKinds.aliasedValueOf["literal"]
+  def booleanConstant: Boolean = TypeKinds.valueOf[true]
+  def charConstant: Char = TypeKinds.valueOf['x']
+  def constantMatchSeven: String = TypeKinds.integerChoice[7]
+  def constantMatchOther: String = TypeKinds.integerChoice[9]
+  def constantBooleanFalse: String = TypeKinds.booleanChoice[false]
+  def constantPrecise: String = TypeKinds.constantResult[true].preciseOnly()
+  def constantFallback: String = TypeKinds.constantResult[false].fallbackOnly()
   def stringName: String = TypeKinds.nameOf[String]
   def intName: String = TypeKinds.nameOf[Int]
   def longName: String = TypeKinds.nameOf[Long]
@@ -103,6 +142,17 @@ object Main {
   def fallbackResult: String = TypeKinds.resultFor[Other].fallbackOnly()
 
   def main(args: Array[String]): Unit = {
+    println(directConstant)
+    println(intConstant)
+    println(longConstant)
+    println(stringConstant)
+    println(booleanConstant)
+    println(charConstant)
+    println(constantMatchSeven)
+    println(constantMatchOther)
+    println(constantBooleanFalse)
+    println(constantPrecise)
+    println(constantFallback)
     println(stringName)
     println(intName)
     println(longName)
@@ -118,8 +168,18 @@ object Main {
   constexpr const char* invalidSource = R"(package demo.invaliderased
 
 import scala.compiletime.erasedValue
+import scala.compiletime.constValue
 
 object Main {
+  val nonConstant = constValue[String]
+  val malformedConstant = constValue[1, 2]
+
+  def unresolvedConstant[T] = constValue[T]
+
+  inline def deferredConstant[T] = constValue[T]
+
+  def unresolvedConstantCall[A] = deferredConstant[A]
+
   val escaped = erasedValue[String]
   val qualifiedEscaped = scala.compiletime.erasedValue[Int]
   val malformed = erasedValue[String, Int]
@@ -189,6 +249,28 @@ object Main {
 
   const std::string_view stringName =
       functionText(result.nirText, "demo.inlineerased.Main.stringName");
+  const std::string_view directConstant =
+      functionText(result.nirText, "demo.inlineerased.Main.directConstant");
+  const std::string_view intConstant =
+      functionText(result.nirText, "demo.inlineerased.Main.intConstant");
+  const std::string_view longConstant =
+      functionText(result.nirText, "demo.inlineerased.Main.longConstant");
+  const std::string_view stringConstant =
+      functionText(result.nirText, "demo.inlineerased.Main.stringConstant");
+  const std::string_view booleanConstant =
+      functionText(result.nirText, "demo.inlineerased.Main.booleanConstant");
+  const std::string_view charConstant =
+      functionText(result.nirText, "demo.inlineerased.Main.charConstant");
+  const std::string_view constantMatchSeven =
+      functionText(result.nirText, "demo.inlineerased.Main.constantMatchSeven");
+  const std::string_view constantMatchOther =
+      functionText(result.nirText, "demo.inlineerased.Main.constantMatchOther");
+  const std::string_view constantBooleanFalse = functionText(
+      result.nirText, "demo.inlineerased.Main.constantBooleanFalse");
+  const std::string_view constantPrecise =
+      functionText(result.nirText, "demo.inlineerased.Main.constantPrecise");
+  const std::string_view constantFallback =
+      functionText(result.nirText, "demo.inlineerased.Main.constantFallback");
   const std::string_view intName =
       functionText(result.nirText, "demo.inlineerased.Main.intName");
   const std::string_view longName =
@@ -207,13 +289,44 @@ object Main {
   const auto fullyReduced = [](std::string_view function) {
     return !function.empty() && !contains(function, "$match") &&
            !contains(function, "is-instance-of") &&
+           !contains(function, "constValue") &&
            !contains(function, "erasedValue") && !contains(function, "TypeKinds.");
   };
+  const bool constantsReduced =
+      fullyReduced(directConstant) && contains(directConstant, "11") &&
+      fullyReduced(intConstant) && contains(intConstant, "42") &&
+      fullyReduced(longConstant) && contains(longConstant, "9000000000L") &&
+      fullyReduced(stringConstant) && contains(stringConstant, "\"literal\"") &&
+      fullyReduced(booleanConstant) && contains(booleanConstant, "true") &&
+      fullyReduced(charConstant) && contains(charConstant, "'x'") &&
+      fullyReduced(constantMatchSeven) &&
+      contains(constantMatchSeven, "\"constant-seven\"") &&
+      !contains(constantMatchSeven, "constant-other") &&
+      fullyReduced(constantMatchOther) &&
+      contains(constantMatchOther, "\"constant-other\"") &&
+      fullyReduced(constantBooleanFalse) &&
+      contains(constantBooleanFalse, "\"constant-false\"") &&
+      fullyReduced(constantPrecise) &&
+      contains(constantPrecise, "demo.inlineerased.PreciseResult") &&
+      contains(constantPrecise, ".preciseOnly") &&
+      !contains(constantPrecise, "FallbackResult") &&
+      fullyReduced(constantFallback) &&
+      contains(constantFallback, "demo.inlineerased.FallbackResult") &&
+      contains(constantFallback, ".fallbackOnly") &&
+      !contains(constantFallback, "PreciseResult");
   const bool valid =
       status == 0 &&
-      outputText == "string\nint\nlong\nother\nalias-string\nalias-other\n"
+      outputText == "11\n42\n9000000000\nliteral\ntrue\nx\nconstant-seven\n"
+                    "constant-other\nconstant-false\nconstant-precise\n"
+                    "constant-fallback\nstring\nint\nlong\nother\nalias-string\n"
+                    "alias-other\n"
                     "precise\nfallback\n" &&
       !invalid.ok &&
+      countOccurrences(invalid.diagnosticsText,
+                       "constValue requires a constant singleton type") == 3 &&
+      contains(invalid.diagnosticsText,
+               "constValue requires exactly one type argument") &&
+      constantsReduced &&
       countOccurrences(
           invalid.diagnosticsText,
           "erasedValue may only be used as the selector of an inline match") == 3 &&
@@ -243,6 +356,20 @@ object Main {
                : fail("inline erasedValue smoke test failed (output='" + outputText +
                       "', diagnostics='" + result.diagnosticsText +
                       "', invalid-diagnostics='" + invalid.diagnosticsText +
+                      "', direct-constant='" + std::string(directConstant) +
+                      "', int-constant='" + std::string(intConstant) +
+                      "', long-constant='" + std::string(longConstant) +
+                      "', string-constant='" + std::string(stringConstant) +
+                      "', boolean-constant='" + std::string(booleanConstant) +
+                      "', char-constant='" + std::string(charConstant) +
+                      "', constant-match-seven='" +
+                      std::string(constantMatchSeven) +
+                      "', constant-match-other='" +
+                      std::string(constantMatchOther) +
+                      "', constant-boolean-false='" +
+                      std::string(constantBooleanFalse) +
+                      "', constant-precise='" + std::string(constantPrecise) +
+                      "', constant-fallback='" + std::string(constantFallback) +
                       "', string-name='" + std::string(stringName) + "', int-name='" +
                       std::string(intName) + "', long-name='" + std::string(longName) +
                       "', other-name='" + std::string(otherName) +

@@ -102,6 +102,10 @@ build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
 # Compiler-owned `scala.compiletime.erasedValue[T]`, through its canonical
 # import (including aliases) or qualified name, drives generic type-only inline
 # matches without materializing a selector in expanded caller NIR.
+# Compiler-owned `scala.compiletime.constValue[T]` materializes Boolean, Int,
+# Long, String, and Char singleton types during compilation. Generic inline
+# definitions defer the intrinsic until specialization, so constant inline
+# matches and transparent result refinement emit only the selected result.
 # Stable top-level and object `inline val` constants, including
 # dependency-ordered aliases of earlier inline values, are substituted directly
 # and can drive branches.
@@ -112,6 +116,10 @@ build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
 build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
   --output /tmp/inline-erased-value \
   cpp-examples/InlineErasedValue.scala
+
+build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
+  --output /tmp/compiletime-constants \
+  cpp-examples/CompiletimeConstants.scala
 
 # Compile explicit Scala 3 union/intersection types across parameters, results,
 # locals, nested generic arguments, generic type aliases, inferred branch

@@ -193,7 +193,8 @@ bool typesMatchForOverride(const TypeInfo& expected, const TypeInfo& actual) {
 TypeInfo staticExpressionType(TypeInfo type) {
   if (!type.typeParameter && !type.abstractTypeMember &&
       type.compositeKind == CompositeTypeKind::None &&
-      type.typeConstructorName.empty() && !type.runtimeName.empty() &&
+      type.typeConstructorName.empty() && type.singletonLiteral.empty() &&
+      !type.runtimeName.empty() &&
       type.runtimeName != type.name) {
     type.runtimeName.clear();
   }
@@ -1612,6 +1613,7 @@ TypedModule Typechecker::typecheck(const AstModule& module) {
   zoneInferenceDepth_ = 0;
   inlineExpansionDepth_ = 0;
   erasedValueSelectorDepth_ = 0;
+  inlineDefinitionDepth_ = 0;
   TypedModule typed;
   typed.packageName = module.packageName;
   Scope scope;
@@ -1845,9 +1847,17 @@ TypedDeclaration Typechecker::typecheckDeclaration(const AstDeclaration& declara
       if (declaration.kind == AstDeclarationKind::Def) {
         addParametersToScope(declaration, expressionScope);
       }
+      const bool inlineDefinition =
+          declaration.kind == AstDeclarationKind::Def && declaration.isInline;
+      if (inlineDefinition) {
+        ++inlineDefinitionDepth_;
+      }
       inferred = inferExpressionType(
           declaration.initializer, expressionScope,
           declared.kind == SimpleTypeKind::Unknown ? nullptr : &declared);
+      if (inlineDefinition) {
+        --inlineDefinitionDepth_;
+      }
     } else {
       inferred = TypeInfo{SimpleTypeKind::Unit, "Unit"};
     }
@@ -2364,6 +2374,20 @@ void Typechecker::addRuntimeBuiltins(Scope& scope) {
   compiletime.type =
       TypeInfo{SimpleTypeKind::Object, compiletime.symbolName};
   globalSymbols_[compiletime.symbolName] = compiletime;
+
+  SymbolInfo constValue;
+  constValue.kind = AstDeclarationKind::Def;
+  constValue.name = std::string(support::StdNames::ConstValue);
+  constValue.symbolName =
+      std::string(support::StdNames::ScalaCompiletimeConstValue);
+  constValue.type = TypeInfo{SimpleTypeKind::Object, "Object"};
+  TypeParameterInfo constantType;
+  constantType.name = "T";
+  constantType.symbolName = constValue.symbolName + ".T";
+  constantType.lowerBound = TypeInfo{SimpleTypeKind::Nothing, "Nothing"};
+  constantType.upperBound = TypeInfo{SimpleTypeKind::Object, "Object"};
+  constValue.typeParameters.push_back(std::move(constantType));
+  globalSymbols_[constValue.symbolName] = std::move(constValue);
 
   SymbolInfo erasedValue;
   erasedValue.kind = AstDeclarationKind::Def;
@@ -4715,6 +4739,43 @@ bool Typechecker::isErasedValueExpression(const AstExpression& expression,
          isErasedValueCallee(expression.children.front(), scope);
 }
 
+bool Typechecker::isConstValueCallee(const AstExpression& expression,
+                                     const Scope& scope) const {
+  if (expression.kind == AstExpressionKind::Identifier) {
+    const auto symbol = scope.find(expression.text);
+    return symbol != scope.end() &&
+           symbol->second.symbolName ==
+               support::StdNames::ScalaCompiletimeConstValue;
+  }
+
+  std::function<std::optional<std::string>(const AstExpression&)> qualifiedPath;
+  qualifiedPath = [&](const AstExpression& candidate)
+      -> std::optional<std::string> {
+    if (candidate.kind == AstExpressionKind::Identifier) {
+      return candidate.text;
+    }
+    if (candidate.kind != AstExpressionKind::Select ||
+        candidate.children.size() != 1) {
+      return std::nullopt;
+    }
+    std::optional<std::string> receiver =
+        qualifiedPath(candidate.children.front());
+    return receiver.has_value()
+               ? std::optional<std::string>(*receiver + "." + candidate.text)
+               : std::nullopt;
+  };
+  const std::optional<std::string> path = qualifiedPath(expression);
+  return path.has_value() &&
+         *path == support::StdNames::ScalaCompiletimeConstValue;
+}
+
+bool Typechecker::isConstValueExpression(const AstExpression& expression,
+                                         const Scope& scope) const {
+  return expression.kind == AstExpressionKind::TypeApply &&
+         expression.children.size() == 1 &&
+         isConstValueCallee(expression.children.front(), scope);
+}
+
 std::optional<bool>
 Typechecker::constantBooleanValue(const AstExpression& expression,
                                   const Scope& scope) const {
@@ -4746,6 +4807,18 @@ Typechecker::constantBooleanValue(const AstExpression& expression,
     }
     return std::nullopt;
   case AstExpressionKind::TypeApply:
+    if (isConstValueExpression(expression, scope) &&
+        typeArgumentsFor(expression).size() == 1) {
+      const TypeInfo constant =
+          typeFromDeclaredName(expression.declaredType, &scope, &expression.span);
+      if (constant.singletonLiteral == "true") {
+        return true;
+      }
+      if (constant.singletonLiteral == "false") {
+        return false;
+      }
+      return std::nullopt;
+    }
     if (expression.children.size() == 1 &&
         expression.children.front().kind == AstExpressionKind::Select &&
         expression.children.front().text == support::StdNames::IsInstanceOf &&
@@ -4958,6 +5031,16 @@ Typechecker::constantIntegerValue(const AstExpression& expression,
       }
     }
     return std::nullopt;
+  case AstExpressionKind::TypeApply:
+    if (isConstValueExpression(expression, scope) &&
+        typeArgumentsFor(expression).size() == 1) {
+      const TypeInfo constant =
+          typeFromDeclaredName(expression.declaredType, &scope, &expression.span);
+      const std::optional<std::int64_t> value =
+          parseIntegerConstant(constant.singletonLiteral);
+      return value.has_value() && fitsType(*value) ? value : std::nullopt;
+    }
+    return std::nullopt;
   case AstExpressionKind::Unary:
     if (expression.children.size() == 1 &&
         (expression.text == "+" || expression.text == "-")) {
@@ -5041,6 +5124,17 @@ Typechecker::constantIntegerType(const AstExpression& expression,
           return member->type.kind;
         }
       }
+    }
+    return SimpleTypeKind::Unknown;
+  case AstExpressionKind::TypeApply:
+    if (isConstValueExpression(expression, scope) &&
+        typeArgumentsFor(expression).size() == 1) {
+      const TypeInfo constant =
+          typeFromDeclaredName(expression.declaredType, &scope, &expression.span);
+      return isIntegerConstantType(constant.kind) &&
+                     !constant.singletonLiteral.empty()
+                 ? constant.kind
+                 : SimpleTypeKind::Unknown;
     }
     return SimpleTypeKind::Unknown;
   case AstExpressionKind::Unary:
@@ -5568,6 +5662,7 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
     const AstExpression& callee = expression.children.front();
     const bool isSizeOf = callee.kind == AstExpressionKind::Identifier &&
                           callee.text == support::StdNames::SizeOf;
+    const bool isConstValue = isConstValueCallee(callee, scope);
     const bool isErasedValue = isErasedValueCallee(callee, scope);
     const bool isSummon =
         callee.kind == AstExpressionKind::Identifier &&
@@ -5583,6 +5678,25 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
         callee.text == support::StdNames::ArrayEmpty &&
         callee.children.front().kind == AstExpressionKind::Identifier &&
         callee.children.front().text == "Array";
+    if (isConstValue) {
+      if (typeArguments.size() != 1) {
+        diagnostics_.error(expression.span,
+                           "constValue requires exactly one type argument");
+        return TypeInfo{SimpleTypeKind::Unknown, "Unknown"};
+      }
+      const TypeInfo constant =
+          typeFromDeclaredName(expression.declaredType, &scope, &expression.span);
+      if (!constant.singletonLiteral.empty()) {
+        return constant;
+      }
+      if (constant.typeParameter && inlineDefinitionDepth_ != 0) {
+        return constant;
+      }
+      diagnostics_.error(expression.span,
+                         "constValue requires a constant singleton type: " +
+                             expression.declaredType);
+      return TypeInfo{SimpleTypeKind::Unknown, "Unknown"};
+    }
     if (isErasedValue) {
       if (typeArguments.size() != 1) {
         diagnostics_.error(expression.span,
@@ -10274,6 +10388,41 @@ TypeInfo Typechecker::typeFromDeclaredName(const std::string& name, const Scope*
   if (normalized.empty()) {
     return TypeInfo{SimpleTypeKind::Unknown, "Unknown"};
   }
+  const std::string compact = compactTypeName(normalized);
+  if (compact == "true" || compact == "false") {
+    TypeInfo literal{SimpleTypeKind::Boolean, compact};
+    literal.runtimeName = "Boolean";
+    literal.singletonLiteral = compact;
+    return literal;
+  }
+  if (!compact.empty() &&
+      ((compact.front() >= '0' && compact.front() <= '9') ||
+       compact.front() == '-')) {
+    if (const std::optional<std::int64_t> value = parseIntegerConstant(compact)) {
+      const bool isLong = compact.back() == 'l' || compact.back() == 'L';
+      if (isLong || (*value >= std::numeric_limits<std::int32_t>::min() &&
+                     *value <= std::numeric_limits<std::int32_t>::max())) {
+        TypeInfo literal{isLong ? SimpleTypeKind::Long : SimpleTypeKind::Int,
+                         compact};
+        literal.runtimeName = isLong ? "Long" : "Int";
+        literal.singletonLiteral = compact;
+        return literal;
+      }
+      if (span != nullptr) {
+        diagnostics_.error(*span,
+                           "integer singleton type is outside the Int range: " +
+                               compact);
+      }
+      return TypeInfo{SimpleTypeKind::Unknown, compact};
+    }
+  }
+  if (normalized.size() >= 3 && normalized.front() == '\'' &&
+      normalized.back() == '\'') {
+    TypeInfo literal{SimpleTypeKind::Char, normalized};
+    literal.runtimeName = "Char";
+    literal.singletonLiteral = normalized;
+    return literal;
+  }
   if (normalized == "Nothing") {
     return TypeInfo{SimpleTypeKind::Nothing, "Nothing"};
   }
@@ -10304,6 +10453,7 @@ TypeInfo Typechecker::typeFromDeclaredName(const std::string& name, const Scope*
   if (normalized.size() >= 2 && normalized.front() == '"' && normalized.back() == '"') {
     TypeInfo literal{SimpleTypeKind::String, normalized};
     literal.runtimeName = "String";
+    literal.singletonLiteral = normalized;
     literal.stringSingleton = true;
     return literal;
   }
@@ -11012,6 +11162,10 @@ bool Typechecker::isAssignable(const TypeInfo& expected, const TypeInfo& actual)
           [&](const TypeInfo& operand) {
             return conforms(target, operand, allowNumericWidening);
           });
+    }
+    if (!target.singletonLiteral.empty()) {
+      return value.singletonLiteral == target.singletonLiteral &&
+             target.kind == value.kind;
     }
     if (target.stringSingleton) {
       return value.stringSingleton && target.name == value.name;

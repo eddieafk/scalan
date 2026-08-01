@@ -1073,6 +1073,18 @@ Current scaffold status:
   isolated in `SmokeTests6.cpp` to preserve incremental harness build times and
   exercises reference/scalar/fallback selection, aliased and qualified forms,
   transparent-result refinement, runtime output, diagnostics, and NIR erasure.
+  Compiler-owned `scala.compiletime.constValue[T]` now materializes Boolean,
+  Int, Long, String, and Char singleton types as typed literals. Exact imports,
+  aliases, and the qualified spelling resolve to the intrinsic; non-singleton
+  concrete types and abstract uses outside an inline definition are diagnosed.
+  An abstract `T` is deferred while checking a generic inline definition and
+  must become a supported singleton at each call site. The resulting value can
+  be returned directly or drive Boolean/integer `inline match` reduction and
+  transparent-result refinement. Expanded caller NIR contains the literal or
+  selected branch only: the intrinsic, synthetic selector local, runtime
+  comparisons, and unselected branches are absent. Focused runtime,
+  diagnostics, import-resolution, transparent-type, and NIR coverage shares
+  `SmokeTests6.cpp` with the related `erasedValue` slice.
   Constants propagate through nested inline calls and work with generic evidence
   selection, contextual and curried calls, effectful instance receivers, and
   transparent-result refinement. Symbolic Boolean and integer inline parameters

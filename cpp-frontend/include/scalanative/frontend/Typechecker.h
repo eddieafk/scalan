@@ -55,6 +55,7 @@ struct TypeInfo {
   CompositeTypeKind compositeKind = CompositeTypeKind::None;
   std::vector<TypeInfo> compositeTypes;
   std::string typeParameterSymbolName;
+  std::string singletonLiteral;
   bool abstractTypeMember = false;
   bool pathDependent = false;
   bool typeProjection = false;
@@ -268,6 +269,10 @@ private:
                                          const Scope& scope) const;
   [[nodiscard]] bool isErasedValueExpression(const AstExpression& expression,
                                              const Scope& scope) const;
+  [[nodiscard]] bool isConstValueCallee(const AstExpression& expression,
+                                        const Scope& scope) const;
+  [[nodiscard]] bool isConstValueExpression(const AstExpression& expression,
+                                            const Scope& scope) const;
   [[nodiscard]] std::optional<bool>
   constantBooleanValue(const AstExpression& expression, const Scope& scope) const;
   [[nodiscard]] std::optional<TypeInfo>
@@ -449,6 +454,7 @@ private:
   std::size_t zoneInferenceDepth_ = 0;
   std::size_t inlineExpansionDepth_ = 0;
   std::size_t erasedValueSelectorDepth_ = 0;
+  std::size_t inlineDefinitionDepth_ = 0;
 };
 
 [[nodiscard]] const char* simpleTypeKindName(SimpleTypeKind kind);

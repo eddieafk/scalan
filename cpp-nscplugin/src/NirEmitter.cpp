@@ -802,34 +802,51 @@ std::string resolveIdentifierName(const std::string& name,
   return name;
 }
 
-bool isErasedValueCallee(const frontend::AstExpression& expression,
-                         const ValueContext& context) {
+std::optional<std::string>
+qualifiedCalleePath(const frontend::AstExpression& expression) {
   using frontend::AstExpressionKind;
   if (expression.kind == AstExpressionKind::Identifier) {
-    return resolveIdentifierName(expression.text, context) ==
-           support::StdNames::ScalaCompiletimeErasedValue;
+    return expression.text;
   }
+  if (expression.kind != AstExpressionKind::Select ||
+      expression.children.size() != 1) {
+    return std::nullopt;
+  }
+  std::optional<std::string> receiver =
+      qualifiedCalleePath(expression.children.front());
+  return receiver.has_value()
+             ? std::optional<std::string>(*receiver + "." + expression.text)
+             : std::nullopt;
+}
 
-  std::function<std::optional<std::string>(const frontend::AstExpression&)>
-      qualifiedPath;
-  qualifiedPath = [&](const frontend::AstExpression& candidate)
-      -> std::optional<std::string> {
-    if (candidate.kind == AstExpressionKind::Identifier) {
-      return candidate.text;
-    }
-    if (candidate.kind != AstExpressionKind::Select ||
-        candidate.children.size() != 1) {
-      return std::nullopt;
-    }
-    std::optional<std::string> receiver =
-        qualifiedPath(candidate.children.front());
-    return receiver.has_value()
-               ? std::optional<std::string>(*receiver + "." + candidate.text)
-               : std::nullopt;
-  };
-  const std::optional<std::string> path = qualifiedPath(expression);
-  return path.has_value() &&
-         *path == support::StdNames::ScalaCompiletimeErasedValue;
+bool isCompiletimeCallee(const frontend::AstExpression& expression,
+                         const ValueContext& context,
+                         std::string_view symbolName) {
+  using frontend::AstExpressionKind;
+  if (expression.kind == AstExpressionKind::Identifier) {
+    return resolveIdentifierName(expression.text, context) == symbolName;
+  }
+  const std::optional<std::string> path = qualifiedCalleePath(expression);
+  return path.has_value() && *path == symbolName;
+}
+
+bool isConstValueCallee(const frontend::AstExpression& expression,
+                        const ValueContext& context) {
+  return isCompiletimeCallee(expression, context,
+                             support::StdNames::ScalaCompiletimeConstValue);
+}
+
+bool isConstValueExpression(const frontend::AstExpression& expression,
+                            const ValueContext& context) {
+  return expression.kind == frontend::AstExpressionKind::TypeApply &&
+         expression.children.size() == 1 &&
+         isConstValueCallee(expression.children.front(), context);
+}
+
+bool isErasedValueCallee(const frontend::AstExpression& expression,
+                         const ValueContext& context) {
+  return isCompiletimeCallee(expression, context,
+                             support::StdNames::ScalaCompiletimeErasedValue);
 }
 
 bool isErasedValueExpression(const frontend::AstExpression& expression,
@@ -1951,6 +1968,11 @@ nir::Value boxForObjectStorage(nir::Value value, const std::string& targetType,
   if (targetType != "Object") {
     return value;
   }
+  const std::string literalType = literalTypeFor(source);
+  if (literalType != "Unknown" && literalType != "String" &&
+      literalType != "Null") {
+    return nir::boxValue(literalType, std::move(value), source.span);
+  }
   const frontend::TypeInfo* sourceType = annotatedTypeFor(source, context);
   if (sourceType == nullptr) {
     return value;
@@ -2026,7 +2048,8 @@ nir::Value scopedBodyValueFor(const frontend::AstExpression& expression,
     }
     if (hasReducedInlineMatch && child.text.starts_with("$match") &&
         child.children.size() == 1 &&
-        isErasedValueExpression(child.children.front(), blockContext)) {
+        (isConstValueExpression(child.children.front(), blockContext) ||
+         isErasedValueExpression(child.children.front(), blockContext))) {
       continue;
     }
 
@@ -2745,6 +2768,14 @@ nir::Value valueFor(const frontend::AstExpression& expression,
       return inlineApplicationValueFor(*application, context);
     }
     const frontend::AstExpression& callee = expression.children.front();
+    if (isConstValueCallee(callee, context)) {
+      const frontend::TypeInfo* constant = annotatedTypeFor(expression, context);
+      if (constant != nullptr && !constant->singletonLiteral.empty()) {
+        return nir::literalValue(constant->singletonLiteral,
+                                 runtimeTypeName(*constant), expression.span);
+      }
+      return nir::literalValue("null", "Object", expression.span);
+    }
     if (isErasedValueCallee(callee, context)) {
       return nir::literalValue("null", "Object", expression.span);
     }
