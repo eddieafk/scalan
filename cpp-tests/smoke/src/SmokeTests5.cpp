@@ -73,8 +73,13 @@ class FallbackResult(val value: String) extends TransparentResult {
   def fallbackOnly(): String = value
 }
 
+inline val topLevelBanner: String = "top-inline"
+
 object Selectors {
   val prefix: String = "selected:"
+  inline val enabled: Boolean = true
+  inline val foldedEnabled: Boolean = !false && true
+  inline val banner: String = "inline-val"
 
   inline def selected[A]: String =
     summonFrom {
@@ -284,6 +289,9 @@ object Selectors {
     } else {
       new FallbackResult("ordinary-transparent-false")
     }
+
+  inline def configured(value: String): String =
+    if (foldedEnabled) banner + ":" + value else "inline-val-disabled"
 }
 
 class InstanceSelectors(val instancePrefix: String) {
@@ -611,6 +619,10 @@ object Main {
     Selectors.ordinaryRefined(true).preciseOnly()
   def ordinaryTransparentFalse: String =
     Selectors.ordinaryRefined(false).fallbackOnly()
+  def directInlineBoolean: Boolean = Selectors.enabled
+  def directInlineString: String = Selectors.banner
+  def inlineValConfigured: String = Selectors.configured("configured")
+  def directTopLevelInlineString: String = topLevelBanner
 
   def main(args: Array[String]): Unit = {
     println(intSelected)
@@ -698,6 +710,10 @@ object Main {
     println(ordinaryRuntimeConditional)
     println(ordinaryTransparentTrue)
     println(ordinaryTransparentFalse)
+    println(directInlineBoolean)
+    println(directInlineString)
+    println(inlineValConfigured)
+    println(directTopLevelInlineString)
   }
 }
 )";
@@ -724,7 +740,8 @@ object Main {
   inline def requiresInlineCondition(condition: Boolean): String =
     inline if (condition) "constant" else "not-constant"
   def invalidInlineCondition: String = requiresInlineCondition(runtimeCondition())
-  inline val unsupported: String = "value"
+  inline val dynamicInlineValue: Boolean = runtimeCondition()
+  inline val missingInlineValue: Boolean
 }
 
 )";
@@ -735,6 +752,18 @@ object Main {
   def misplacedInlineParameter(inline condition: Boolean): String = "invalid"
   def misplacedInlineIf(condition: Boolean): String =
     inline if (condition) "invalid" else "invalid"
+}
+
+class UnsupportedInlineValueOwner {
+  inline val value: Boolean = true
+}
+
+)";
+  constexpr const char* parserInvalidSource =
+      R"(package demo.invalidinlinevalparser
+
+object Main {
+  inline var unsupportedInlineVariable: Boolean = true
 }
 
 )";
@@ -764,6 +793,10 @@ object Main {
   const scalanative::tools::build::BuildResult structuralInvalid =
       driver.buildSource("StructurallyInvalidInline.scala", structurallyInvalidSource,
                          {}, structuralInvalidDiagnostics);
+  scalanative::support::DiagnosticEngine parserInvalidDiagnostics;
+  const scalanative::tools::build::BuildResult parserInvalid =
+      driver.buildSource("ParserInvalidInlineVal.scala", parserInvalidSource, {},
+                         parserInvalidDiagnostics);
 
   if (!result.ok) {
     if (contains(result.diagnosticsText, "clang toolchain not found")) {
@@ -948,6 +981,14 @@ object Main {
       functionText(result.nirText, "demo.inlinecalls.Main.ordinaryTransparentTrue");
   const std::string_view ordinaryTransparentFalse =
       functionText(result.nirText, "demo.inlinecalls.Main.ordinaryTransparentFalse");
+  const std::string_view directInlineBoolean =
+      functionText(result.nirText, "demo.inlinecalls.Main.directInlineBoolean");
+  const std::string_view directInlineString =
+      functionText(result.nirText, "demo.inlinecalls.Main.directInlineString");
+  const std::string_view inlineValConfigured =
+      functionText(result.nirText, "demo.inlinecalls.Main.inlineValConfigured");
+  const std::string_view directTopLevelInlineString =
+      functionText(result.nirText, "demo.inlinecalls.Main.directTopLevelInlineString");
 
   const bool valid =
       status == 0 &&
@@ -1029,7 +1070,8 @@ object Main {
               "nested-ordinary-false:nested\n"
               "condition-effect\nordinary-true:dynamic\n"
               "ordinary-transparent-true\n"
-              "ordinary-transparent-false\n" &&
+              "ordinary-transparent-false\n"
+              "true\ninline-val\ninline-val:configured\ntop-inline\n" &&
       !invalid.ok &&
       contains(invalid.diagnosticsText,
                "no given value found for context parameter value of type") &&
@@ -1050,10 +1092,18 @@ object Main {
                "inline parameters are only supported on inline methods") &&
       contains(invalid.diagnosticsText,
                "inline if condition must be a compile-time Boolean constant") &&
+      contains(invalid.diagnosticsText,
+               "inline value initializer must be a self-contained constant "
+               "expression") &&
+      contains(invalid.diagnosticsText, "inline value requires an initializer") &&
       contains(structuralInvalid.diagnosticsText,
                "inline if is only supported inside an inline method") &&
-      contains(invalid.diagnosticsText,
-               "'inline' must modify a def in this milestone") &&
+      contains(structuralInvalid.diagnosticsText,
+               "inline values are currently supported only at top level or in "
+               "objects") &&
+      !parserInvalid.ok &&
+      contains(parserInvalid.diagnosticsText,
+               "'inline' must modify a def or val in this milestone") &&
       contains(intSelected, "call %demo.inlinecalls.Main.intNamed()") &&
       contains(intSelected, "call %demo.inlinecalls.Selectors.prefix()") &&
       !contains(intSelected, "%demo.inlinecalls.Selectors.selected") &&
@@ -1405,7 +1455,19 @@ object Main {
       contains(ordinaryTransparentFalse, ".fallbackOnly") &&
       !contains(ordinaryTransparentFalse, "demo.inlinecalls.PreciseResult") &&
       !contains(ordinaryTransparentFalse,
-                "%demo.inlinecalls.Selectors.ordinaryRefined");
+                "%demo.inlinecalls.Selectors.ordinaryRefined") &&
+      contains(directInlineBoolean, "true") &&
+      !contains(directInlineBoolean, "%demo.inlinecalls.Selectors.enabled") &&
+      contains(directInlineString, "\"inline-val\"") &&
+      !contains(directInlineString, "%demo.inlinecalls.Selectors.banner") &&
+      contains(inlineValConfigured, "\"inline-val\"") &&
+      contains(inlineValConfigured, "\"configured\"") &&
+      !contains(inlineValConfigured, "inline-val-disabled") &&
+      !contains(inlineValConfigured, "%demo.inlinecalls.Selectors.foldedEnabled") &&
+      !contains(inlineValConfigured, "%demo.inlinecalls.Selectors.banner") &&
+      !contains(inlineValConfigured, "%demo.inlinecalls.Selectors.configured") &&
+      contains(directTopLevelInlineString, "\"top-inline\"") &&
+      !contains(directTopLevelInlineString, "%demo.inlinecalls.topLevelBanner");
   return valid
              ? 0
              : fail(
@@ -1413,15 +1475,16 @@ object Main {
                    "', diagnostics='" + result.diagnosticsText +
                    "', invalid-diagnostics='" + invalid.diagnosticsText +
                    "', structural-invalid-diagnostics='" +
-                   structuralInvalid.diagnosticsText + "', int-selected='" +
-                   std::string(intSelected) + "', local-selected='" +
-                   std::string(localSelected) + "', fallback-selected='" +
-                   std::string(fallbackSelected) + "', nested-selected='" +
-                   std::string(nestedSelected) + "', value-selected='" +
-                   std::string(valueSelected) + "', value-fallback='" +
-                   std::string(valueFallback) + "', nested-value-selected='" +
-                   std::string(nestedValueSelected) + "', passed-int='" +
-                   std::string(passedInt) + "', passed-string='" +
+                   structuralInvalid.diagnosticsText +
+                   "', parser-invalid-diagnostics='" + parserInvalid.diagnosticsText +
+                   "', int-selected='" + std::string(intSelected) +
+                   "', local-selected='" + std::string(localSelected) +
+                   "', fallback-selected='" + std::string(fallbackSelected) +
+                   "', nested-selected='" + std::string(nestedSelected) +
+                   "', value-selected='" + std::string(valueSelected) +
+                   "', value-fallback='" + std::string(valueFallback) +
+                   "', nested-value-selected='" + std::string(nestedValueSelected) +
+                   "', passed-int='" + std::string(passedInt) + "', passed-string='" +
                    std::string(passedString) + "', inferred-int='" +
                    std::string(inferredInt) + "', inferred-fallback='" +
                    std::string(inferredFallback) + "', inferred-local='" +
@@ -1535,7 +1598,12 @@ object Main {
                    "', ordinary-transparent-true='" +
                    std::string(ordinaryTransparentTrue) +
                    "', ordinary-transparent-false='" +
-                   std::string(ordinaryTransparentFalse) + "')");
+                   std::string(ordinaryTransparentFalse) +
+                   "', direct-inline-boolean='" + std::string(directInlineBoolean) +
+                   "', direct-inline-string='" + std::string(directInlineString) +
+                   "', inline-val-configured='" + std::string(inlineValConfigured) +
+                   "', direct-top-level-inline-string='" +
+                   std::string(directTopLevelInlineString) + "')");
 }
 
 } // namespace

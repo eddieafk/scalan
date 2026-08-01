@@ -2192,10 +2192,27 @@ nir::Value valueFor(const frontend::AstExpression& expression,
   switch (expression.kind) {
   case AstExpressionKind::Empty:
     return nir::unitValue(expression.span);
-  case AstExpressionKind::Identifier:
+  case AstExpressionKind::Identifier: {
     if (auto inlineValue = context.inlineValues.find(expression.text);
         inlineValue != context.inlineValues.end()) {
       return inlineValue->second;
+    }
+    const frontend::TypedDeclaration* inlineValueDeclaration =
+        declarationForExpression(expression, context);
+    if (inlineValueDeclaration == nullptr && context.declarations != nullptr) {
+      const std::string resolved = resolveIdentifierName(expression.text, context);
+      inlineValueDeclaration =
+          findDeclarationBySymbol(*context.declarations, resolved);
+      if (inlineValueDeclaration == nullptr && !context.packageName.empty()) {
+        inlineValueDeclaration = findDeclarationBySymbol(
+            *context.declarations, context.packageName + "." + resolved);
+      }
+    }
+    if (const frontend::TypedDeclaration* declaration = inlineValueDeclaration;
+        declaration != nullptr && declaration->isInline &&
+        declaration->kind == frontend::AstDeclarationKind::Val &&
+        declaration->hasInitializer) {
+      return expressionValueFor(declaration->initializer, context);
     }
     if (expression.text == support::StdNames::NotImplemented) {
       return nir::throwValue(
@@ -2281,6 +2298,7 @@ nir::Value valueFor(const frontend::AstExpression& expression,
     }
     return nir::localValue(resolveIdentifierName(expression.text, context),
                            expression.span);
+  }
   case AstExpressionKind::ModuleReference:
     return nir::localValue(resolveIdentifierName(expression.text, context),
                            expression.span);
@@ -2468,6 +2486,11 @@ nir::Value valueFor(const frontend::AstExpression& expression,
       }
       const frontend::TypedDeclaration* selectedDeclaration =
           declarationForExpression(expression, context);
+      if (selectedDeclaration != nullptr && selectedDeclaration->isInline &&
+          selectedDeclaration->kind == frontend::AstDeclarationKind::Val &&
+          selectedDeclaration->hasInitializer) {
+        return expressionValueFor(selectedDeclaration->initializer, context);
+      }
       if (selectedDeclaration != nullptr &&
           selectedDeclaration->kind == frontend::AstDeclarationKind::Object) {
         return nir::localValue(selectedDeclaration->symbolName, expression.span);

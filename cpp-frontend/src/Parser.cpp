@@ -309,13 +309,17 @@ AstDeclaration Parser::parseDeclaration() {
   consumeSeparators();
   if (check(TokenKind::Identifier) && peek().text == "inline") {
     const Token modifier = advance();
-    if (!match(TokenKind::KeywordDef)) {
+    AstDeclaration declaration;
+    if (match(TokenKind::KeywordDef)) {
+      declaration = parseDef(previous(), true);
+    } else if (match(TokenKind::KeywordVal)) {
+      declaration = parseValOrVar(AstDeclarationKind::Val, previous());
+    } else {
       diagnostics_.error(peek().span,
-                         "'inline' must modify a def in this milestone");
+                         "'inline' must modify a def or val in this milestone");
       synchronize();
       return {};
     }
-    AstDeclaration declaration = parseDef(previous(), true);
     declaration.isInline = true;
     declaration.span = modifier.span;
     return declaration;

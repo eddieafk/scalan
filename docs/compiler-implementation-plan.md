@@ -1052,6 +1052,16 @@ Current scaffold status:
   bounded slice both branches must still typecheck at the original definition
   site. Partially applied calls and the remaining Scala 3 inline surface stay
   future milestones.
+  Initialized `inline val` declarations are supported at top level and in
+  objects when their initializer is a self-contained scalar or string literal
+  expression composed with supported unary/binary operators. Boolean values are
+  recorded on their symbols for ordinary and mandatory conditional reduction;
+  direct identifier or object-member references substitute the initializer in
+  NIR, leaving no accessor call. Compound Boolean constants therefore work as
+  configuration flags inside inline methods. Dynamic and missing initializers,
+  class/trait-owned inline values, `inline var`, references to other constants,
+  and abstract inline values remain outside this bounded slice and receive
+  focused diagnostics where applicable.
   Recursive inline applications reuse the same nested metadata tree and unfold
   when compile-time branch reduction reaches them. The expansion depth is capped
   at Scala 3's default of 32, so terminating Boolean recursion emits no residual
@@ -1079,7 +1089,9 @@ Current scaffold status:
   general repeated/discarded inline arguments, inferred/explicit/nested
   contextual inline evidence, nested ordinary-parameter shadowing, depth-limit
   and ordinary constant/dynamic/nested/transparent conditionals, mandatory
-  constant/placement failures, malformed clause shapes,
+  constant/placement failures, direct Boolean/String and compound-condition
+  inline values, invalid initializer/owner/mutability forms, malformed clause
+  shapes,
   malformed cases, unmatched search, ambiguity propagation, and unsupported
   inline forms.
 - Anonymous givens and block-local named or anonymous givens now use the same

@@ -117,9 +117,17 @@ bool AstValidator::validateDeclaration(const AstDeclaration& declaration,
         "methods");
     ok = false;
   }
-  if (declaration.isInline && declaration.kind != AstDeclarationKind::Def) {
+  if (declaration.isInline && declaration.kind != AstDeclarationKind::Def &&
+      declaration.kind != AstDeclarationKind::Val) {
     diagnostics.error(declaration.span,
-                      "inline modifier is only supported on methods");
+                      "inline modifier is only supported on methods and values");
+    ok = false;
+  }
+  if (declaration.isInline && declaration.kind == AstDeclarationKind::Val &&
+      !isTopLevel && !hasStableOwner) {
+    diagnostics.error(
+        declaration.span,
+        "inline values are currently supported only at top level or in objects");
     ok = false;
   }
   if (declaration.isLegacyImplicit && !declaration.isGiven) {

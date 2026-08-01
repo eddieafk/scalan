@@ -18,6 +18,24 @@ constexpr std::string_view SummonName = "summon";
 constexpr std::string_view ImplicitlyName = "implicitly";
 constexpr std::size_t MaxInlineExpansionDepth = 32;
 
+bool isSupportedInlineValueInitializer(const AstExpression& expression) {
+  switch (expression.kind) {
+  case AstExpressionKind::IntegerLiteral:
+  case AstExpressionKind::FloatingLiteral:
+  case AstExpressionKind::StringLiteral:
+  case AstExpressionKind::CharLiteral:
+  case AstExpressionKind::BooleanLiteral:
+    return true;
+  case AstExpressionKind::Unary:
+  case AstExpressionKind::Binary:
+    return !expression.children.empty() &&
+           std::all_of(expression.children.begin(), expression.children.end(),
+                       isSupportedInlineValueInitializer);
+  default:
+    return false;
+  }
+}
+
 bool isClassLikeDeclaration(AstDeclarationKind kind) {
   return kind == AstDeclarationKind::Object || kind == AstDeclarationKind::Class ||
          kind == AstDeclarationKind::Trait;
@@ -1648,9 +1666,18 @@ TypedDeclaration Typechecker::typecheckDeclaration(const AstDeclaration& declara
   typed.contextualParameterClauses =
       declaration.contextualParameterClauses;
   if (typed.isInline) {
-    if (!typed.hasInitializer) {
+    if (typed.kind == AstDeclarationKind::Def && !typed.hasInitializer) {
       diagnostics_.error(declaration.span,
                          "inline method requires an implementation");
+    } else if (typed.kind == AstDeclarationKind::Val) {
+      if (!typed.hasInitializer) {
+        diagnostics_.error(declaration.span,
+                           "inline value requires an initializer");
+      } else if (!isSupportedInlineValueInitializer(declaration.initializer)) {
+        diagnostics_.error(
+            declaration.initializer.span,
+            "inline value initializer must be a self-contained constant expression");
+      }
     }
   }
   for (std::size_t i = 0; i < typed.parameters.size(); ++i) {
@@ -1844,6 +1871,11 @@ TypedDeclaration Typechecker::typecheckDeclaration(const AstDeclaration& declara
     symbol.isInline = declaration.isInline;
     if (declaration.isInline) {
       symbol.inlineBody = declaration.initializer;
+    }
+    if (declaration.isInline && declaration.kind == AstDeclarationKind::Val &&
+        typed.inferredType.kind == SimpleTypeKind::Boolean) {
+      symbol.specializedBooleanValue =
+          constantBooleanValue(declaration.initializer, signatureScope);
     }
     if (auto enclosing = globalSymbols_.find(owner);
         enclosing != globalSymbols_.end() &&
@@ -2108,6 +2140,11 @@ TypedDeclaration Typechecker::typecheckDeclaration(const AstDeclaration& declara
     updated.isInline = typedMember.isInline;
     if (typedMember.isInline) {
       updated.inlineBody = member.initializer;
+    }
+    if (typedMember.isInline && typedMember.kind == AstDeclarationKind::Val &&
+        typedMember.inferredType.kind == SimpleTypeKind::Boolean) {
+      updated.specializedBooleanValue =
+          constantBooleanValue(member.initializer, memberScope);
     }
     updated.isAnonymousGiven = typedMember.isAnonymousGiven;
     updated.isModuleMember = declaration.kind == AstDeclarationKind::Object &&
@@ -4497,6 +4534,19 @@ Typechecker::constantBooleanValue(const AstExpression& expression,
   case AstExpressionKind::Identifier:
     if (auto symbol = scope.find(expression.text); symbol != scope.end()) {
       return symbol->second.specializedBooleanValue;
+    }
+    return std::nullopt;
+  case AstExpressionKind::Select:
+    if (expression.children.size() == 1 &&
+        expression.children.front().kind == AstExpressionKind::Identifier) {
+      if (auto receiver = scope.find(expression.children.front().text);
+          receiver != scope.end()) {
+        if (std::optional<SymbolInfo> member =
+                resolvedMemberForReceiverType(receiver->second.type,
+                                              expression.text)) {
+          return member->specializedBooleanValue;
+        }
+      }
     }
     return std::nullopt;
   case AstExpressionKind::Unary:

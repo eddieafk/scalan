@@ -22,8 +22,13 @@ class FallbackResult(val value: String) extends TransparentResult {
   def fallbackOnly(): String = value
 }
 
+inline val topLevelBanner: String = "top-inline"
+
 object Selectors {
   val prefix: String = "selected:"
+  inline val enabled: Boolean = true
+  inline val foldedEnabled: Boolean = !false && true
+  inline val banner: String = "inline-val"
 
   inline def selected[A]: String =
     summonFrom {
@@ -233,6 +238,9 @@ object Selectors {
     } else {
       new FallbackResult("ordinary-transparent-false")
     }
+
+  inline def configured(value: String): String =
+    if (foldedEnabled) banner + ":" + value else "inline-val-disabled"
 }
 
 class InstanceSelectors(val instancePrefix: String) {
@@ -522,5 +530,9 @@ object Main {
     println(Selectors.ordinaryConditional(nextCondition(), "dynamic"))
     println(Selectors.ordinaryRefined(true).preciseOnly())
     println(Selectors.ordinaryRefined(false).fallbackOnly())
+    println(Selectors.enabled)
+    println(Selectors.banner)
+    println(Selectors.configured("configured"))
+    println(topLevelBanner)
   }
 }
