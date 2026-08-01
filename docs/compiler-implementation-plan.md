@@ -1014,9 +1014,15 @@ Current scaffold status:
   expanding the recorded body, preserving single evaluation even when a
   receiver or parameter is referenced repeatedly.
   `summonFrom` may therefore select a different branch at each call and no call
-  to the inline method remains. Recursive expansion is diagnosed. Partially
-  applied calls, `transparent inline`, and the remaining Scala 3 inline surface
-  stay future milestones.
+  to the inline method remains. Canonical Scala 3 `transparent inline def`
+  declarations use the specialized body's rechecked result type at each call
+  site while retaining their declared result as the erased method contract.
+  This permits members of a precise selected or fallback result class to be
+  called directly after expansion, including through nested transparent calls,
+  inferred type arguments, contextual evidence, and explicit `using`
+  arguments. Expanded block receivers are evaluated once into typed NIR locals
+  before member calls. Recursive expansion is diagnosed. Partially applied
+  calls and the remaining Scala 3 inline surface stay future milestones.
   Focused native coverage exercises ordered
   search, wildcard fallback, pattern-bound contextual evidence, recursive
   generic factories, lexical definition-owner values, member and nearest local
@@ -1029,9 +1035,10 @@ Current scaffold status:
   ordinary/expected-result/context-only inference, inferred call-site
   contextual selection, nested parameterized inline expansion, dead-branch
   elimination, explicit/inferred curried calls, contextual and nested curried
-  forwarding, effect ordering across receiver and ordinary clauses, malformed
-  clause shapes, malformed cases, unmatched search, ambiguity propagation, and
-  unsupported inline forms.
+  forwarding, effect ordering across receiver and ordinary clauses,
+  precise/fallback transparent-result member selection, nested/contextual/
+  inferred transparent refinement, malformed clause shapes, malformed cases,
+  unmatched search, ambiguity propagation, and unsupported inline forms.
 - Anonymous givens and block-local named or anonymous givens now use the same
   typed evidence model. Lexical depth is retained during search, so the
   innermost matching local given wins while equally nested matches remain

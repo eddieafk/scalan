@@ -8,6 +8,20 @@ class NamedValue[A](val value: String) extends Named[A] {
   def label(): String = value
 }
 
+trait TransparentResult {
+  def text(): String
+}
+
+class PreciseResult(val value: String) extends TransparentResult {
+  def text(): String = value
+  def preciseOnly(): String = value
+}
+
+class FallbackResult(val value: String) extends TransparentResult {
+  def text(): String = value
+  def fallbackOnly(): String = value
+}
+
 object Selectors {
   val prefix: String = "selected:"
 
@@ -74,6 +88,24 @@ object Selectors {
   inline def inferredCurried[A](value: A)(suffix: String)(
       using named: Named[A]): String =
     prefix + named.label() + ":" + suffix
+
+  transparent inline def refined[A](): TransparentResult =
+    summonFrom {
+      case found: Named[A] =>
+        new PreciseResult("transparent:" + found.label())
+      case _ => new FallbackResult("transparent-fallback")
+    }
+
+  transparent inline def nestedRefined[A](): TransparentResult =
+    refined[A]()
+
+  transparent inline def contextualRefined[A]()(using
+      named: Named[A]): TransparentResult =
+    new PreciseResult("context-transparent:" + named.label())
+
+  transparent inline def inferredRefined[A](value: A)(using
+      named: Named[A]): TransparentResult =
+    new PreciseResult("inferred-transparent:" + named.label())
 }
 
 class InstanceSelectors(val instancePrefix: String) {
@@ -296,5 +328,13 @@ object Main {
         new NamedValue[String]("explicit-curried")))
     println(Selectors.inferredCurried(21)("inferred-second"))
     println(nextInstances().curried[Int](nextFirst())(nextSecond()))
+    println(Selectors.refined[Int]().preciseOnly())
+    println(Selectors.refined[Boolean]().fallbackOnly())
+    println(Selectors.nestedRefined[Int]().preciseOnly())
+    println(Selectors.contextualRefined[Int]().preciseOnly())
+    println(
+      Selectors.contextualRefined[String]()(using
+        new NamedValue[String]("explicit-transparent")).preciseOnly())
+    println(Selectors.inferredRefined(22).preciseOnly())
   }
 }

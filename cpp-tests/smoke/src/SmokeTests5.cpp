@@ -59,6 +59,20 @@ class NamedValue[A](val value: String) extends Named[A] {
   def label(): String = value
 }
 
+trait TransparentResult {
+  def text(): String
+}
+
+class PreciseResult(val value: String) extends TransparentResult {
+  def text(): String = value
+  def preciseOnly(): String = value
+}
+
+class FallbackResult(val value: String) extends TransparentResult {
+  def text(): String = value
+  def fallbackOnly(): String = value
+}
+
 object Selectors {
   val prefix: String = "selected:"
 
@@ -125,6 +139,24 @@ object Selectors {
   inline def inferredCurried[A](value: A)(suffix: String)(
       using named: Named[A]): String =
     prefix + named.label() + ":" + suffix
+
+  transparent inline def refined[A](): TransparentResult =
+    summonFrom {
+      case found: Named[A] =>
+        new PreciseResult("transparent:" + found.label())
+      case _ => new FallbackResult("transparent-fallback")
+    }
+
+  transparent inline def nestedRefined[A](): TransparentResult =
+    refined[A]()
+
+  transparent inline def contextualRefined[A]()(using
+      named: Named[A]): TransparentResult =
+    new PreciseResult("context-transparent:" + named.label())
+
+  transparent inline def inferredRefined[A](value: A)(using
+      named: Named[A]): TransparentResult =
+    new PreciseResult("inferred-transparent:" + named.label())
 }
 
 class InstanceSelectors(val instancePrefix: String) {
@@ -356,6 +388,19 @@ object Main {
     Selectors.inferredCurried(21)("inferred-second")
   def effectfulReceiverCurried: String =
     nextInstances().curried[Int](nextFirst())(nextSecond())
+  def transparentSelected: String =
+    Selectors.refined[Int]().preciseOnly()
+  def transparentFallback: String =
+    Selectors.refined[Boolean]().fallbackOnly()
+  def nestedTransparentSelected: String =
+    Selectors.nestedRefined[Int]().preciseOnly()
+  def contextualTransparentSelected: String =
+    Selectors.contextualRefined[Int]().preciseOnly()
+  def explicitTransparentSelected: String =
+    Selectors.contextualRefined[String]()(using
+      new NamedValue[String]("explicit-transparent")).preciseOnly()
+  def inferredTransparentSelected: String =
+    Selectors.inferredRefined(22).preciseOnly()
 
   def main(args: Array[String]): Unit = {
     println(intSelected)
@@ -405,6 +450,12 @@ object Main {
     println(explicitCurriedContextual)
     println(inferredCurriedSelected)
     println(effectfulReceiverCurried)
+    println(transparentSelected)
+    println(transparentFallback)
+    println(nestedTransparentSelected)
+    println(contextualTransparentSelected)
+    println(explicitTransparentSelected)
+    println(inferredTransparentSelected)
   }
 }
 )";
@@ -422,6 +473,7 @@ object Main {
   def unsupportedInference: String = noInference("value")
   inline def curried[A](first: String)(second: String): String = first + second
   def flattenedCurried: String = curried[Int]("first", "second")
+  transparent def unsupportedTransparent[A](): String = "transparent"
   inline def missingBody[A]: String
   inline def recursive[A]: String = recursive[A]
   inline val unsupported: String = "value"
@@ -558,6 +610,18 @@ object Main {
       functionText(result.nirText, "demo.inlinecalls.Main.inferredCurriedSelected");
   const std::string_view effectfulReceiverCurried =
       functionText(result.nirText, "demo.inlinecalls.Main.effectfulReceiverCurried");
+  const std::string_view transparentSelected =
+      functionText(result.nirText, "demo.inlinecalls.Main.transparentSelected");
+  const std::string_view transparentFallback =
+      functionText(result.nirText, "demo.inlinecalls.Main.transparentFallback");
+  const std::string_view nestedTransparentSelected =
+      functionText(result.nirText, "demo.inlinecalls.Main.nestedTransparentSelected");
+  const std::string_view contextualTransparentSelected = functionText(
+      result.nirText, "demo.inlinecalls.Main.contextualTransparentSelected");
+  const std::string_view explicitTransparentSelected =
+      functionText(result.nirText, "demo.inlinecalls.Main.explicitTransparentSelected");
+  const std::string_view inferredTransparentSelected =
+      functionText(result.nirText, "demo.inlinecalls.Main.inferredTransparentSelected");
 
   const bool valid =
       status == 0 &&
@@ -599,7 +663,12 @@ object Main {
               "selected:explicit-curried:explicit-first:explicit-second\n"
               "selected:member-int:inferred-second\n"
               "receiver-effect\nfirst-effect\nsecond-effect\n"
-              "effectful-instance:member-int:first:second\n" &&
+              "effectful-instance:member-int:first:second\n"
+              "transparent:member-int\ntransparent-fallback\n"
+              "transparent:member-int\n"
+              "context-transparent:member-int\n"
+              "context-transparent:explicit-transparent\n"
+              "inferred-transparent:member-int\n" &&
       !invalid.ok &&
       contains(invalid.diagnosticsText,
                "inline call-site specialization currently requires a generic "
@@ -612,6 +681,8 @@ object Main {
       contains(invalid.diagnosticsText,
                "inline call to curried must preserve its declared ordinary "
                "argument clauses") &&
+      contains(invalid.diagnosticsText,
+               "'transparent' must modify a class, trait, or inline def") &&
       contains(invalid.diagnosticsText, "inline method requires an implementation") &&
       contains(invalid.diagnosticsText,
                "recursive inline call-site specialization is not supported yet") &&
@@ -812,7 +883,36 @@ object Main {
           effectfulReceiverCurried.find("nextSecond") &&
       countOccurrences(effectfulReceiverCurried, "Main.intNamed") == 1 &&
       !contains(effectfulReceiverCurried,
-                "%demo.inlinecalls.InstanceSelectors.curried");
+                "%demo.inlinecalls.InstanceSelectors.curried") &&
+      contains(transparentSelected, "demo.inlinecalls.PreciseResult") &&
+      contains(transparentSelected, ".preciseOnly") &&
+      countOccurrences(transparentSelected, "Main.intNamed") == 1 &&
+      !contains(transparentSelected, "%demo.inlinecalls.Selectors.refined") &&
+      contains(transparentFallback, "demo.inlinecalls.FallbackResult") &&
+      contains(transparentFallback, ".fallbackOnly") &&
+      !contains(transparentFallback, "Main.intNamed") &&
+      !contains(transparentFallback, "%demo.inlinecalls.Selectors.refined") &&
+      contains(nestedTransparentSelected, "demo.inlinecalls.PreciseResult") &&
+      contains(nestedTransparentSelected, ".preciseOnly") &&
+      countOccurrences(nestedTransparentSelected, "Main.intNamed") == 1 &&
+      !contains(nestedTransparentSelected,
+                "%demo.inlinecalls.Selectors.nestedRefined") &&
+      !contains(nestedTransparentSelected, "%demo.inlinecalls.Selectors.refined") &&
+      contains(contextualTransparentSelected, "demo.inlinecalls.PreciseResult") &&
+      contains(contextualTransparentSelected, ".preciseOnly") &&
+      countOccurrences(contextualTransparentSelected, "Main.intNamed") == 1 &&
+      !contains(contextualTransparentSelected,
+                "%demo.inlinecalls.Selectors.contextualRefined") &&
+      contains(explicitTransparentSelected, "explicit-transparent") &&
+      contains(explicitTransparentSelected, ".preciseOnly") &&
+      !contains(explicitTransparentSelected, "Main.intNamed") &&
+      !contains(explicitTransparentSelected,
+                "%demo.inlinecalls.Selectors.contextualRefined") &&
+      contains(inferredTransparentSelected, "demo.inlinecalls.PreciseResult") &&
+      contains(inferredTransparentSelected, ".preciseOnly") &&
+      countOccurrences(inferredTransparentSelected, "Main.intNamed") == 1 &&
+      !contains(inferredTransparentSelected,
+                "%demo.inlinecalls.Selectors.inferredRefined");
   return valid
              ? 0
              : fail(
@@ -881,7 +981,17 @@ object Main {
                    "', inferred-curried-selected='" +
                    std::string(inferredCurriedSelected) +
                    "', effectful-receiver-curried='" +
-                   std::string(effectfulReceiverCurried) + "')");
+                   std::string(effectfulReceiverCurried) + "', transparent-selected='" +
+                   std::string(transparentSelected) + "', transparent-fallback='" +
+                   std::string(transparentFallback) +
+                   "', nested-transparent-selected='" +
+                   std::string(nestedTransparentSelected) +
+                   "', contextual-transparent-selected='" +
+                   std::string(contextualTransparentSelected) +
+                   "', explicit-transparent-selected='" +
+                   std::string(explicitTransparentSelected) +
+                   "', inferred-transparent-selected='" +
+                   std::string(inferredTransparentSelected) + "')");
 }
 
 } // namespace

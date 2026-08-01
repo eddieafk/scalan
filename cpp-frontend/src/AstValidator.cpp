@@ -109,10 +109,12 @@ bool AstValidator::validateDeclaration(const AstDeclaration& declaration,
   }
   if (declaration.isTransparent &&
       declaration.kind != AstDeclarationKind::Class &&
-      declaration.kind != AstDeclarationKind::Trait) {
+      declaration.kind != AstDeclarationKind::Trait &&
+      (declaration.kind != AstDeclarationKind::Def || !declaration.isInline)) {
     diagnostics.error(
         declaration.span,
-        "transparent modifier is only supported on classes and traits");
+        "transparent modifier is only supported on classes, traits, and inline "
+        "methods");
     ok = false;
   }
   if (declaration.isInline && declaration.kind != AstDeclarationKind::Def) {

@@ -96,6 +96,7 @@ struct TypedDeclaration {
   bool importsWildcard = false;
   TypeInfo inferredType;
   bool isOverride = false;
+  bool isTransparent = false;
   bool isInline = false;
   bool isGiven = false;
   bool isAnonymousGiven = false;
@@ -140,6 +141,7 @@ struct TypedInlineApplication {
   std::vector<TypeInfo> parameterTypes;
   std::vector<AstExpression> arguments;
   std::vector<TypedContextArgument> contextualArguments;
+  TypeInfo resultType;
   bool hasReceiver = false;
   AstExpression receiver;
   TypeInfo receiverType;
@@ -336,15 +338,16 @@ private:
       bool reportDiagnostics = true,
       std::vector<TypeInfo>* inferredTypeArguments = nullptr,
       bool* inferenceConflict = nullptr) const;
-  void recordInlineApplication(const AstExpression& expression,
-                               const SymbolInfo& symbol,
-                               const std::vector<TypeInfo>& typeArguments,
-                               const std::vector<AstExpression>& arguments,
-                               const std::vector<TypedContextArgument>&
-                                   contextualArguments,
-                               const AstExpression* receiver,
-                               const TypeInfo* receiverType,
-                               Scope& scope, const TypeInfo* expectedType);
+  [[nodiscard]] std::optional<TypeInfo>
+  recordInlineApplication(const AstExpression& expression,
+                          const SymbolInfo& symbol,
+                          const std::vector<TypeInfo>& typeArguments,
+                          const std::vector<AstExpression>& arguments,
+                          const std::vector<TypedContextArgument>&
+                              contextualArguments,
+                          const AstExpression* receiver,
+                          const TypeInfo* receiverType,
+                          Scope& scope, const TypeInfo* expectedType);
   [[nodiscard]] std::vector<SymbolInfo> inferContextualTypeApplications(
       const SymbolInfo& symbol, const std::vector<TypeInfo>& inferredTypeArguments,
       std::size_t firstContextParameter, Scope& scope, const support::SourceSpan& span,

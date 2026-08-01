@@ -90,8 +90,8 @@ build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
 
 # Compile generic `inline def` call-site specialization with explicit or
 # inferred type arguments, curried ordinary clauses, contextual `using`
-# parameters, single-evaluation class/trait receiver expressions, and per-call
-# `summonFrom` reduction.
+# parameters, single-evaluation class/trait receiver expressions, per-call
+# `summonFrom` reduction, and `transparent inline def` result refinement.
 build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
   --output /tmp/inline-summon-from \
   cpp-examples/InlineSummonFrom.scala

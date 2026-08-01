@@ -517,7 +517,7 @@ object Main {
               "7\nseven\nunrelated\n" &&
       !invalid.ok &&
       contains(invalid.diagnosticsText,
-               "'transparent' must modify a class or trait") &&
+               "'transparent' must modify a class, trait, or inline def") &&
       contains(invalid.diagnosticsText, "does not conform to declared type "
                                         "demo.invalidcompositetypes.Left | "
                                         "demo.invalidcompositetypes.Right") &&

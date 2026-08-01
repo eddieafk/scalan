@@ -216,14 +216,25 @@ bool Parser::isDeclarationStart() const {
       break;
     }
   }
-  if (peek().kind == TokenKind::Identifier &&
-      (peek().text == "infix" || peek().text == "transparent") &&
-      current_ + 1 < tokens_.size() &&
-      (tokens_[current_ + 1].kind == TokenKind::KeywordClass ||
-       tokens_[current_ + 1].kind == TokenKind::KeywordTrait ||
-       (peek().text == "infix" &&
-        tokens_[current_ + 1].kind == TokenKind::KeywordType))) {
-    return true;
+  if (peek().kind == TokenKind::Identifier && current_ + 1 < tokens_.size()) {
+    if ((peek().text == "infix" || peek().text == "transparent") &&
+        (tokens_[current_ + 1].kind == TokenKind::KeywordClass ||
+         tokens_[current_ + 1].kind == TokenKind::KeywordTrait ||
+         (peek().text == "infix" &&
+          tokens_[current_ + 1].kind == TokenKind::KeywordType))) {
+      return true;
+    }
+    if (peek().text == "transparent" &&
+        tokens_[current_ + 1].kind == TokenKind::Identifier &&
+        tokens_[current_ + 1].text == "inline" &&
+        current_ + 2 < tokens_.size() &&
+        tokens_[current_ + 2].kind == TokenKind::KeywordDef) {
+      return true;
+    }
+    if (peek().text == "transparent" &&
+        tokens_[current_ + 1].kind == TokenKind::KeywordDef) {
+      return true;
+    }
   }
   switch (peek().kind) {
   case TokenKind::KeywordObject:
@@ -308,13 +319,23 @@ AstDeclaration Parser::parseDeclaration() {
   if (check(TokenKind::Identifier) && peek().text == "transparent") {
     const Token modifier = advance();
     AstDeclaration declaration;
-    if (match(TokenKind::KeywordClass)) {
+    if (check(TokenKind::Identifier) && peek().text == "inline") {
+      advance();
+      if (!match(TokenKind::KeywordDef)) {
+        diagnostics_.error(peek().span,
+                           "'transparent inline' must modify a def");
+        synchronize();
+        return {};
+      }
+      declaration = parseDef(previous(), true);
+      declaration.isInline = true;
+    } else if (match(TokenKind::KeywordClass)) {
       declaration = parseObjectLike(AstDeclarationKind::Class, previous());
     } else if (match(TokenKind::KeywordTrait)) {
       declaration = parseObjectLike(AstDeclarationKind::Trait, previous());
     } else {
       diagnostics_.error(peek().span,
-                         "'transparent' must modify a class or trait");
+                         "'transparent' must modify a class, trait, or inline def");
       synchronize();
       return {};
     }

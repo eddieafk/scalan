@@ -3232,15 +3232,43 @@ nir::Value valueFor(const frontend::AstExpression& expression,
         arguments.insert(arguments.begin() + insertionIndex, std::move(argument));
       }
     }
-    nir::Value call =
-        nir::callValue(expressionValueFor(expression.children.front(), context, true),
-                       std::move(arguments), expression.span);
+    std::vector<nir::Value> receiverEvaluation;
+    nir::Value callee =
+        expressionValueFor(expression.children.front(), context, true);
+    if (callee.kind == nir::ValueKind::Select && callee.operands.size() == 1 &&
+        callee.operands.front().kind == nir::ValueKind::Block) {
+      nir::Value receiver = std::move(callee.operands.front());
+      const support::SourceSpan receiverSpan = receiver.span;
+      const std::string receiverName =
+          "inline$receiver$" + std::to_string(receiverSpan.start);
+      std::string receiverType = receiver.type;
+      if (receiverType.empty() &&
+          expression.children.front().children.size() == 1) {
+        if (const frontend::TypeInfo* annotatedReceiver = annotatedTypeFor(
+                expression.children.front().children.front(), context)) {
+          receiverType = runtimeTypeName(*annotatedReceiver);
+        }
+      }
+      receiverEvaluation.push_back(nir::localLetValue(
+          receiverName, std::move(receiverType), std::move(receiver), receiverSpan));
+      callee.operands.front() = nir::localValue(receiverName, receiverSpan);
+    }
+    nir::Value call = nir::callValue(std::move(callee), std::move(arguments),
+                                     expression.span);
+    auto finishCall = [&](nir::Value result) {
+      if (receiverEvaluation.empty()) {
+        return result;
+      }
+      receiverEvaluation.push_back(std::move(result));
+      return nir::blockValue(std::move(receiverEvaluation), expression.span);
+    };
     const std::string returnPrimitive =
         target == nullptr
             ? std::string{}
             : boxedPrimitiveTypeFor(target->inferredType, targetReceiver, context);
     if (!returnPrimitive.empty()) {
-      return nir::unboxValue(returnPrimitive, std::move(call), expression.span);
+      return finishCall(
+          nir::unboxValue(returnPrimitive, std::move(call), expression.span));
     }
     if (target != nullptr) {
       const frontend::TypeInfo* staticResult = annotatedTypeFor(expression, context);
@@ -3252,12 +3280,14 @@ nir::Value valueFor(const frontend::AstExpression& expression,
                                           ? std::string{}
                                           : boxedObjectTypeName(staticResult->kind);
         if (!boxedType.empty()) {
-          return nir::unboxValue(boxedType, std::move(call), expression.span);
+          return finishCall(
+              nir::unboxValue(boxedType, std::move(call), expression.span));
         }
-        return nir::asInstanceOfValue(staticRuntime, std::move(call), expression.span);
+        return finishCall(nir::asInstanceOfValue(staticRuntime, std::move(call),
+                                                 expression.span));
       }
     }
-    return call;
+    return finishCall(std::move(call));
   }
   case AstExpressionKind::Unary:
     if (expression.children.size() != 1) {
