@@ -44,6 +44,7 @@ struct AstLocalMethod {
   std::vector<AstTypeParameter> typeParameters;
   std::vector<std::string> parameters;
   std::vector<bool> contextualParameters;
+  std::vector<bool> inlineParameters;
 };
 
 enum class AstExpressionKind {
@@ -92,6 +93,7 @@ struct AstExpression {
   bool isLegacyImplicit = false;
   bool isAnonymousGiven = false;
   bool isFlattenedCall = false;
+  bool isInline = false;
 };
 
 struct AstClassBodyItem {
@@ -112,6 +114,7 @@ struct AstDeclaration {
   std::vector<AstTypeParameter> typeParameters;
   std::vector<std::string> parameters;
   std::vector<bool> contextualParameters;
+  std::vector<bool> inlineParameters;
   std::vector<std::size_t> parameterClauseSizes;
   std::vector<bool> contextualParameterClauses;
   std::string declaredType;

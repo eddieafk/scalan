@@ -123,6 +123,52 @@ object Selectors {
 
   transparent inline def nonGenericRefined(): TransparentResult =
     new PreciseResult("non-generic-transparent")
+
+  inline def choose(inline condition: Boolean, value: String): String =
+    inline if (condition) {
+      "inline-true:" + value + ":" + value
+    } else {
+      "inline-false:" + value + ":" + value
+    }
+
+  inline def nestedChoose(inline condition: Boolean, value: String): String =
+    "nested-" + choose(condition, value)
+
+  inline def negatedChoose(inline condition: Boolean): String =
+    inline if (!condition) "inline-negated" else "inline-original"
+
+  inline def contextualChoose(inline condition: Boolean)(using
+      named: Named[Int]): String =
+    inline if (condition) {
+      "inline-context:" + named.label()
+    } else {
+      "inline-context-false"
+    }
+
+  inline def curriedChoose(inline condition: Boolean)(value: String): String =
+    inline if (condition) {
+      "inline-curried-true:" + value
+    } else {
+      "inline-curried-false:" + value
+    }
+
+  inline def genericChoose[A](inline condition: Boolean): String =
+    inline if (condition) {
+      summonFrom {
+        case found: Named[A] => "inline-generic:" + found.label()
+        case _ => "inline-generic-fallback"
+      }
+    } else {
+      "inline-generic-false"
+    }
+
+  transparent inline def refinedChoice(
+      inline condition: Boolean): TransparentResult =
+    inline if (condition) {
+      new PreciseResult("inline-transparent-true")
+    } else {
+      new FallbackResult("inline-transparent-false")
+    }
 }
 
 class InstanceSelectors(val instancePrefix: String) {
@@ -150,6 +196,13 @@ class InstanceSelectors(val instancePrefix: String) {
     instancePrefix + value + ":" + value
 
   inline def nonGenericConstant: String = instancePrefix + "constant"
+
+  inline def choose(inline condition: Boolean, value: String): String =
+    inline if (condition) {
+      instancePrefix + "inline-true:" + value
+    } else {
+      instancePrefix + "inline-false:" + value
+    }
 }
 
 trait TraitInstanceSelectors {
@@ -371,5 +424,15 @@ object Main {
     println(nextInstances().nonGeneric("receiver"))
     println(nextInstances().nonGenericConstant)
     println(Selectors.nonGenericRefined().preciseOnly())
+    println(Selectors.choose(true, nextNonGeneric()))
+    println(Selectors.choose(false, "cold"))
+    println(Selectors.nestedChoose(!false, "nested"))
+    println(Selectors.negatedChoose(false))
+    println(Selectors.contextualChoose(true))
+    println(Selectors.curriedChoose(false)(nextValue()))
+    println(Selectors.genericChoose[Int](true))
+    println(nextInstances().choose(false, "chosen"))
+    println(Selectors.refinedChoice(true).preciseOnly())
+    println(Selectors.refinedChoice(false).fallbackOnly())
   }
 }

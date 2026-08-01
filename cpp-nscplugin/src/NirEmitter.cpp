@@ -3424,6 +3424,17 @@ nir::Value valueFor(const frontend::AstExpression& expression,
     if (expression.children.size() < 2) {
       return nir::unknownValue("<malformed-if>", expression.span);
     }
+    if (expression.isInline) {
+      const frontend::TypedContextApplication* application =
+          contextApplicationFor(expression, context);
+      if (application != nullptr && application->hasSelectedBranch) {
+        if (application->selectedBranch >= expression.children.size()) {
+          return nir::unitValue(expression.span);
+        }
+        return scopedBodyValueFor(
+            expression.children[application->selectedBranch], context);
+      }
+    }
     if (expression.children.size() == 2) {
       return nir::ifValue(expressionValueFor(expression.children[0], context),
                           scopedBodyValueFor(expression.children[1], context),

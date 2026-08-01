@@ -1028,8 +1028,18 @@ Current scaffold status:
   transparent-result refinement. Inline-application identity includes both
   source span and expression kind so synthesized contextual expressions cannot
   alias their enclosing call metadata. Recursive expansion is diagnosed.
-  Partially applied calls and the remaining Scala 3 inline surface stay future
-  milestones.
+  Boolean `inline` parameters are represented separately from runtime parameter
+  signatures and require compile-time literal or propagated Boolean arguments.
+  Call-site rechecking reduces `inline if` conditions formed from those values,
+  including `!`, `&&`, `||`, `==`, and `!=`, records the selected branch, and
+  emits only that branch. Constants propagate through nested inline calls and
+  work with generic evidence selection, contextual and curried calls,
+  effectful instance receivers, and transparent-result refinement. Symbolic
+  inline parameters defer nested specialization until the enclosing call site.
+  In this bounded slice both branches must still typecheck at the original
+  definition site. Inline parameters currently require `Boolean`, and
+  contextual inline parameters are rejected. Partially applied calls and the
+  remaining Scala 3 inline surface stay future milestones.
   Focused native coverage exercises ordered
   search, wildcard fallback, pattern-bound contextual evidence, recursive
   generic factories, lexical definition-owner values, member and nearest local
@@ -1045,7 +1055,9 @@ Current scaffold status:
   forwarding, effect ordering across receiver and ordinary clauses,
   precise/fallback transparent-result member selection, nested/contextual/
   inferred transparent refinement, non-generic parameterless/value/contextual/
-  curried/instance/nested/transparent forms, malformed clause shapes,
+  curried/instance/nested/transparent forms, Boolean inline-parameter true,
+  false, negated, nested, generic/contextual/curried/instance and transparent
+  selection, constant/type/placement failures, malformed clause shapes,
   malformed cases, unmatched search, ambiguity propagation, and unsupported
   inline forms.
 - Anonymous givens and block-local named or anonymous givens now use the same

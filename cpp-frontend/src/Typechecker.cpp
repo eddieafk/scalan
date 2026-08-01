@@ -1517,6 +1517,8 @@ TypedModule Typechecker::typecheck(const AstModule& module) {
   zoneBodiesToAnalyze_.clear();
   currentPackageName_ = module.packageName;
   zoneInferenceDepth_ = 0;
+  inlineExpansionDepth_ = 0;
+  inlineExpansionHasInvalidArgument_ = false;
   TypedModule typed;
   typed.packageName = module.packageName;
   Scope scope;
@@ -1641,6 +1643,8 @@ TypedDeclaration Typechecker::typecheckDeclaration(const AstDeclaration& declara
                                         &typed.parameterTypes, &declaration.span);
   typed.contextualParameters = declaration.contextualParameters;
   typed.contextualParameters.resize(typed.parameters.size(), false);
+  typed.inlineParameters = declaration.inlineParameters;
+  typed.inlineParameters.resize(typed.parameters.size(), false);
   typed.parameterClauseSizes = declaration.parameterClauseSizes;
   typed.contextualParameterClauses =
       declaration.contextualParameterClauses;
@@ -1648,6 +1652,16 @@ TypedDeclaration Typechecker::typecheckDeclaration(const AstDeclaration& declara
     if (!typed.hasInitializer) {
       diagnostics_.error(declaration.span,
                          "inline method requires an implementation");
+    }
+  }
+  for (std::size_t i = 0; i < typed.inlineParameters.size(); ++i) {
+    if (!typed.inlineParameters[i]) {
+      continue;
+    }
+    if (i >= typed.parameterTypes.size() ||
+        typed.parameterTypes[i].kind != SimpleTypeKind::Boolean) {
+      diagnostics_.error(declaration.span,
+                         "inline parameters currently require type Boolean");
     }
   }
   for (std::size_t i = 0; i < typed.parameters.size(); ++i) {
@@ -1663,6 +1677,7 @@ TypedDeclaration Typechecker::typecheckDeclaration(const AstDeclaration& declara
                          ? typed.parameterTypes[i]
                          : TypeInfo{SimpleTypeKind::Unknown, "Unknown"};
     parameter.isContextParameter = typed.contextualParameters[i];
+    parameter.isInlineParameter = typed.inlineParameters[i];
     parameter.isLexicalValue = true;
     signatureScope[name] = std::move(parameter);
   }
@@ -1790,6 +1805,7 @@ TypedDeclaration Typechecker::typecheckDeclaration(const AstDeclaration& declara
       imported.parameters = symbol.parameters;
       imported.parameterTypes = symbol.parameterTypes;
       imported.contextualParameters = symbol.contextualParameters;
+      imported.inlineParameters = symbol.inlineParameters;
       imported.parameterClauseSizes = symbol.parameterClauseSizes;
       imported.contextualParameterClauses =
           symbol.contextualParameterClauses;
@@ -1830,6 +1846,7 @@ TypedDeclaration Typechecker::typecheckDeclaration(const AstDeclaration& declara
     symbol.parameters = typed.parameters;
     symbol.parameterTypes = typed.parameterTypes;
     symbol.contextualParameters = typed.contextualParameters;
+    symbol.inlineParameters = typed.inlineParameters;
     symbol.parameterClauseSizes = declaration.parameterClauseSizes;
     symbol.contextualParameterClauses = declaration.contextualParameterClauses;
     symbol.isGiven = typed.isGiven;
@@ -2093,6 +2110,7 @@ TypedDeclaration Typechecker::typecheckDeclaration(const AstDeclaration& declara
     updated.parameters = typedMember.parameters;
     updated.parameterTypes = typedMember.parameterTypes;
     updated.contextualParameters = typedMember.contextualParameters;
+    updated.inlineParameters = typedMember.inlineParameters;
     updated.parameterClauseSizes = typedMember.parameterClauseSizes;
     updated.contextualParameterClauses =
         typedMember.contextualParameterClauses;
@@ -2647,6 +2665,8 @@ void Typechecker::collectDeclaration(const AstDeclaration& declaration,
   symbol.parameters = declaration.parameters;
   symbol.contextualParameters = declaration.contextualParameters;
   symbol.contextualParameters.resize(declaration.parameters.size(), false);
+  symbol.inlineParameters = declaration.inlineParameters;
+  symbol.inlineParameters.resize(declaration.parameters.size(), false);
   symbol.parameterClauseSizes = declaration.parameterClauseSizes;
   symbol.contextualParameterClauses = declaration.contextualParameterClauses;
   symbol.isGiven = declaration.isGiven;
@@ -4473,6 +4493,62 @@ TypeInfo Typechecker::inferExpressionType(const AstExpression& expression, Scope
   return type;
 }
 
+std::optional<bool>
+Typechecker::constantBooleanValue(const AstExpression& expression,
+                                  const Scope& scope) const {
+  switch (expression.kind) {
+  case AstExpressionKind::BooleanLiteral:
+    if (expression.text == "true") {
+      return true;
+    }
+    if (expression.text == "false") {
+      return false;
+    }
+    return std::nullopt;
+  case AstExpressionKind::Identifier:
+    if (auto symbol = scope.find(expression.text); symbol != scope.end()) {
+      return symbol->second.inlineBooleanValue;
+    }
+    return std::nullopt;
+  case AstExpressionKind::Unary:
+    if (expression.text == "!" && expression.children.size() == 1) {
+      if (std::optional<bool> operand =
+              constantBooleanValue(expression.children.front(), scope)) {
+        return !*operand;
+      }
+    }
+    return std::nullopt;
+  case AstExpressionKind::Binary:
+    if (expression.children.size() != 2) {
+      return std::nullopt;
+    }
+    {
+      const std::optional<bool> left =
+          constantBooleanValue(expression.children.front(), scope);
+      const std::optional<bool> right =
+          constantBooleanValue(expression.children.back(), scope);
+      if (!left.has_value() || !right.has_value()) {
+        return std::nullopt;
+      }
+      if (expression.text == "&&") {
+        return *left && *right;
+      }
+      if (expression.text == "||") {
+        return *left || *right;
+      }
+      if (expression.text == "==") {
+        return *left == *right;
+      }
+      if (expression.text == "!=") {
+        return *left != *right;
+      }
+    }
+    return std::nullopt;
+  default:
+    return std::nullopt;
+  }
+}
+
 std::optional<TypeInfo> Typechecker::recordInlineApplication(
     const AstExpression& expression, const SymbolInfo& symbol,
     const std::vector<TypeInfo>& typeArguments,
@@ -4503,6 +4579,32 @@ std::optional<TypeInfo> Typechecker::recordInlineApplication(
   if (symbol.isInstanceMember &&
       (receiver == nullptr || receiverType == nullptr)) {
     return std::nullopt;
+  }
+  {
+    std::size_t sourceArgumentIndex = 0;
+    for (std::size_t index = 0; index < symbol.parameters.size(); ++index) {
+      const bool contextual = index < symbol.contextualParameters.size() &&
+                              symbol.contextualParameters[index];
+      if (contextual && !contextualArguments.empty()) {
+        continue;
+      }
+      const AstExpression* sourceArgument =
+          sourceArgumentIndex < arguments.size()
+              ? &arguments[sourceArgumentIndex++]
+              : nullptr;
+      const bool inlineParameter = index < symbol.inlineParameters.size() &&
+                                   symbol.inlineParameters[index];
+      if (!inlineParameter || sourceArgument == nullptr ||
+          constantBooleanValue(*sourceArgument, scope).has_value() ||
+          sourceArgument->kind != AstExpressionKind::Identifier) {
+        continue;
+      }
+      if (auto parameter = scope.find(sourceArgument->text);
+          parameter != scope.end() && parameter->second.isInlineParameter &&
+          !parameter->second.inlineBooleanValue.has_value()) {
+        return std::nullopt;
+      }
+    }
   }
   const std::string definitionOwner = ownerNameOf(symbol.symbolName);
   std::optional<TypeInfo> ownerReceiverType;
@@ -4535,6 +4637,10 @@ std::optional<TypeInfo> Typechecker::recordInlineApplication(
         "recursive inline call-site specialization is not supported yet");
     return std::nullopt;
   }
+
+  const bool outerInvalidInlineArgument =
+      inlineExpansionHasInvalidArgument_;
+  inlineExpansionHasInvalidArgument_ = false;
 
   Scope inlineScope = scope;
   std::unordered_map<std::string, TypeInfo> substitutions;
@@ -4596,6 +4702,7 @@ std::optional<TypeInfo> Typechecker::recordInlineApplication(
   std::vector<TypeInfo> parameterTypes;
   parameterNames.reserve(symbol.parameters.size());
   parameterTypes.reserve(symbol.parameters.size());
+  std::size_t sourceArgumentIndex = 0;
   for (std::size_t index = 0; index < symbol.parameters.size(); ++index) {
     const std::string name = parameterName(symbol.parameters[index]);
     TypeInfo type =
@@ -4610,6 +4717,27 @@ std::optional<TypeInfo> Typechecker::recordInlineApplication(
     parameter.isContextParameter =
         index < symbol.contextualParameters.size() &&
         symbol.contextualParameters[index];
+    parameter.isInlineParameter =
+        index < symbol.inlineParameters.size() && symbol.inlineParameters[index];
+    const bool materializedContextParameter =
+        parameter.isContextParameter && !contextualArguments.empty();
+    const AstExpression* sourceArgument = nullptr;
+    if (!materializedContextParameter && sourceArgumentIndex < arguments.size()) {
+      sourceArgument = &arguments[sourceArgumentIndex++];
+    }
+    if (parameter.isInlineParameter) {
+      parameter.inlineBooleanValue =
+          sourceArgument == nullptr
+              ? std::nullopt
+              : constantBooleanValue(*sourceArgument, scope);
+      if (!parameter.inlineBooleanValue.has_value()) {
+        diagnostics_.error(
+            sourceArgument == nullptr ? expression.span : sourceArgument->span,
+            "argument for inline parameter " + name +
+                " must be a compile-time Boolean constant");
+        inlineExpansionHasInvalidArgument_ = true;
+      }
+    }
     parameter.isLexicalValue = true;
     inlineScope[name] = std::move(parameter);
     parameterNames.push_back(name);
@@ -4626,9 +4754,11 @@ std::optional<TypeInfo> Typechecker::recordInlineApplication(
   contextApplications_.clear();
   inlineApplications_.clear();
 
+  ++inlineExpansionDepth_;
   TypeInfo resultType = inferExpressionType(
       symbol.inlineBody, inlineScope,
       symbol.isTransparent ? nullptr : expectedType);
+  --inlineExpansionDepth_;
 
   TypedInlineApplication application;
   application.span = expression.span;
@@ -4654,6 +4784,7 @@ std::optional<TypeInfo> Typechecker::recordInlineApplication(
   contextApplications_ = std::move(outerContextApplications);
   inlineApplications_ = std::move(outerInlineApplications);
   expandingInlineApplications_.erase(symbol.symbolName);
+  inlineExpansionHasInvalidArgument_ = outerInvalidInlineArgument;
 
   const auto sameSpan = [&](const TypedInlineApplication& candidate) {
     return candidate.expressionKind == expression.kind &&
@@ -6617,6 +6748,23 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
           condition.kind != SimpleTypeKind::Unknown) {
         diagnostics_.error(expression.children[0].span,
                            "if condition requires a Boolean value");
+      }
+    }
+    if (expression.isInline && inlineExpansionDepth_ != 0) {
+      if (std::optional<bool> condition =
+              constantBooleanValue(expression.children[0], scope)) {
+        const std::size_t selectedBranch = *condition ? 1 : 2;
+        recordContextApplication(expression.span, {}, true, selectedBranch);
+        if (selectedBranch >= expression.children.size()) {
+          return TypeInfo{SimpleTypeKind::Unit, "Unit"};
+        }
+        return inferExpressionType(expression.children[selectedBranch], scope,
+                                   expectedType);
+      }
+      if (!inlineExpansionHasInvalidArgument_) {
+        diagnostics_.error(
+            expression.children[0].span,
+            "inline if condition must be a compile-time Boolean constant");
       }
     }
     if (expression.children.size() == 2) {
@@ -10828,6 +10976,8 @@ void Typechecker::addParametersToScope(const AstDeclaration& declaration,
     symbol.type = parameterType(parameter, &scope, &declaration.span);
     symbol.isContextParameter = i < declaration.contextualParameters.size() &&
                                 declaration.contextualParameters[i];
+    symbol.isInlineParameter = i < declaration.inlineParameters.size() &&
+                               declaration.inlineParameters[i];
     symbol.isLexicalValue = true;
     scope[name] = std::move(symbol);
   }

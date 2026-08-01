@@ -92,7 +92,8 @@ build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
 # explicit or inferred type arguments, curried ordinary clauses, contextual
 # `using` parameters, single-evaluation class/trait receiver expressions,
 # per-call `summonFrom` reduction, and `transparent inline def` result
-# refinement.
+# refinement. Boolean `inline` parameters can drive compile-time `inline if`
+# branch selection.
 build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
   --output /tmp/inline-summon-from \
   cpp-examples/InlineSummonFrom.scala

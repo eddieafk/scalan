@@ -174,6 +174,52 @@ object Selectors {
 
   transparent inline def nonGenericRefined(): TransparentResult =
     new PreciseResult("non-generic-transparent")
+
+  inline def choose(inline condition: Boolean, value: String): String =
+    inline if (condition) {
+      "inline-true:" + value + ":" + value
+    } else {
+      "inline-false:" + value + ":" + value
+    }
+
+  inline def nestedChoose(inline condition: Boolean, value: String): String =
+    "nested-" + choose(condition, value)
+
+  inline def negatedChoose(inline condition: Boolean): String =
+    inline if (!condition) "inline-negated" else "inline-original"
+
+  inline def contextualChoose(inline condition: Boolean)(using
+      named: Named[Int]): String =
+    inline if (condition) {
+      "inline-context:" + named.label()
+    } else {
+      "inline-context-false"
+    }
+
+  inline def curriedChoose(inline condition: Boolean)(value: String): String =
+    inline if (condition) {
+      "inline-curried-true:" + value
+    } else {
+      "inline-curried-false:" + value
+    }
+
+  inline def genericChoose[A](inline condition: Boolean): String =
+    inline if (condition) {
+      summonFrom {
+        case found: Named[A] => "inline-generic:" + found.label()
+        case _ => "inline-generic-fallback"
+      }
+    } else {
+      "inline-generic-false"
+    }
+
+  transparent inline def refinedChoice(
+      inline condition: Boolean): TransparentResult =
+    inline if (condition) {
+      new PreciseResult("inline-transparent-true")
+    } else {
+      new FallbackResult("inline-transparent-false")
+    }
 }
 
 class InstanceSelectors(val instancePrefix: String) {
@@ -201,6 +247,13 @@ class InstanceSelectors(val instancePrefix: String) {
     instancePrefix + value + ":" + value
 
   inline def nonGenericConstant: String = instancePrefix + "constant"
+
+  inline def choose(inline condition: Boolean, value: String): String =
+    inline if (condition) {
+      instancePrefix + "inline-true:" + value
+    } else {
+      instancePrefix + "inline-false:" + value
+    }
 }
 
 trait TraitInstanceSelectors {
@@ -441,6 +494,21 @@ object Main {
     nextInstances().nonGenericConstant
   def nonGenericTransparent: String =
     Selectors.nonGenericRefined().preciseOnly()
+  def inlineTrue: String = Selectors.choose(true, nextNonGeneric())
+  def inlineFalse: String = Selectors.choose(false, "cold")
+  def nestedInlineChoice: String =
+    Selectors.nestedChoose(!false, "nested")
+  def negatedInlineChoice: String = Selectors.negatedChoose(false)
+  def contextualInlineChoice: String = Selectors.contextualChoose(true)
+  def curriedInlineChoice: String =
+    Selectors.curriedChoose(false)(nextValue())
+  def genericInlineChoice: String = Selectors.genericChoose[Int](true)
+  def instanceInlineChoice: String =
+    nextInstances().choose(false, "chosen")
+  def transparentInlineChoiceTrue: String =
+    Selectors.refinedChoice(true).preciseOnly()
+  def transparentInlineChoiceFalse: String =
+    Selectors.refinedChoice(false).fallbackOnly()
 
   def main(args: Array[String]): Unit = {
     println(intSelected)
@@ -504,6 +572,16 @@ object Main {
     println(effectfulReceiverNonGeneric)
     println(effectfulReceiverNonGenericConstant)
     println(nonGenericTransparent)
+    println(inlineTrue)
+    println(inlineFalse)
+    println(nestedInlineChoice)
+    println(negatedInlineChoice)
+    println(contextualInlineChoice)
+    println(curriedInlineChoice)
+    println(genericInlineChoice)
+    println(instanceInlineChoice)
+    println(transparentInlineChoiceTrue)
+    println(transparentInlineChoiceFalse)
   }
 }
 )";
@@ -523,7 +601,26 @@ object Main {
   transparent def unsupportedTransparent[A](): String = "transparent"
   inline def missingBody[A]: String
   inline def recursive[A]: String = recursive[A]
+  inline def invalidInlineParameterType(
+      inline count: Int): String = "invalid-type"
+  def runtimeCondition(): Boolean = true
+  inline def requiresConstant(inline condition: Boolean): String =
+    inline if (condition) "constant" else "not-constant"
+  def invalidInlineArgument: String = requiresConstant(runtimeCondition())
+  inline def requiresInlineCondition(condition: Boolean): String =
+    inline if (condition) "constant" else "not-constant"
+  def invalidInlineCondition: String = requiresInlineCondition(true)
   inline val unsupported: String = "value"
+}
+
+)";
+  constexpr const char* structurallyInvalidSource =
+      R"(package demo.invalidinlineplacement
+
+object Main {
+  def misplacedInlineParameter(inline condition: Boolean): String = "invalid"
+  def misplacedInlineIf(condition: Boolean): String =
+    inline if (condition) "invalid" else "invalid"
 }
 
 )";
@@ -549,6 +646,10 @@ object Main {
   scalanative::support::DiagnosticEngine invalidDiagnostics;
   const scalanative::tools::build::BuildResult invalid = driver.buildSource(
       "InvalidInlineSummonFrom.scala", invalidSource, {}, invalidDiagnostics);
+  scalanative::support::DiagnosticEngine structuralInvalidDiagnostics;
+  const scalanative::tools::build::BuildResult structuralInvalid =
+      driver.buildSource("StructurallyInvalidInline.scala", structurallyInvalidSource,
+                         {}, structuralInvalidDiagnostics);
 
   if (!result.ok) {
     if (contains(result.diagnosticsText, "clang toolchain not found")) {
@@ -685,6 +786,26 @@ object Main {
       result.nirText, "demo.inlinecalls.Main.effectfulReceiverNonGenericConstant");
   const std::string_view nonGenericTransparent =
       functionText(result.nirText, "demo.inlinecalls.Main.nonGenericTransparent");
+  const std::string_view inlineTrue =
+      functionText(result.nirText, "demo.inlinecalls.Main.inlineTrue");
+  const std::string_view inlineFalse =
+      functionText(result.nirText, "demo.inlinecalls.Main.inlineFalse");
+  const std::string_view nestedInlineChoice =
+      functionText(result.nirText, "demo.inlinecalls.Main.nestedInlineChoice");
+  const std::string_view negatedInlineChoice =
+      functionText(result.nirText, "demo.inlinecalls.Main.negatedInlineChoice");
+  const std::string_view contextualInlineChoice =
+      functionText(result.nirText, "demo.inlinecalls.Main.contextualInlineChoice");
+  const std::string_view curriedInlineChoice =
+      functionText(result.nirText, "demo.inlinecalls.Main.curriedInlineChoice");
+  const std::string_view genericInlineChoice =
+      functionText(result.nirText, "demo.inlinecalls.Main.genericInlineChoice");
+  const std::string_view instanceInlineChoice =
+      functionText(result.nirText, "demo.inlinecalls.Main.instanceInlineChoice");
+  const std::string_view transparentInlineChoiceTrue =
+      functionText(result.nirText, "demo.inlinecalls.Main.transparentInlineChoiceTrue");
+  const std::string_view transparentInlineChoiceFalse = functionText(
+      result.nirText, "demo.inlinecalls.Main.transparentInlineChoiceFalse");
 
   const bool valid =
       status == 0 &&
@@ -740,7 +861,17 @@ object Main {
               "non-generic-curried:first:second\n"
               "receiver-effect\neffectful-instance:receiver:receiver\n"
               "receiver-effect\neffectful-instance:constant\n"
-              "non-generic-transparent\n" &&
+              "non-generic-transparent\n"
+              "non-generic-effect\ninline-true:plain:plain\n"
+              "inline-false:cold:cold\n"
+              "nested-inline-true:nested:nested\n"
+              "inline-negated\n"
+              "inline-context:member-int\n"
+              "effect\ninline-curried-false:value\n"
+              "inline-generic:member-int\n"
+              "receiver-effect\neffectful-instance:inline-false:chosen\n"
+              "inline-transparent-true\n"
+              "inline-transparent-false\n" &&
       !invalid.ok &&
       contains(invalid.diagnosticsText,
                "no given value found for context parameter value of type") &&
@@ -755,6 +886,18 @@ object Main {
       contains(invalid.diagnosticsText, "inline method requires an implementation") &&
       contains(invalid.diagnosticsText,
                "recursive inline call-site specialization is not supported yet") &&
+      !structuralInvalid.ok &&
+      contains(structuralInvalid.diagnosticsText,
+               "inline parameters are only supported on inline methods") &&
+      contains(invalid.diagnosticsText,
+               "inline parameters currently require type Boolean") &&
+      contains(invalid.diagnosticsText,
+               "argument for inline parameter condition must be a compile-time "
+               "Boolean constant") &&
+      contains(invalid.diagnosticsText,
+               "inline if condition must be a compile-time Boolean constant") &&
+      contains(structuralInvalid.diagnosticsText,
+               "inline if is only supported inside an inline method") &&
       contains(invalid.diagnosticsText,
                "'inline' must modify a def in this milestone") &&
       contains(intSelected, "call %demo.inlinecalls.Main.intNamed()") &&
@@ -1006,21 +1149,63 @@ object Main {
                 "%demo.inlinecalls.InstanceSelectors.nonGenericConstant") &&
       contains(nonGenericTransparent, "demo.inlinecalls.PreciseResult") &&
       contains(nonGenericTransparent, ".preciseOnly") &&
-      !contains(nonGenericTransparent, "%demo.inlinecalls.Selectors.nonGenericRefined");
+      !contains(nonGenericTransparent,
+                "%demo.inlinecalls.Selectors.nonGenericRefined") &&
+      contains(inlineTrue, "\"inline-true:\"") &&
+      !contains(inlineTrue, "inline-false:") &&
+      countOccurrences(inlineTrue, "nextNonGeneric") == 1 &&
+      !contains(inlineTrue, "%demo.inlinecalls.Selectors.choose") &&
+      contains(inlineFalse, "\"inline-false:\"") &&
+      !contains(inlineFalse, "inline-true:") &&
+      !contains(inlineFalse, "%demo.inlinecalls.Selectors.choose") &&
+      contains(nestedInlineChoice, "\"inline-true:\"") &&
+      !contains(nestedInlineChoice, "inline-false:") &&
+      !contains(nestedInlineChoice, "%demo.inlinecalls.Selectors.nestedChoose") &&
+      !contains(nestedInlineChoice, "%demo.inlinecalls.Selectors.choose") &&
+      contains(negatedInlineChoice, "\"inline-negated\"") &&
+      !contains(negatedInlineChoice, "inline-original") &&
+      countOccurrences(contextualInlineChoice, "Main.intNamed") == 1 &&
+      !contains(contextualInlineChoice, "inline-context-false") &&
+      !contains(contextualInlineChoice,
+                "%demo.inlinecalls.Selectors.contextualChoose") &&
+      contains(curriedInlineChoice, "\"inline-curried-false:\"") &&
+      !contains(curriedInlineChoice, "inline-curried-true:") &&
+      countOccurrences(curriedInlineChoice, "nextValue") == 1 &&
+      !contains(curriedInlineChoice, "%demo.inlinecalls.Selectors.curriedChoose") &&
+      contains(genericInlineChoice, "\"inline-generic:\"") &&
+      !contains(genericInlineChoice, "inline-generic-false") &&
+      countOccurrences(genericInlineChoice, "Main.intNamed") == 1 &&
+      !contains(genericInlineChoice, "%demo.inlinecalls.Selectors.genericChoose") &&
+      contains(instanceInlineChoice, "\"inline-false:\"") &&
+      !contains(instanceInlineChoice, "inline-true:") &&
+      countOccurrences(instanceInlineChoice, "nextInstances") == 1 &&
+      !contains(instanceInlineChoice, "%demo.inlinecalls.InstanceSelectors.choose") &&
+      contains(transparentInlineChoiceTrue, "demo.inlinecalls.PreciseResult") &&
+      contains(transparentInlineChoiceTrue, ".preciseOnly") &&
+      !contains(transparentInlineChoiceTrue, "demo.inlinecalls.FallbackResult") &&
+      !contains(transparentInlineChoiceTrue,
+                "%demo.inlinecalls.Selectors.refinedChoice") &&
+      contains(transparentInlineChoiceFalse, "demo.inlinecalls.FallbackResult") &&
+      contains(transparentInlineChoiceFalse, ".fallbackOnly") &&
+      !contains(transparentInlineChoiceFalse, "demo.inlinecalls.PreciseResult") &&
+      !contains(transparentInlineChoiceFalse,
+                "%demo.inlinecalls.Selectors.refinedChoice");
   return valid
              ? 0
              : fail(
                    "inline summonFrom smoke test failed (output='" + text +
                    "', diagnostics='" + result.diagnosticsText +
                    "', invalid-diagnostics='" + invalid.diagnosticsText +
-                   "', int-selected='" + std::string(intSelected) +
-                   "', local-selected='" + std::string(localSelected) +
-                   "', fallback-selected='" + std::string(fallbackSelected) +
-                   "', nested-selected='" + std::string(nestedSelected) +
-                   "', value-selected='" + std::string(valueSelected) +
-                   "', value-fallback='" + std::string(valueFallback) +
-                   "', nested-value-selected='" + std::string(nestedValueSelected) +
-                   "', passed-int='" + std::string(passedInt) + "', passed-string='" +
+                   "', structural-invalid-diagnostics='" +
+                   structuralInvalid.diagnosticsText + "', int-selected='" +
+                   std::string(intSelected) + "', local-selected='" +
+                   std::string(localSelected) + "', fallback-selected='" +
+                   std::string(fallbackSelected) + "', nested-selected='" +
+                   std::string(nestedSelected) + "', value-selected='" +
+                   std::string(valueSelected) + "', value-fallback='" +
+                   std::string(valueFallback) + "', nested-value-selected='" +
+                   std::string(nestedValueSelected) + "', passed-int='" +
+                   std::string(passedInt) + "', passed-string='" +
                    std::string(passedString) + "', inferred-int='" +
                    std::string(inferredInt) + "', inferred-fallback='" +
                    std::string(inferredFallback) + "', inferred-local='" +
@@ -1096,7 +1281,18 @@ object Main {
                    "', effectful-receiver-non-generic-constant='" +
                    std::string(effectfulReceiverNonGenericConstant) +
                    "', non-generic-transparent='" + std::string(nonGenericTransparent) +
-                   "')");
+                   "', inline-true='" + std::string(inlineTrue) + "', inline-false='" +
+                   std::string(inlineFalse) + "', nested-inline-choice='" +
+                   std::string(nestedInlineChoice) + "', negated-inline-choice='" +
+                   std::string(negatedInlineChoice) + "', contextual-inline-choice='" +
+                   std::string(contextualInlineChoice) + "', curried-inline-choice='" +
+                   std::string(curriedInlineChoice) + "', generic-inline-choice='" +
+                   std::string(genericInlineChoice) + "', instance-inline-choice='" +
+                   std::string(instanceInlineChoice) +
+                   "', transparent-inline-choice-true='" +
+                   std::string(transparentInlineChoiceTrue) +
+                   "', transparent-inline-choice-false='" +
+                   std::string(transparentInlineChoiceFalse) + "')");
 }
 
 } // namespace

@@ -41,7 +41,9 @@ private:
                                              const Token& keyword);
   [[nodiscard]] std::vector<AstTypeParameter> parseTypeParameterList();
   [[nodiscard]] std::vector<std::string>
-  parseParameterList(bool allowModifiers = false, bool* contextualClause = nullptr);
+  parseParameterList(bool allowModifiers = false,
+                     bool* contextualClause = nullptr,
+                     std::vector<bool>* inlineParameters = nullptr);
   [[nodiscard]] std::vector<AstExpression> parseArgumentList();
   [[nodiscard]] std::string parseTypeName(bool stopAtUpperBound = false,
                                           bool stopAtRightBracket = false,

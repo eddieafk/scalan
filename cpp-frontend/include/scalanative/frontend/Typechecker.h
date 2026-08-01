@@ -79,6 +79,7 @@ struct TypedDeclaration {
   std::vector<std::string> parameters;
   std::vector<TypeInfo> parameterTypes;
   std::vector<bool> contextualParameters;
+  std::vector<bool> inlineParameters;
   std::vector<std::size_t> parameterClauseSizes;
   std::vector<bool> contextualParameterClauses;
   std::vector<std::string> accessorParameters;
@@ -173,6 +174,7 @@ struct SymbolInfo {
   std::vector<std::string> parameters;
   std::vector<TypeInfo> parameterTypes;
   std::vector<bool> contextualParameters;
+  std::vector<bool> inlineParameters;
   std::vector<std::size_t> parameterClauseSizes;
   std::vector<bool> contextualParameterClauses;
   bool hasImplementation = true;
@@ -180,6 +182,7 @@ struct SymbolInfo {
   bool isAnonymousGiven = false;
   bool isTransparent = false;
   bool isInline = false;
+  bool isInlineParameter = false;
   bool isContextParameter = false;
   bool isModuleMember = false;
   bool isInstanceMember = false;
@@ -187,6 +190,7 @@ struct SymbolInfo {
   std::size_t captureParameterCount = 0;
   std::size_t contextPrerequisiteCount = 0;
   std::size_t contextualNestingDepth = 0;
+  std::optional<bool> inlineBooleanValue;
   AstExpression inlineBody;
 };
 
@@ -252,6 +256,8 @@ private:
   [[nodiscard]] TypeInfo inferExpressionTypeImpl(const AstExpression& expression,
                                                  Scope& scope,
                                                  const TypeInfo* expectedType);
+  [[nodiscard]] std::optional<bool>
+  constantBooleanValue(const AstExpression& expression, const Scope& scope) const;
   [[nodiscard]] TypeInfo inferNewType(const AstExpression& expression, Scope& scope);
   [[nodiscard]] TypeInfo inferSelectType(const AstExpression& expression, Scope& scope);
   [[nodiscard]] std::string inferArrayElementTypeName(const AstExpression& expression,
@@ -421,6 +427,8 @@ private:
   std::vector<AstExpression> zoneBodiesToAnalyze_;
   std::string currentPackageName_;
   std::size_t zoneInferenceDepth_ = 0;
+  std::size_t inlineExpansionDepth_ = 0;
+  bool inlineExpansionHasInvalidArgument_ = false;
 };
 
 [[nodiscard]] const char* simpleTypeKindName(SimpleTypeKind kind);

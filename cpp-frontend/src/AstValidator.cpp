@@ -228,6 +228,12 @@ bool AstValidator::validateDeclaration(const AstDeclaration& declaration,
                       "contextual parameter metadata is inconsistent");
     ok = false;
   }
+  if (!declaration.inlineParameters.empty() &&
+      declaration.inlineParameters.size() != declaration.parameters.size()) {
+    diagnostics.error(declaration.span,
+                      "inline parameter metadata is inconsistent");
+    ok = false;
+  }
   if (declaration.parameterClauseSizes.size() !=
       declaration.contextualParameterClauses.size()) {
     diagnostics.error(declaration.span,
@@ -266,6 +272,22 @@ bool AstValidator::validateDeclaration(const AstDeclaration& declaration,
   }
   ok = validateParameterNames(declaration.parameters, declaration.span, diagnostics) &&
        ok;
+  for (std::size_t i = 0; i < declaration.inlineParameters.size(); ++i) {
+    if (!declaration.inlineParameters[i]) {
+      continue;
+    }
+    if (declaration.kind != AstDeclarationKind::Def || !declaration.isInline) {
+      diagnostics.error(declaration.span,
+                        "inline parameters are only supported on inline methods");
+      ok = false;
+    }
+    if (i < declaration.contextualParameters.size() &&
+        declaration.contextualParameters[i]) {
+      diagnostics.error(declaration.span,
+                        "contextual inline parameters are not supported yet");
+      ok = false;
+    }
+  }
   for (std::size_t i = 0; i < declaration.contextualParameters.size(); ++i) {
     if (!declaration.contextualParameters[i]) {
       continue;
@@ -329,7 +351,7 @@ bool AstValidator::validateDeclaration(const AstDeclaration& declaration,
       ok = false;
     }
     for (const AstExpression& expression : declaration.constructorBody) {
-      ok = validateExpression(expression, diagnostics) && ok;
+      ok = validateExpression(expression, diagnostics, false) && ok;
     }
     ok = validateScope(declaration.members, diagnostics, false, false) && ok;
     break;
@@ -358,7 +380,9 @@ bool AstValidator::validateDeclaration(const AstDeclaration& declaration,
     break;
   case AstDeclarationKind::Def:
     if (declaration.hasInitializer) {
-      ok = validateExpression(declaration.initializer, diagnostics) && ok;
+      ok = validateExpression(declaration.initializer, diagnostics,
+                              declaration.isInline) &&
+           ok;
     }
     break;
   case AstDeclarationKind::Val:
@@ -367,7 +391,7 @@ bool AstValidator::validateDeclaration(const AstDeclaration& declaration,
       diagnostics.warning(declaration.span,
                           "value declaration has no initializer in this subset");
     } else if (declaration.hasInitializer) {
-      ok = validateExpression(declaration.initializer, diagnostics) && ok;
+      ok = validateExpression(declaration.initializer, diagnostics, false) && ok;
     }
     break;
   }
@@ -376,8 +400,19 @@ bool AstValidator::validateDeclaration(const AstDeclaration& declaration,
 }
 
 bool AstValidator::validateExpression(const AstExpression& expression,
-                                      support::DiagnosticEngine& diagnostics) const {
+                                      support::DiagnosticEngine& diagnostics,
+                                      bool allowInlineExpressions) const {
   bool ok = true;
+  if (expression.isInline && expression.kind != AstExpressionKind::If) {
+    diagnostics.error(expression.span,
+                      "inline expression metadata requires an if expression");
+    ok = false;
+  }
+  if (expression.isInline && !allowInlineExpressions) {
+    diagnostics.error(expression.span,
+                      "inline if is only supported inside an inline method");
+    ok = false;
+  }
   switch (expression.kind) {
   case AstExpressionKind::Empty:
     diagnostics.error(expression.span, "empty expression");
@@ -568,7 +603,7 @@ bool AstValidator::validateExpression(const AstExpression& expression,
   }
 
   for (const AstExpression& child : expression.children) {
-    ok = validateExpression(child, diagnostics) && ok;
+    ok = validateExpression(child, diagnostics, allowInlineExpressions) && ok;
   }
   return ok;
 }

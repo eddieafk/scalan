@@ -18,7 +18,8 @@ private:
                                          support::DiagnosticEngine& diagnostics,
                                          bool isTopLevel, bool hasStableOwner) const;
   [[nodiscard]] bool validateExpression(const AstExpression& expression,
-                                        support::DiagnosticEngine& diagnostics) const;
+                                        support::DiagnosticEngine& diagnostics,
+                                        bool allowInlineExpressions) const;
 };
 
 } // namespace scalanative::frontend

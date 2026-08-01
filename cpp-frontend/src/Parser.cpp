@@ -111,6 +111,7 @@ void appendContextBoundParameters(AstDeclaration& declaration) {
   }
 
   declaration.contextualParameters.resize(declaration.parameters.size(), false);
+  declaration.inlineParameters.resize(declaration.parameters.size(), false);
   std::size_t insertionIndex = declaration.parameters.size();
   bool hasDependentPlacement = false;
   for (const std::string& witnessName : namedWitnesses) {
@@ -136,6 +137,9 @@ void appendContextBoundParameters(AstDeclaration& declaration) {
   declaration.contextualParameters.insert(declaration.contextualParameters.begin() +
                                               insertionIndex,
                                           contextParameters.size(), true);
+  declaration.inlineParameters.insert(declaration.inlineParameters.begin() +
+                                          insertionIndex,
+                                      contextParameters.size(), false);
   declaration.parameterClauseSizes.clear();
   declaration.contextualParameterClauses.clear();
 }
@@ -746,7 +750,9 @@ AstDeclaration Parser::parseDef(const Token& keyword,
   bool sawContextualClause = false;
   while (check(TokenKind::LeftParen)) {
     bool contextualClause = false;
-    std::vector<std::string> parameters = parseParameterList(false, &contextualClause);
+    std::vector<bool> inlineParameters;
+    std::vector<std::string> parameters =
+        parseParameterList(false, &contextualClause, &inlineParameters);
     if (sawContextualClause && !contextualClause) {
       diagnostics_.error(keyword.span,
                          "ordinary parameter clauses cannot follow a using clause");
@@ -760,6 +766,9 @@ AstDeclaration Parser::parseDef(const Token& keyword,
                                   parameters.end());
     declaration.contextualParameters.insert(declaration.contextualParameters.end(),
                                             parameters.size(), contextualClause);
+    declaration.inlineParameters.insert(declaration.inlineParameters.end(),
+                                        inlineParameters.begin(),
+                                        inlineParameters.end());
     declaration.parameterClauseSizes.push_back(parameters.size());
     declaration.contextualParameterClauses.push_back(contextualClause);
     sawParameterClause = true;
@@ -1033,8 +1042,9 @@ std::vector<AstTypeParameter> Parser::parseTypeParameterList() {
   return parameters;
 }
 
-std::vector<std::string> Parser::parseParameterList(bool allowModifiers,
-                                                    bool* contextualClause) {
+std::vector<std::string>
+Parser::parseParameterList(bool allowModifiers, bool* contextualClause,
+                           std::vector<bool>* inlineParameters) {
   std::vector<std::string> parameters;
   if (!consume(TokenKind::LeftParen, "expected '('")) {
     return parameters;
@@ -1048,6 +1058,13 @@ std::vector<std::string> Parser::parseParameterList(bool allowModifiers,
   }
   consumeSeparators();
   while (!isAtEnd() && !check(TokenKind::RightParen)) {
+    bool inlineParameter = false;
+    if (inlineParameters != nullptr && check(TokenKind::Identifier) &&
+        peek().text == "inline" && current_ + 1 < tokens_.size() &&
+        tokens_[current_ + 1].kind == TokenKind::Identifier) {
+      inlineParameter = true;
+      advance();
+    }
     std::string modifier;
     if (allowModifiers &&
         (check(TokenKind::KeywordVal) || check(TokenKind::KeywordVar))) {
@@ -1069,6 +1086,9 @@ std::vector<std::string> Parser::parseParameterList(bool allowModifiers,
       }
     }
     parameters.push_back(std::move(parameter));
+    if (inlineParameters != nullptr) {
+      inlineParameters->push_back(inlineParameter);
+    }
 
     consumeSeparators();
     if (!match(TokenKind::Comma)) {
@@ -1406,6 +1426,16 @@ AstExpression Parser::parsePostfixExpression() {
 }
 
 AstExpression Parser::parsePrimaryExpression() {
+  if (check(TokenKind::Identifier) && peek().text == "inline" &&
+      current_ + 1 < tokens_.size() &&
+      tokens_[current_ + 1].kind == TokenKind::KeywordIf) {
+    const Token modifier = advance();
+    advance();
+    AstExpression expression = parseIfExpression(previous());
+    expression.isInline = true;
+    expression.span = modifier.span;
+    return expression;
+  }
   if (match(TokenKind::Identifier)) {
     if (previous().text == "summonFrom" && check(TokenKind::LeftBrace)) {
       return parseSummonFromExpression(previous());
@@ -1529,6 +1559,8 @@ AstExpression Parser::parseBlockExpression() {
         localExpression.localMethod->parameters = std::move(local.parameters);
         localExpression.localMethod->contextualParameters =
             std::move(local.contextualParameters);
+        localExpression.localMethod->inlineParameters =
+            std::move(local.inlineParameters);
       }
       localExpression.span = local.span;
       localExpression.mutableLocal = local.kind == AstDeclarationKind::Var;
