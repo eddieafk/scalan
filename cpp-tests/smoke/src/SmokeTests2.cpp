@@ -13142,8 +13142,12 @@ int smokeInterflowUnassignedVarPromotion() {
 int runSmokeTests3();
 int runSmokeTests4();
 int runSmokeTests5();
+int runSmokeTests6();
 
 int main() {
+  if (std::getenv("CPP_SCALANATIVE_SMOKE_TESTS6_ONLY") != nullptr) {
+    return runSmokeTests6();
+  }
   if (std::getenv("CPP_SCALANATIVE_SMOKE_TESTS5_ONLY") != nullptr) {
     return runSmokeTests5();
   }
@@ -13160,6 +13164,9 @@ int main() {
     return code;
   }
   if (int code = runSmokeTests5()) {
+    return code;
+  }
+  if (int code = runSmokeTests6()) {
     return code;
   }
   if (int code = smokeBuildConfigurationJson()) {

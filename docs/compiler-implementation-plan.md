@@ -1062,6 +1062,17 @@ Current scaffold status:
   runtime test. Guards, type-pattern alternatives, singleton-value patterns,
   literal strings/floats/chars/`null`, and indentation-only match syntax remain
   later milestones and receive focused diagnostics where applicable.
+  Compiler-owned `scala.compiletime.erasedValue[T]` can now provide the static
+  selector for the same bounded type-pattern reduction. Exact imports, import
+  aliases, and the qualified spelling are recognized. The frontend re-resolves
+  `T` in the concrete inline-application scope, restricts the intrinsic to a
+  braced `inline match`, rejects pattern bindings because no term value exists,
+  and diagnoses abstract call-site types that cannot select a branch. Expanded
+  caller NIR contains only the selected body: the synthetic `$match` local,
+  runtime type tests, and the intrinsic itself are absent. Focused coverage is
+  isolated in `SmokeTests6.cpp` to preserve incremental harness build times and
+  exercises reference/scalar/fallback selection, aliased and qualified forms,
+  transparent-result refinement, runtime output, diagnostics, and NIR erasure.
   Constants propagate through nested inline calls and work with generic evidence
   selection, contextual and curried calls, effectful instance receivers, and
   transparent-result refinement. Symbolic Boolean and integer inline parameters

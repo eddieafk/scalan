@@ -6,6 +6,10 @@ namespace scalanative::support {
 
 struct StdNames final {
   inline static constexpr std::string_view ScalaPackage = "scala";
+  inline static constexpr std::string_view ScalaCompiletime = "scala.compiletime";
+  inline static constexpr std::string_view ErasedValue = "erasedValue";
+  inline static constexpr std::string_view ScalaCompiletimeErasedValue =
+      "scala.compiletime.erasedValue";
   inline static constexpr std::string_view JavaLangObject = "java.lang.Object";
   inline static constexpr std::string_view JavaLangThrowable = "java.lang.Throwable";
   inline static constexpr std::string_view JavaLangError = "java.lang.Error";

@@ -189,6 +189,7 @@ struct SymbolInfo {
   bool isModuleMember = false;
   bool isInstanceMember = false;
   bool isLexicalValue = false;
+  bool isErasedCompileTimeValue = false;
   std::size_t captureParameterCount = 0;
   std::size_t contextPrerequisiteCount = 0;
   std::size_t contextualNestingDepth = 0;
@@ -263,6 +264,10 @@ private:
   [[nodiscard]] bool
   isSupportedInlineValueInitializer(const AstExpression& expression,
                                     const Scope& scope) const;
+  [[nodiscard]] bool isErasedValueCallee(const AstExpression& expression,
+                                         const Scope& scope) const;
+  [[nodiscard]] bool isErasedValueExpression(const AstExpression& expression,
+                                             const Scope& scope) const;
   [[nodiscard]] std::optional<bool>
   constantBooleanValue(const AstExpression& expression, const Scope& scope) const;
   [[nodiscard]] std::optional<TypeInfo>
@@ -443,6 +448,7 @@ private:
   std::string currentPackageName_;
   std::size_t zoneInferenceDepth_ = 0;
   std::size_t inlineExpansionDepth_ = 0;
+  std::size_t erasedValueSelectorDepth_ = 0;
 };
 
 [[nodiscard]] const char* simpleTypeKindName(SimpleTypeKind kind);

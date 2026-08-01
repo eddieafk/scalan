@@ -1611,6 +1611,7 @@ TypedModule Typechecker::typecheck(const AstModule& module) {
   currentPackageName_ = module.packageName;
   zoneInferenceDepth_ = 0;
   inlineExpansionDepth_ = 0;
+  erasedValueSelectorDepth_ = 0;
   TypedModule typed;
   typed.packageName = module.packageName;
   Scope scope;
@@ -2356,6 +2357,28 @@ TypedDeclaration Typechecker::typecheckDeclaration(const AstDeclaration& declara
 }
 
 void Typechecker::addRuntimeBuiltins(Scope& scope) {
+  SymbolInfo compiletime;
+  compiletime.kind = AstDeclarationKind::Object;
+  compiletime.name = "compiletime";
+  compiletime.symbolName = std::string(support::StdNames::ScalaCompiletime);
+  compiletime.type =
+      TypeInfo{SimpleTypeKind::Object, compiletime.symbolName};
+  globalSymbols_[compiletime.symbolName] = compiletime;
+
+  SymbolInfo erasedValue;
+  erasedValue.kind = AstDeclarationKind::Def;
+  erasedValue.name = std::string(support::StdNames::ErasedValue);
+  erasedValue.symbolName =
+      std::string(support::StdNames::ScalaCompiletimeErasedValue);
+  erasedValue.type = TypeInfo{SimpleTypeKind::Object, "Object"};
+  TypeParameterInfo erasedType;
+  erasedType.name = "T";
+  erasedType.symbolName = erasedValue.symbolName + ".T";
+  erasedType.lowerBound = TypeInfo{SimpleTypeKind::Nothing, "Nothing"};
+  erasedType.upperBound = TypeInfo{SimpleTypeKind::Object, "Object"};
+  erasedValue.typeParameters.push_back(std::move(erasedType));
+  globalSymbols_[erasedValue.symbolName] = std::move(erasedValue);
+
   SymbolInfo notImplemented;
   notImplemented.kind = AstDeclarationKind::Def;
   notImplemented.name = std::string(support::StdNames::NotImplemented);
@@ -4655,6 +4678,43 @@ bool Typechecker::isSupportedInlineValueInitializer(
   }
 }
 
+bool Typechecker::isErasedValueCallee(const AstExpression& expression,
+                                      const Scope& scope) const {
+  if (expression.kind == AstExpressionKind::Identifier) {
+    const auto symbol = scope.find(expression.text);
+    return symbol != scope.end() &&
+           symbol->second.symbolName ==
+               support::StdNames::ScalaCompiletimeErasedValue;
+  }
+
+  std::function<std::optional<std::string>(const AstExpression&)> qualifiedPath;
+  qualifiedPath = [&](const AstExpression& candidate)
+      -> std::optional<std::string> {
+    if (candidate.kind == AstExpressionKind::Identifier) {
+      return candidate.text;
+    }
+    if (candidate.kind != AstExpressionKind::Select ||
+        candidate.children.size() != 1) {
+      return std::nullopt;
+    }
+    std::optional<std::string> receiver =
+        qualifiedPath(candidate.children.front());
+    return receiver.has_value()
+               ? std::optional<std::string>(*receiver + "." + candidate.text)
+               : std::nullopt;
+  };
+  const std::optional<std::string> path = qualifiedPath(expression);
+  return path.has_value() &&
+         *path == support::StdNames::ScalaCompiletimeErasedValue;
+}
+
+bool Typechecker::isErasedValueExpression(const AstExpression& expression,
+                                          const Scope& scope) const {
+  return expression.kind == AstExpressionKind::TypeApply &&
+         expression.children.size() == 1 &&
+         isErasedValueCallee(expression.children.front(), scope);
+}
+
 std::optional<bool>
 Typechecker::constantBooleanValue(const AstExpression& expression,
                                   const Scope& scope) const {
@@ -4770,6 +4830,11 @@ Typechecker::constantBooleanValue(const AstExpression& expression,
 std::optional<TypeInfo>
 Typechecker::specializedStaticType(const AstExpression& expression,
                                    const Scope& scope) const {
+  if (isErasedValueExpression(expression, scope) &&
+      typeArgumentsFor(expression).size() == 1) {
+    return staticExpressionType(
+        typeFromDeclaredName(expression.declaredType, &scope, &expression.span));
+  }
   if (expression.kind == AstExpressionKind::Identifier) {
     if (auto symbol = scope.find(expression.text);
         symbol != scope.end() && symbol->second.specializedStaticType.has_value()) {
@@ -5401,6 +5466,12 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
       diagnostics_.error(expression.span, "unresolved identifier: " + expression.text);
       return TypeInfo{SimpleTypeKind::Unknown, "Unknown"};
     }
+    if (found->second.isErasedCompileTimeValue) {
+      diagnostics_.error(
+          expression.span,
+          "erasedValue inline match patterns cannot bind a runtime value");
+      return TypeInfo{SimpleTypeKind::Object, "Object"};
+    }
     if ((found->second.kind == AstDeclarationKind::Class ||
          found->second.kind == AstDeclarationKind::Trait) &&
         companionTypeNames_.contains(found->second.symbolName)) {
@@ -5497,6 +5568,7 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
     const AstExpression& callee = expression.children.front();
     const bool isSizeOf = callee.kind == AstExpressionKind::Identifier &&
                           callee.text == support::StdNames::SizeOf;
+    const bool isErasedValue = isErasedValueCallee(callee, scope);
     const bool isSummon =
         callee.kind == AstExpressionKind::Identifier &&
         (callee.text == SummonName || callee.text == ImplicitlyName);
@@ -5511,6 +5583,21 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
         callee.text == support::StdNames::ArrayEmpty &&
         callee.children.front().kind == AstExpressionKind::Identifier &&
         callee.children.front().text == "Array";
+    if (isErasedValue) {
+      if (typeArguments.size() != 1) {
+        diagnostics_.error(expression.span,
+                           "erasedValue requires exactly one type argument");
+        return TypeInfo{SimpleTypeKind::Object, "Object"};
+      }
+      (void)typeFromDeclaredName(expression.declaredType, &scope,
+                                 &expression.span);
+      if (erasedValueSelectorDepth_ == 0) {
+        diagnostics_.error(
+            expression.span,
+            "erasedValue may only be used as the selector of an inline match");
+      }
+      return TypeInfo{SimpleTypeKind::Object, "Object"};
+    }
     if (isSizeOf) {
       if (typeArguments.size() != 1) {
         diagnostics_.error(expression.span,
@@ -5645,7 +5732,23 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
       return TypeInfo{SimpleTypeKind::Unknown, "Unknown"};
     }
 
-    const TypeInfo receiverType = inferExpressionType(callee.children.front(), scope);
+    const SymbolInfo* erasedReceiver = nullptr;
+    if (callee.children.front().kind == AstExpressionKind::Identifier) {
+      const auto receiver = scope.find(callee.children.front().text);
+      if (receiver != scope.end() &&
+          receiver->second.isErasedCompileTimeValue) {
+        erasedReceiver = &receiver->second;
+      }
+    }
+    if (erasedReceiver != nullptr && isCast) {
+      diagnostics_.error(
+          callee.children.front().span,
+          "erasedValue inline match patterns cannot bind a runtime value");
+    }
+    const TypeInfo receiverType =
+        erasedReceiver == nullptr
+            ? inferExpressionType(callee.children.front(), scope)
+            : TypeInfo{SimpleTypeKind::Object, "Object"};
     if (receiverType.kind != SimpleTypeKind::Object &&
         receiverType.kind != SimpleTypeKind::Null &&
         receiverType.kind != SimpleTypeKind::Unknown) {
@@ -6834,6 +6937,11 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
     }
     {
       Scope blockScope = scope;
+      const bool isInlineMatchBlock =
+          !expression.children.empty() &&
+          expression.children.back().kind == AstExpressionKind::If &&
+          expression.children.back().isInline &&
+          expression.children.back().text == "match";
       std::size_t contextualNestingDepth = 1;
       for (const auto& [name, candidate] : blockScope) {
         (void)name;
@@ -7006,7 +7114,17 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
           return;
         }
 
+        const bool erasedInlineMatchSelector =
+            isInlineMatchBlock && !local.mutableLocal &&
+            local.text.starts_with("$match") && local.children.size() == 1 &&
+            isErasedValueExpression(local.children.front(), blockScope);
+        if (erasedInlineMatchSelector) {
+          ++erasedValueSelectorDepth_;
+        }
         TypeInfo localType = localDeclarationType(local);
+        if (erasedInlineMatchSelector) {
+          --erasedValueSelectorDepth_;
+        }
         if (local.span.isValid()) {
           auto sameSpan = [&](const TypedExpressionInfo& info) {
             return info.span.source == local.span.source &&
@@ -7032,6 +7150,7 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
         symbol.isAnonymousGiven = local.isAnonymousGiven;
         symbol.contextualNestingDepth = contextualNestingDepth;
         symbol.isLexicalValue = true;
+        symbol.isErasedCompileTimeValue = erasedInlineMatchSelector;
         if (!local.mutableLocal && !local.children.empty() &&
             local.text.starts_with("$match")) {
           symbol.specializedBooleanValue =

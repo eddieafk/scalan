@@ -6,7 +6,8 @@ add_executable(
   src/SmokeTests2.cpp
   src/SmokeTests3.cpp
   src/SmokeTests4.cpp
-  src/SmokeTests5.cpp)
+  src/SmokeTests5.cpp
+  src/SmokeTests6.cpp)
 
 target_link_libraries(
   cpp-smoke-tests

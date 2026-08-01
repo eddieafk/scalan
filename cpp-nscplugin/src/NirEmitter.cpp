@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <functional>
+#include <optional>
 #include <sstream>
 #include <string_view>
 #include <unordered_map>
@@ -799,6 +800,43 @@ std::string resolveIdentifierName(const std::string& name,
     return imported->second;
   }
   return name;
+}
+
+bool isErasedValueCallee(const frontend::AstExpression& expression,
+                         const ValueContext& context) {
+  using frontend::AstExpressionKind;
+  if (expression.kind == AstExpressionKind::Identifier) {
+    return resolveIdentifierName(expression.text, context) ==
+           support::StdNames::ScalaCompiletimeErasedValue;
+  }
+
+  std::function<std::optional<std::string>(const frontend::AstExpression&)>
+      qualifiedPath;
+  qualifiedPath = [&](const frontend::AstExpression& candidate)
+      -> std::optional<std::string> {
+    if (candidate.kind == AstExpressionKind::Identifier) {
+      return candidate.text;
+    }
+    if (candidate.kind != AstExpressionKind::Select ||
+        candidate.children.size() != 1) {
+      return std::nullopt;
+    }
+    std::optional<std::string> receiver =
+        qualifiedPath(candidate.children.front());
+    return receiver.has_value()
+               ? std::optional<std::string>(*receiver + "." + candidate.text)
+               : std::nullopt;
+  };
+  const std::optional<std::string> path = qualifiedPath(expression);
+  return path.has_value() &&
+         *path == support::StdNames::ScalaCompiletimeErasedValue;
+}
+
+bool isErasedValueExpression(const frontend::AstExpression& expression,
+                             const ValueContext& context) {
+  return expression.kind == frontend::AstExpressionKind::TypeApply &&
+         expression.children.size() == 1 &&
+         isErasedValueCallee(expression.children.front(), context);
 }
 
 bool shouldUseImplicitThis(const std::string& name, const ValueContext& context) {
@@ -1966,6 +2004,15 @@ nir::Value scopedBodyValueFor(const frontend::AstExpression& expression,
   }
 
   ValueContext blockContext = context;
+  const frontend::TypedContextApplication* selectedMatch =
+      expression.children.empty()
+          ? nullptr
+          : contextApplicationFor(expression.children.back(), context);
+  const bool hasReducedInlineMatch =
+      selectedMatch != nullptr && selectedMatch->hasSelectedBranch &&
+      expression.children.back().kind == AstExpressionKind::If &&
+      expression.children.back().isInline &&
+      expression.children.back().text == "match";
   std::vector<nir::Value> values;
   values.reserve(expression.children.size());
   for (const frontend::AstExpression& child : expression.children) {
@@ -1975,6 +2022,11 @@ nir::Value scopedBodyValueFor(const frontend::AstExpression& expression,
     }
     if (child.localMethod != nullptr) {
       values.push_back(nir::unitValue(child.span));
+      continue;
+    }
+    if (hasReducedInlineMatch && child.text.starts_with("$match") &&
+        child.children.size() == 1 &&
+        isErasedValueExpression(child.children.front(), blockContext)) {
       continue;
     }
 
@@ -2693,6 +2745,9 @@ nir::Value valueFor(const frontend::AstExpression& expression,
       return inlineApplicationValueFor(*application, context);
     }
     const frontend::AstExpression& callee = expression.children.front();
+    if (isErasedValueCallee(callee, context)) {
+      return nir::literalValue("null", "Object", expression.span);
+    }
     const bool isArrayEmpty =
         callee.kind == AstExpressionKind::Select && callee.children.size() == 1 &&
         callee.text == support::StdNames::ArrayEmpty &&

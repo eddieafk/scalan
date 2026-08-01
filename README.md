@@ -42,7 +42,7 @@ still use the selected preset normally. During work on the newest coverage, use:
 
 ```sh
 cmake --build build/debug --target cpp-smoke-tests -j2
-CPP_SCALANATIVE_SMOKE_TESTS5_ONLY=1 \
+CPP_SCALANATIVE_SMOKE_TESTS6_ONLY=1 \
   build/debug/cpp-tests/smoke/cpp-smoke-tests
 ```
 
@@ -99,12 +99,19 @@ build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
 # cases, literal alternatives, and a final wildcard or binding at the call site.
 # Unguarded type patterns also reduce from call-site static types, including
 # boxed scalar tests and transparent-inline result refinement.
+# Compiler-owned `scala.compiletime.erasedValue[T]`, through its canonical
+# import (including aliases) or qualified name, drives generic type-only inline
+# matches without materializing a selector in expanded caller NIR.
 # Stable top-level and object `inline val` constants, including
 # dependency-ordered aliases of earlier inline values, are substituted directly
 # and can drive branches.
 build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
   --output /tmp/inline-summon-from \
   cpp-examples/InlineSummonFrom.scala
+
+build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
+  --output /tmp/inline-erased-value \
+  cpp-examples/InlineErasedValue.scala
 
 # Compile explicit Scala 3 union/intersection types across parameters, results,
 # locals, nested generic arguments, generic type aliases, inferred branch
