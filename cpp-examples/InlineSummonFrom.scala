@@ -169,6 +169,33 @@ object Selectors {
     } else {
       new FallbackResult("inline-transparent-false")
     }
+
+  inline def recursiveChoose(inline first: Boolean, inline second: Boolean,
+      value: String): String =
+    inline if (first) {
+      "recursive-step:" + recursiveChoose(second, false, value)
+    } else {
+      "recursive-done:" + value + ":" + value
+    }
+
+  inline def recursiveContextual[A](inline continue: Boolean)(using
+      named: Named[A]): String =
+    inline if (continue) {
+      "recursive-context:" + recursiveContextual[A](false)
+    } else {
+      summonFrom {
+        case found: Named[A] => "recursive-context-done:" + found.label()
+        case _ => "recursive-context-fallback"
+      }
+    }
+
+  transparent inline def recursiveRefined(
+      inline continue: Boolean): TransparentResult =
+    inline if (continue) {
+      recursiveRefined(false)
+    } else {
+      new PreciseResult("recursive-transparent")
+    }
 }
 
 class InstanceSelectors(val instancePrefix: String) {
@@ -434,5 +461,8 @@ object Main {
     println(nextInstances().choose(false, "chosen"))
     println(Selectors.refinedChoice(true).preciseOnly())
     println(Selectors.refinedChoice(false).fallbackOnly())
+    println(Selectors.recursiveChoose(true, true, nextNonGeneric()))
+    println(Selectors.recursiveContextual[Int](true))
+    println(Selectors.recursiveRefined(true).preciseOnly())
   }
 }

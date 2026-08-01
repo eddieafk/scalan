@@ -220,6 +220,33 @@ object Selectors {
     } else {
       new FallbackResult("inline-transparent-false")
     }
+
+  inline def recursiveChoose(inline first: Boolean, inline second: Boolean,
+      value: String): String =
+    inline if (first) {
+      "recursive-step:" + recursiveChoose(second, false, value)
+    } else {
+      "recursive-done:" + value + ":" + value
+    }
+
+  inline def recursiveContextual[A](inline continue: Boolean)(using
+      named: Named[A]): String =
+    inline if (continue) {
+      "recursive-context:" + recursiveContextual[A](false)
+    } else {
+      summonFrom {
+        case found: Named[A] => "recursive-context-done:" + found.label()
+        case _ => "recursive-context-fallback"
+      }
+    }
+
+  transparent inline def recursiveRefined(
+      inline continue: Boolean): TransparentResult =
+    inline if (continue) {
+      recursiveRefined(false)
+    } else {
+      new PreciseResult("recursive-transparent")
+    }
 }
 
 class InstanceSelectors(val instancePrefix: String) {
@@ -509,6 +536,12 @@ object Main {
     Selectors.refinedChoice(true).preciseOnly()
   def transparentInlineChoiceFalse: String =
     Selectors.refinedChoice(false).fallbackOnly()
+  def recursiveInlineChoice: String =
+    Selectors.recursiveChoose(true, true, nextNonGeneric())
+  def recursiveContextualChoice: String =
+    Selectors.recursiveContextual[Int](true)
+  def recursiveTransparentChoice: String =
+    Selectors.recursiveRefined(true).preciseOnly()
 
   def main(args: Array[String]): Unit = {
     println(intSelected)
@@ -582,6 +615,9 @@ object Main {
     println(instanceInlineChoice)
     println(transparentInlineChoiceTrue)
     println(transparentInlineChoiceFalse)
+    println(recursiveInlineChoice)
+    println(recursiveContextualChoice)
+    println(recursiveTransparentChoice)
   }
 }
 )";
@@ -806,6 +842,12 @@ object Main {
       functionText(result.nirText, "demo.inlinecalls.Main.transparentInlineChoiceTrue");
   const std::string_view transparentInlineChoiceFalse = functionText(
       result.nirText, "demo.inlinecalls.Main.transparentInlineChoiceFalse");
+  const std::string_view recursiveInlineChoice =
+      functionText(result.nirText, "demo.inlinecalls.Main.recursiveInlineChoice");
+  const std::string_view recursiveContextualChoice =
+      functionText(result.nirText, "demo.inlinecalls.Main.recursiveContextualChoice");
+  const std::string_view recursiveTransparentChoice =
+      functionText(result.nirText, "demo.inlinecalls.Main.recursiveTransparentChoice");
 
   const bool valid =
       status == 0 &&
@@ -871,7 +913,11 @@ object Main {
               "inline-generic:member-int\n"
               "receiver-effect\neffectful-instance:inline-false:chosen\n"
               "inline-transparent-true\n"
-              "inline-transparent-false\n" &&
+              "inline-transparent-false\n"
+              "non-generic-effect\n"
+              "recursive-step:recursive-step:recursive-done:plain:plain\n"
+              "recursive-context:recursive-context-done:member-int\n"
+              "recursive-transparent\n" &&
       !invalid.ok &&
       contains(invalid.diagnosticsText,
                "no given value found for context parameter value of type") &&
@@ -885,7 +931,8 @@ object Main {
                "'transparent' must modify a class, trait, or inline def") &&
       contains(invalid.diagnosticsText, "inline method requires an implementation") &&
       contains(invalid.diagnosticsText,
-               "recursive inline call-site specialization is not supported yet") &&
+               "maximum inline expansion depth of 32 exceeded while expanding "
+               "recursive") &&
       !structuralInvalid.ok &&
       contains(structuralInvalid.diagnosticsText,
                "inline parameters are only supported on inline methods") &&
@@ -1189,7 +1236,20 @@ object Main {
       contains(transparentInlineChoiceFalse, ".fallbackOnly") &&
       !contains(transparentInlineChoiceFalse, "demo.inlinecalls.PreciseResult") &&
       !contains(transparentInlineChoiceFalse,
-                "%demo.inlinecalls.Selectors.refinedChoice");
+                "%demo.inlinecalls.Selectors.refinedChoice") &&
+      contains(recursiveInlineChoice, "\"recursive-step:\"") &&
+      contains(recursiveInlineChoice, "\"recursive-done:\"") &&
+      countOccurrences(recursiveInlineChoice, "nextNonGeneric") == 1 &&
+      !contains(recursiveInlineChoice, "%demo.inlinecalls.Selectors.recursiveChoose") &&
+      contains(recursiveContextualChoice, "\"recursive-context:\"") &&
+      contains(recursiveContextualChoice, "\"recursive-context-done:\"") &&
+      countOccurrences(recursiveContextualChoice, "Main.intNamed") == 1 &&
+      !contains(recursiveContextualChoice,
+                "%demo.inlinecalls.Selectors.recursiveContextual") &&
+      contains(recursiveTransparentChoice, "demo.inlinecalls.PreciseResult") &&
+      contains(recursiveTransparentChoice, ".preciseOnly") &&
+      !contains(recursiveTransparentChoice,
+                "%demo.inlinecalls.Selectors.recursiveRefined");
   return valid
              ? 0
              : fail(
@@ -1292,7 +1352,12 @@ object Main {
                    "', transparent-inline-choice-true='" +
                    std::string(transparentInlineChoiceTrue) +
                    "', transparent-inline-choice-false='" +
-                   std::string(transparentInlineChoiceFalse) + "')");
+                   std::string(transparentInlineChoiceFalse) +
+                   "', recursive-inline-choice='" + std::string(recursiveInlineChoice) +
+                   "', recursive-contextual-choice='" +
+                   std::string(recursiveContextualChoice) +
+                   "', recursive-transparent-choice='" +
+                   std::string(recursiveTransparentChoice) + "')");
 }
 
 } // namespace

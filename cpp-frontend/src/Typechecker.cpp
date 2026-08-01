@@ -16,6 +16,7 @@ namespace {
 
 constexpr std::string_view SummonName = "summon";
 constexpr std::string_view ImplicitlyName = "implicitly";
+constexpr std::size_t MaxInlineExpansionDepth = 32;
 
 bool isClassLikeDeclaration(AstDeclarationKind kind) {
   return kind == AstDeclarationKind::Object || kind == AstDeclarationKind::Class ||
@@ -1510,7 +1511,6 @@ TypedModule Typechecker::typecheck(const AstModule& module) {
   expressionTypes_.clear();
   contextApplications_.clear();
   inlineApplications_.clear();
-  expandingInlineApplications_.clear();
   directZoneReceiverEscapes_.clear();
   receiverMethodCallSites_.clear();
   implicitReceiverMethodNames_.clear();
@@ -4631,10 +4631,11 @@ std::optional<TypeInfo> Typechecker::recordInlineApplication(
       return std::nullopt;
     }
   }
-  if (!expandingInlineApplications_.insert(symbol.symbolName).second) {
-    diagnostics_.error(
-        expression.span,
-        "recursive inline call-site specialization is not supported yet");
+  if (inlineExpansionDepth_ >= MaxInlineExpansionDepth) {
+    diagnostics_.error(expression.span,
+                       "maximum inline expansion depth of " +
+                           std::to_string(MaxInlineExpansionDepth) +
+                           " exceeded while expanding " + symbol.name);
     return std::nullopt;
   }
 
@@ -4783,7 +4784,6 @@ std::optional<TypeInfo> Typechecker::recordInlineApplication(
   expressionTypes_ = std::move(outerExpressionTypes);
   contextApplications_ = std::move(outerContextApplications);
   inlineApplications_ = std::move(outerInlineApplications);
-  expandingInlineApplications_.erase(symbol.symbolName);
   inlineExpansionHasInvalidArgument_ = outerInvalidInlineArgument;
 
   const auto sameSpan = [&](const TypedInlineApplication& candidate) {

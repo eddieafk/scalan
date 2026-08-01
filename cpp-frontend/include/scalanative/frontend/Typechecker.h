@@ -419,7 +419,6 @@ private:
   std::vector<TypedExpressionInfo> expressionTypes_;
   std::vector<TypedContextApplication> contextApplications_;
   std::vector<TypedInlineApplication> inlineApplications_;
-  std::unordered_set<std::string> expandingInlineApplications_;
   std::unordered_set<std::string> directZoneReceiverEscapes_;
   std::unordered_map<std::string, std::vector<AstExpression>> receiverMethodCallSites_;
   std::unordered_map<std::string, std::unordered_set<std::string>>
