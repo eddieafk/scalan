@@ -97,6 +97,8 @@ build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
 # mandatory `inline if` branches, including bounded recursive inline expansion.
 # Braced `inline match` expressions reduce ordered Boolean and integer literal
 # cases, literal alternatives, and a final wildcard or binding at the call site.
+# Unguarded type patterns also reduce from call-site static types, including
+# boxed scalar tests and transparent-inline result refinement.
 # Stable top-level and object `inline val` constants, including
 # dependency-ordered aliases of earlier inline values, are substituted directly
 # and can drive branches.

@@ -2098,18 +2098,28 @@ AstExpression Parser::parseMatchExpression(AstExpression selector,
         return pattern.kind == AstExpressionKind::BooleanLiteral ||
                pattern.kind == AstExpressionKind::IntegerLiteral;
       };
+      const bool supportedTypePattern =
+          !current.typePattern.empty() &&
+          current.alternativeTypePatterns.empty() &&
+          (current.isWildcard || !current.bindingName.empty());
+      const bool supportedLiteralPattern =
+          current.typePattern.empty() && !current.isWildcard &&
+          current.bindingName.empty() && supportedLiteral(current.pattern) &&
+          std::all_of(current.alternativePatterns.begin(),
+                      current.alternativePatterns.end(), supportedLiteral);
+      const bool supportedCatchAll =
+          current.typePattern.empty() &&
+          (current.isWildcard || !current.bindingName.empty());
       if (current.hasGuard) {
         diagnostics_.error(current.pattern.span,
                            "inline match guards are not supported yet");
       }
-      if (!current.isWildcard && current.bindingName.empty() &&
-          (!current.typePattern.empty() || !supportedLiteral(current.pattern) ||
-           !std::all_of(current.alternativePatterns.begin(),
-                        current.alternativePatterns.end(), supportedLiteral))) {
+      if (!supportedTypePattern && !supportedLiteralPattern &&
+          !supportedCatchAll) {
         diagnostics_.error(
             current.pattern.span,
-            "inline match currently supports Boolean and integer literal "
-            "patterns plus a final wildcard or binding case");
+            "inline match currently supports Boolean and integer literals, one "
+            "unguarded type pattern per case, and a final wildcard or binding");
       }
     }
 
@@ -2160,7 +2170,7 @@ AstExpression Parser::parseMatchExpression(AstExpression selector,
     binding.declaredType = declaredType;
 
     AstExpression selectorReference =
-        makeExpression(AstExpressionKind::Identifier, selectorName, span);
+        makeExpression(AstExpressionKind::Identifier, selectorName, selector.span);
     if (declaredType.empty()) {
       binding.children.push_back(std::move(selectorReference));
     } else {
@@ -2173,6 +2183,7 @@ AstExpression Parser::parseMatchExpression(AstExpression selector,
       AstExpression cast;
       cast.kind = AstExpressionKind::TypeApply;
       cast.declaredType = declaredType;
+      cast.typeArguments.push_back(declaredType);
       cast.span = span;
       cast.children.push_back(std::move(castMember));
       binding.children.push_back(std::move(cast));
@@ -2211,6 +2222,7 @@ AstExpression Parser::parseMatchExpression(AstExpression selector,
         AstExpression typeTest;
         typeTest.kind = AstExpressionKind::TypeApply;
         typeTest.declaredType = typeName;
+        typeTest.typeArguments.push_back(typeName);
         typeTest.span = current->pattern.span;
         typeTest.children.push_back(std::move(typeTestMember));
         return typeTest;

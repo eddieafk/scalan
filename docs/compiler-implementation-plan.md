@@ -1052,10 +1052,16 @@ Current scaffold status:
   Ordered Boolean/integer literal cases, literal alternatives, and a required
   final wildcard or binding are supported; each lowered case has distinct
   branch-selection metadata and only the selected body reaches NIR. A dynamic
-  selector is rejected during call-site specialization. Guards, type tests,
-  singleton objects, strings, floating-point values, characters, `null`, and
-  indentation-only match syntax remain later milestones and receive focused
-  diagnostics where applicable.
+  selector is rejected during call-site specialization. One unguarded type
+  pattern per case can also be reduced from a call-site static type. Positive
+  subtype tests, exact boxed scalar/String tests (without numeric widening), and
+  provably disjoint concrete-class tests are selected conservatively; a broad,
+  abstract, composite, or otherwise overlapping static type remains
+  non-reducible. Pattern bindings retain their narrowed type, so transparent
+  inline calls can expose a selected concrete result API without emitting a
+  runtime test. Guards, type-pattern alternatives, singleton-value patterns,
+  literal strings/floats/chars/`null`, and indentation-only match syntax remain
+  later milestones and receive focused diagnostics where applicable.
   Constants propagate through nested inline calls and work with generic evidence
   selection, contextual and curried calls, effectful instance receivers, and
   transparent-result refinement. Symbolic Boolean and integer inline parameters

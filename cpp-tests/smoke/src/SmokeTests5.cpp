@@ -326,6 +326,30 @@ object Selectors {
       case _ => "match-alias-other"
     }
 
+  transparent inline def refinedTypeMatch(value: Any): TransparentResult =
+    inline value match {
+      case text: String => new PreciseResult("type-string:" + text)
+      case number: Double => new PreciseResult("type-double:" + number.toString)
+      case _ => new FallbackResult("type-fallback")
+    }
+
+  transparent inline def refinedClassMatch(
+      value: TransparentResult): TransparentResult =
+    inline value match {
+      case selected: PreciseResult =>
+        new PreciseResult("class-precise:" + selected.preciseOnly())
+      case selected: FallbackResult =>
+        new FallbackResult("class-fallback:" + selected.fallbackOnly())
+      case _ => new FallbackResult("class-other")
+    }
+
+  inline def scalarTypeMatch(value: Any): String =
+    inline value match {
+      case _: Long => "type-long"
+      case _: Int => "type-int"
+      case _ => "type-scalar-other"
+    }
+
   inline def ordinaryConditional(condition: Boolean, value: String): String =
     if (condition) {
       "ordinary-true:" + value
@@ -688,6 +712,19 @@ object Main {
   def computedInlineMatch: String = Selectors.computedInlineMatch(3)
   def longInlineMatch: String = Selectors.longInlineMatch(100L)
   def aliasedInlineMatch: String = Selectors.aliasedInlineMatch()
+  def stringTypeMatch: String =
+    Selectors.refinedTypeMatch("static").preciseOnly()
+  def doubleTypeMatch: String =
+    Selectors.refinedTypeMatch(1.5).preciseOnly()
+  def fallbackTypeMatch: String =
+    Selectors.refinedTypeMatch(new FallbackResult("input")).fallbackOnly()
+  def preciseClassMatch: String =
+    Selectors.refinedClassMatch(new PreciseResult("input")).preciseOnly()
+  def fallbackClassMatch: String =
+    Selectors.refinedClassMatch(
+      new FallbackResult("input")).fallbackOnly()
+  def intTypeMatch: String = Selectors.scalarTypeMatch(7)
+  def longTypeMatch: String = Selectors.scalarTypeMatch(7L)
   def ordinaryConstantConditional: String =
     Selectors.ordinaryConditional(true, "constant")
   def nestedOrdinaryConstantConditional: String =
@@ -807,6 +844,13 @@ object Main {
     println(computedInlineMatch)
     println(longInlineMatch)
     println(aliasedInlineMatch)
+    println(stringTypeMatch)
+    println(doubleTypeMatch)
+    println(fallbackTypeMatch)
+    println(preciseClassMatch)
+    println(fallbackClassMatch)
+    println(intTypeMatch)
+    println(longTypeMatch)
     println(ordinaryConstantConditional)
     println(nestedOrdinaryConstantConditional)
     println(ordinaryRuntimeConditional)
@@ -833,6 +877,8 @@ inline val followingInlineValue: Boolean = true
 inline val invalidSelfReference: Boolean = invalidSelfReference
 
 object Main {
+  trait RuntimeResult
+  class RuntimePrecise extends RuntimeResult
   trait Missing[A]
 
   inline def missingContext[A]()(using value: Missing[A]): String =
@@ -847,6 +893,8 @@ object Main {
   inline def recursive[A]: String = recursive[A]
   def runtimeCondition(): Boolean = true
   def runtimeNumber(): Int = 1
+  def runtimeAny(): Any = runtimeNumber()
+  def runtimeResult(): RuntimeResult = new RuntimePrecise
   inline def requiresConstant(inline condition: Boolean): String =
     inline if (condition) "constant" else "not-constant"
   def invalidInlineArgument: String = requiresConstant(runtimeCondition())
@@ -862,6 +910,18 @@ object Main {
       case _ => "other"
     }
   def invalidInlineMatch: String = requiresInlineMatch(runtimeNumber())
+  transparent inline def requiresStaticType(value: Any): Any =
+    inline value match {
+      case text: String => text
+      case _ => value
+    }
+  def invalidStaticTypeMatch: Any = requiresStaticType(runtimeAny())
+  inline def requiresStaticClass(value: RuntimeResult): String =
+    inline value match {
+      case _: RuntimePrecise => "precise"
+      case _ => "fallback"
+    }
+  def invalidStaticClassMatch: String = requiresStaticClass(runtimeResult())
   inline val dynamicInlineValue: Boolean = runtimeCondition()
   inline val missingInlineValue: Boolean
 }
@@ -1153,6 +1213,20 @@ object Main {
       functionText(result.nirText, "demo.inlinecalls.Main.longInlineMatch");
   const std::string_view aliasedInlineMatch =
       functionText(result.nirText, "demo.inlinecalls.Main.aliasedInlineMatch");
+  const std::string_view stringTypeMatch =
+      functionText(result.nirText, "demo.inlinecalls.Main.stringTypeMatch");
+  const std::string_view doubleTypeMatch =
+      functionText(result.nirText, "demo.inlinecalls.Main.doubleTypeMatch");
+  const std::string_view fallbackTypeMatch =
+      functionText(result.nirText, "demo.inlinecalls.Main.fallbackTypeMatch");
+  const std::string_view preciseClassMatch =
+      functionText(result.nirText, "demo.inlinecalls.Main.preciseClassMatch");
+  const std::string_view fallbackClassMatch =
+      functionText(result.nirText, "demo.inlinecalls.Main.fallbackClassMatch");
+  const std::string_view intTypeMatch =
+      functionText(result.nirText, "demo.inlinecalls.Main.intTypeMatch");
+  const std::string_view longTypeMatch =
+      functionText(result.nirText, "demo.inlinecalls.Main.longTypeMatch");
   const std::string_view ordinaryConstantConditional =
       functionText(result.nirText, "demo.inlinecalls.Main.ordinaryConstantConditional");
   const std::string_view nestedOrdinaryConstantConditional = functionText(
@@ -1260,6 +1334,9 @@ object Main {
               "nested-numeric-high\nordinary-numeric-even\nlong-high\n6\n"
               "match-true\nmatch-false\nmatch-zero\nmatch-small\nmatch-other\n"
               "match-computed\nmatch-long\nmatch-alias\n"
+              "type-string:static\ntype-double:1.500000\ntype-fallback\n"
+              "class-precise:input\nclass-fallback:input\n"
+              "type-int\ntype-long\n"
               "ordinary-true:constant\n"
               "nested-ordinary-false:nested\n"
               "condition-effect\nordinary-true:dynamic\n"
@@ -1288,9 +1365,10 @@ object Main {
       countOccurrences(
           invalid.diagnosticsText,
           "inline if condition must be a compile-time Boolean constant") == 3 &&
-      contains(invalid.diagnosticsText,
-               "inline match selector must be a compile-time Boolean or integer "
-               "constant") &&
+      countOccurrences(
+          invalid.diagnosticsText,
+          "inline match selector must be reducible from a compile-time value or "
+          "static type") == 3 &&
       contains(invalid.diagnosticsText,
                "inline value initializer must use literals, operators, and "
                "previously defined inline values") &&
@@ -1309,8 +1387,8 @@ object Main {
       contains(inlineMatchParserInvalid.diagnosticsText,
                "inline match guards are not supported yet") &&
       contains(inlineMatchParserInvalid.diagnosticsText,
-               "inline match currently supports Boolean and integer literal "
-               "patterns plus a final wildcard or binding case") &&
+               "inline match currently supports Boolean and integer literals, one "
+               "unguarded type pattern per case, and a final wildcard or binding") &&
       contains(intSelected, "call %demo.inlinecalls.Main.intNamed()") &&
       contains(intSelected, "call %demo.inlinecalls.Selectors.prefix()") &&
       !contains(intSelected, "%demo.inlinecalls.Selectors.selected") &&
@@ -1706,6 +1784,51 @@ object Main {
       !contains(aliasedInlineMatch, "match-alias-other") &&
       !contains(aliasedInlineMatch,
                 "%demo.inlinecalls.Selectors.aliasedInlineMatch") &&
+      contains(stringTypeMatch, "\"type-string:\"") &&
+      contains(stringTypeMatch, "demo.inlinecalls.PreciseResult") &&
+      contains(stringTypeMatch, ".preciseOnly") &&
+      !contains(stringTypeMatch, "type-double:") &&
+      !contains(stringTypeMatch, "type-fallback") &&
+      !contains(stringTypeMatch,
+                "%demo.inlinecalls.Selectors.refinedTypeMatch") &&
+      contains(doubleTypeMatch, "\"type-double:\"") &&
+      contains(doubleTypeMatch, "demo.inlinecalls.PreciseResult") &&
+      contains(doubleTypeMatch, ".preciseOnly") &&
+      !contains(doubleTypeMatch, "type-string:") &&
+      !contains(doubleTypeMatch, "type-fallback") &&
+      !contains(doubleTypeMatch,
+                "%demo.inlinecalls.Selectors.refinedTypeMatch") &&
+      contains(fallbackTypeMatch, "\"type-fallback\"") &&
+      contains(fallbackTypeMatch, "demo.inlinecalls.FallbackResult") &&
+      contains(fallbackTypeMatch, ".fallbackOnly") &&
+      !contains(fallbackTypeMatch, "type-string:") &&
+      !contains(fallbackTypeMatch, "type-double:") &&
+      !contains(fallbackTypeMatch,
+                "%demo.inlinecalls.Selectors.refinedTypeMatch") &&
+      contains(preciseClassMatch, "\"class-precise:\"") &&
+      contains(preciseClassMatch, "demo.inlinecalls.PreciseResult") &&
+      contains(preciseClassMatch, ".preciseOnly") &&
+      !contains(preciseClassMatch, "class-fallback:") &&
+      !contains(preciseClassMatch, "class-other") &&
+      !contains(preciseClassMatch,
+                "%demo.inlinecalls.Selectors.refinedClassMatch") &&
+      contains(fallbackClassMatch, "\"class-fallback:\"") &&
+      contains(fallbackClassMatch, "demo.inlinecalls.FallbackResult") &&
+      contains(fallbackClassMatch, ".fallbackOnly") &&
+      !contains(fallbackClassMatch, "class-precise:") &&
+      !contains(fallbackClassMatch, "class-other") &&
+      !contains(fallbackClassMatch,
+                "%demo.inlinecalls.Selectors.refinedClassMatch") &&
+      contains(intTypeMatch, "\"type-int\"") &&
+      !contains(intTypeMatch, "type-long") &&
+      !contains(intTypeMatch, "type-scalar-other") &&
+      !contains(intTypeMatch,
+                "%demo.inlinecalls.Selectors.scalarTypeMatch") &&
+      contains(longTypeMatch, "\"type-long\"") &&
+      !contains(longTypeMatch, "type-int") &&
+      !contains(longTypeMatch, "type-scalar-other") &&
+      !contains(longTypeMatch,
+                "%demo.inlinecalls.Selectors.scalarTypeMatch") &&
       contains(ordinaryConstantConditional, "\"ordinary-true:\"") &&
       !contains(ordinaryConstantConditional, "ordinary-false:") &&
       !contains(ordinaryConstantConditional,

@@ -4685,6 +4685,21 @@ Typechecker::constantBooleanValue(const AstExpression& expression,
       }
     }
     return std::nullopt;
+  case AstExpressionKind::TypeApply:
+    if (expression.children.size() == 1 &&
+        expression.children.front().kind == AstExpressionKind::Select &&
+        expression.children.front().text == support::StdNames::IsInstanceOf &&
+        expression.children.front().children.size() == 1) {
+      const std::optional<TypeInfo> actual = specializedStaticType(
+          expression.children.front().children.front(), scope);
+      if (!actual.has_value()) {
+        return std::nullopt;
+      }
+      const TypeInfo target =
+          typeFromDeclaredName(expression.declaredType, &scope, &expression.span);
+      return staticTypeTestValue(*actual, target);
+    }
+    return std::nullopt;
   case AstExpressionKind::Unary:
     if (expression.text == "!" && expression.children.size() == 1) {
       if (std::optional<bool> operand =
@@ -4750,6 +4765,92 @@ Typechecker::constantBooleanValue(const AstExpression& expression,
   default:
     return std::nullopt;
   }
+}
+
+std::optional<TypeInfo>
+Typechecker::specializedStaticType(const AstExpression& expression,
+                                   const Scope& scope) const {
+  if (expression.kind == AstExpressionKind::Identifier) {
+    if (auto symbol = scope.find(expression.text);
+        symbol != scope.end() && symbol->second.specializedStaticType.has_value()) {
+      return symbol->second.specializedStaticType;
+    }
+  }
+  if (!expression.span.isValid()) {
+    return std::nullopt;
+  }
+  for (auto info = expressionTypes_.rbegin(); info != expressionTypes_.rend(); ++info) {
+    if (info->span.source == expression.span.source &&
+        info->span.start == expression.span.start &&
+        info->span.length == expression.span.length) {
+      return staticExpressionType(info->type);
+    }
+  }
+  return std::nullopt;
+}
+
+std::optional<bool>
+Typechecker::staticTypeTestValue(const TypeInfo& actual,
+                                 const TypeInfo& target) const {
+  if (actual.kind == SimpleTypeKind::Unknown ||
+      target.kind == SimpleTypeKind::Unknown || actual.typeParameter ||
+      target.typeParameter || actual.abstractTypeMember ||
+      target.abstractTypeMember ||
+      actual.compositeKind != CompositeTypeKind::None ||
+      target.compositeKind != CompositeTypeKind::None) {
+    return std::nullopt;
+  }
+  if (actual.kind == SimpleTypeKind::Null) {
+    return false;
+  }
+  const bool actualScalar = isBoxablePrimitiveType(actual.kind) &&
+                            actual.kind != SimpleTypeKind::String;
+  const bool targetScalar = isBoxablePrimitiveType(target.kind) &&
+                            target.kind != SimpleTypeKind::String;
+  if ((actualScalar || actual.kind == SimpleTypeKind::String) &&
+      (targetScalar || target.kind == SimpleTypeKind::String)) {
+    return actual.kind == target.kind;
+  }
+  if (isAssignable(target, actual)) {
+    return true;
+  }
+
+  const auto runtimeName = [](const TypeInfo& type) {
+    return type.typeConstructorName.empty()
+               ? (type.runtimeName.empty() ? type.name : type.runtimeName)
+               : type.typeConstructorName;
+  };
+  const std::string actualName = runtimeName(actual);
+  const std::string targetName = runtimeName(target);
+  if (actual.kind == SimpleTypeKind::Object && actualName == "Object") {
+    return std::nullopt;
+  }
+  if (actual.kind == SimpleTypeKind::String &&
+      target.kind == SimpleTypeKind::Object) {
+    return std::nullopt;
+  }
+  if (actual.kind == SimpleTypeKind::Object &&
+      (targetScalar || target.kind == SimpleTypeKind::String)) {
+    return false;
+  }
+
+  const auto actualSymbol = globalSymbols_.find(actualName);
+  const auto targetSymbol = globalSymbols_.find(targetName);
+  if (actualSymbol == globalSymbols_.end() ||
+      targetSymbol == globalSymbols_.end()) {
+    return std::nullopt;
+  }
+  if (actualSymbol->second.kind == AstDeclarationKind::Object) {
+    return false;
+  }
+  const bool actualClass = actualSymbol->second.kind == AstDeclarationKind::Class;
+  const bool targetClass = targetSymbol->second.kind == AstDeclarationKind::Class;
+  const bool targetObject = targetSymbol->second.kind == AstDeclarationKind::Object;
+  if (actualClass && (targetClass || targetObject) &&
+      !isSubtypeOf(targetName, actualName)) {
+    return false;
+  }
+  return std::nullopt;
 }
 
 std::optional<std::int64_t>
@@ -5104,6 +5205,19 @@ std::optional<TypeInfo> Typechecker::recordInlineApplication(
     const AstExpression* sourceArgument = nullptr;
     if (!materializedContextParameter && sourceArgumentIndex < arguments.size()) {
       sourceArgument = &arguments[sourceArgumentIndex++];
+    }
+    if (sourceArgument != nullptr) {
+      parameter.specializedStaticType =
+          specializedStaticType(*sourceArgument, scope);
+    } else if (materializedContextParameter) {
+      auto contextual = std::find_if(
+          contextualArguments.begin(), contextualArguments.end(),
+          [&](const TypedContextArgument& argument) {
+            return argument.parameterIndex == index;
+          });
+      if (contextual != contextualArguments.end()) {
+        parameter.specializedStaticType = contextual->type;
+      }
     }
     if (type.kind == SimpleTypeKind::Boolean) {
       parameter.specializedBooleanValue =
@@ -6924,6 +7038,8 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
               constantBooleanValue(local.children.front(), blockScope);
           symbol.specializedIntegerValue =
               constantIntegerValue(local.children.front(), blockScope);
+          symbol.specializedStaticType =
+              specializedStaticType(local.children.front(), blockScope);
         }
         blockScope[local.text] = std::move(symbol);
       };
@@ -7148,8 +7264,8 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
       if (expression.isInline) {
         diagnostics_.error(expression.children[0].span,
                            expression.text == "match"
-                               ? "inline match selector must be a compile-time "
-                                 "Boolean or integer constant"
+                               ? "inline match selector must be reducible from a "
+                                 "compile-time value or static type"
                                : "inline if condition must be a compile-time "
                                  "Boolean constant");
       }

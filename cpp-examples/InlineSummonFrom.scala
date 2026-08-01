@@ -275,6 +275,30 @@ object Selectors {
       case _ => "match-alias-other"
     }
 
+  transparent inline def refinedTypeMatch(value: Any): TransparentResult =
+    inline value match {
+      case text: String => new PreciseResult("type-string:" + text)
+      case number: Double => new PreciseResult("type-double:" + number.toString)
+      case _ => new FallbackResult("type-fallback")
+    }
+
+  transparent inline def refinedClassMatch(
+      value: TransparentResult): TransparentResult =
+    inline value match {
+      case selected: PreciseResult =>
+        new PreciseResult("class-precise:" + selected.preciseOnly())
+      case selected: FallbackResult =>
+        new FallbackResult("class-fallback:" + selected.fallbackOnly())
+      case _ => new FallbackResult("class-other")
+    }
+
+  inline def scalarTypeMatch(value: Any): String =
+    inline value match {
+      case _: Long => "type-long"
+      case _: Int => "type-int"
+      case _ => "type-scalar-other"
+    }
+
   inline def ordinaryConditional(condition: Boolean, value: String): String =
     if (condition) {
       "ordinary-true:" + value
@@ -609,6 +633,16 @@ object Main {
     println(Selectors.computedInlineMatch(3))
     println(Selectors.longInlineMatch(100L))
     println(Selectors.aliasedInlineMatch())
+    println(Selectors.refinedTypeMatch("static").preciseOnly())
+    println(Selectors.refinedTypeMatch(1.5).preciseOnly())
+    println(Selectors.refinedTypeMatch(
+      new FallbackResult("input")).fallbackOnly())
+    println(Selectors.refinedClassMatch(
+      new PreciseResult("input")).preciseOnly())
+    println(Selectors.refinedClassMatch(
+      new FallbackResult("input")).fallbackOnly())
+    println(Selectors.scalarTypeMatch(7))
+    println(Selectors.scalarTypeMatch(7L))
     println(Selectors.ordinaryConditional(true, "constant"))
     println(Selectors.nestedOrdinaryConditional(false, "nested"))
     println(Selectors.ordinaryConditional(nextCondition(), "dynamic"))
