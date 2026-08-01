@@ -33,6 +33,8 @@ object Selectors {
   inline val enabledAlias: Boolean = enabled
   inline val foldedEnabledAlias: Boolean = enabledAlias && foldedEnabled
   inline val bannerAlias: String = banner
+  inline val numericThreshold: Int = 5
+  inline val numericThresholdAlias: Int = numericThreshold + 1
 
   inline def selected[A]: String =
     summonFrom {
@@ -223,6 +225,24 @@ object Selectors {
 
   inline def nestedContextualInline[A]()(using inline named: Named[A]): String =
     "nested-" + contextualInline[A]()
+
+  inline def numericChoice(inline value: Int): String =
+    inline if (value >= numericThresholdAlias) "numeric-high" else "numeric-low"
+
+  inline def computedNumericChoice(inline value: Int): String =
+    inline if (value * 2 == 8) "numeric-computed" else "numeric-unexpected"
+
+  inline def arithmeticNumericChoice(inline value: Int): String =
+    inline if ((value - 2) / 2 < 4) "numeric-arithmetic" else "numeric-too-large"
+
+  inline def nestedNumericChoice(inline value: Int): String =
+    "nested-" + numericChoice(value + 2)
+
+  inline def ordinaryNumericChoice(value: Int): String =
+    if (value % 2 == 0) "ordinary-numeric-even" else "ordinary-numeric-odd"
+
+  inline def longNumericChoice(inline value: Long): String =
+    inline if (value >= 100L) "long-high" else "long-low"
 
   inline def ordinaryConditional(condition: Boolean, value: String): String =
     if (condition) {
@@ -542,6 +562,14 @@ object Main {
     println(Selectors.contextualInline[Int]())
     println(Selectors.contextualInline[String]()(using nextInlineNamed()))
     println(Selectors.nestedContextualInline[Int]())
+    println(Selectors.numericChoice(8))
+    println(Selectors.numericChoice(3))
+    println(Selectors.computedNumericChoice(4))
+    println(Selectors.arithmeticNumericChoice(8))
+    println(Selectors.nestedNumericChoice(5))
+    println(Selectors.ordinaryNumericChoice(6))
+    println(Selectors.longNumericChoice(120L))
+    println(Selectors.numericThresholdAlias)
     println(Selectors.ordinaryConditional(true, "constant"))
     println(Selectors.nestedOrdinaryConditional(false, "nested"))
     println(Selectors.ordinaryConditional(nextCondition(), "dynamic"))

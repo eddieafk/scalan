@@ -4,6 +4,7 @@
 #include "scalanative/support/Diagnostics.h"
 
 #include <cstddef>
+#include <cstdint>
 #include <optional>
 #include <string>
 #include <unordered_map>
@@ -192,6 +193,7 @@ struct SymbolInfo {
   std::size_t contextPrerequisiteCount = 0;
   std::size_t contextualNestingDepth = 0;
   std::optional<bool> specializedBooleanValue;
+  std::optional<std::int64_t> specializedIntegerValue;
   AstExpression inlineBody;
 };
 
@@ -262,6 +264,10 @@ private:
                                     const Scope& scope) const;
   [[nodiscard]] std::optional<bool>
   constantBooleanValue(const AstExpression& expression, const Scope& scope) const;
+  [[nodiscard]] std::optional<std::int64_t>
+  constantIntegerValue(const AstExpression& expression, const Scope& scope) const;
+  [[nodiscard]] SimpleTypeKind
+  constantIntegerType(const AstExpression& expression, const Scope& scope) const;
   [[nodiscard]] TypeInfo inferNewType(const AstExpression& expression, Scope& scope);
   [[nodiscard]] TypeInfo inferSelectType(const AstExpression& expression, Scope& scope);
   [[nodiscard]] std::string inferArrayElementTypeName(const AstExpression& expression,

@@ -84,6 +84,8 @@ object Selectors {
   inline val enabledAlias: Boolean = enabled
   inline val foldedEnabledAlias: Boolean = enabledAlias && foldedEnabled
   inline val bannerAlias: String = banner
+  inline val numericThreshold: Int = 5
+  inline val numericThresholdAlias: Int = numericThreshold + 1
 
   inline def selected[A]: String =
     summonFrom {
@@ -274,6 +276,24 @@ object Selectors {
 
   inline def nestedContextualInline[A]()(using inline named: Named[A]): String =
     "nested-" + contextualInline[A]()
+
+  inline def numericChoice(inline value: Int): String =
+    inline if (value >= numericThresholdAlias) "numeric-high" else "numeric-low"
+
+  inline def computedNumericChoice(inline value: Int): String =
+    inline if (value * 2 == 8) "numeric-computed" else "numeric-unexpected"
+
+  inline def arithmeticNumericChoice(inline value: Int): String =
+    inline if ((value - 2) / 2 < 4) "numeric-arithmetic" else "numeric-too-large"
+
+  inline def nestedNumericChoice(inline value: Int): String =
+    "nested-" + numericChoice(value + 2)
+
+  inline def ordinaryNumericChoice(value: Int): String =
+    if (value % 2 == 0) "ordinary-numeric-even" else "ordinary-numeric-odd"
+
+  inline def longNumericChoice(inline value: Long): String =
+    inline if (value >= 100L) "long-high" else "long-low"
 
   inline def ordinaryConditional(condition: Boolean, value: String): String =
     if (condition) {
@@ -621,6 +641,14 @@ object Main {
     Selectors.contextualInline[String]()(using nextInlineNamed())
   def nestedContextualInlineParameter: String =
     Selectors.nestedContextualInline[Int]()
+  def numericHigh: String = Selectors.numericChoice(8)
+  def numericLow: String = Selectors.numericChoice(3)
+  def computedNumeric: String = Selectors.computedNumericChoice(4)
+  def arithmeticNumeric: String = Selectors.arithmeticNumericChoice(8)
+  def nestedNumeric: String = Selectors.nestedNumericChoice(5)
+  def ordinaryNumeric: String = Selectors.ordinaryNumericChoice(6)
+  def longNumeric: String = Selectors.longNumericChoice(120L)
+  def directInlineInteger: Int = Selectors.numericThresholdAlias
   def ordinaryConstantConditional: String =
     Selectors.ordinaryConditional(true, "constant")
   def nestedOrdinaryConstantConditional: String =
@@ -724,6 +752,14 @@ object Main {
     println(inferredContextualInlineParameter)
     println(explicitContextualInlineParameter)
     println(nestedContextualInlineParameter)
+    println(numericHigh)
+    println(numericLow)
+    println(computedNumeric)
+    println(arithmeticNumeric)
+    println(nestedNumeric)
+    println(ordinaryNumeric)
+    println(longNumeric)
+    println(directInlineInteger)
     println(ordinaryConstantConditional)
     println(nestedOrdinaryConstantConditional)
     println(ordinaryRuntimeConditional)
@@ -763,12 +799,16 @@ object Main {
   inline def missingBody[A]: String
   inline def recursive[A]: String = recursive[A]
   def runtimeCondition(): Boolean = true
+  def runtimeNumber(): Int = 1
   inline def requiresConstant(inline condition: Boolean): String =
     inline if (condition) "constant" else "not-constant"
   def invalidInlineArgument: String = requiresConstant(runtimeCondition())
   inline def requiresInlineCondition(condition: Boolean): String =
     inline if (condition) "constant" else "not-constant"
   def invalidInlineCondition: String = requiresInlineCondition(runtimeCondition())
+  inline def requiresNumeric(inline value: Int): String =
+    inline if (value >= 0) "non-negative" else "negative"
+  def invalidNumericCondition: String = requiresNumeric(runtimeNumber())
   inline val dynamicInlineValue: Boolean = runtimeCondition()
   inline val missingInlineValue: Boolean
 }
@@ -1000,6 +1040,22 @@ object Main {
       result.nirText, "demo.inlinecalls.Main.explicitContextualInlineParameter");
   const std::string_view nestedContextualInlineParameter = functionText(
       result.nirText, "demo.inlinecalls.Main.nestedContextualInlineParameter");
+  const std::string_view numericHigh =
+      functionText(result.nirText, "demo.inlinecalls.Main.numericHigh");
+  const std::string_view numericLow =
+      functionText(result.nirText, "demo.inlinecalls.Main.numericLow");
+  const std::string_view computedNumeric =
+      functionText(result.nirText, "demo.inlinecalls.Main.computedNumeric");
+  const std::string_view arithmeticNumeric =
+      functionText(result.nirText, "demo.inlinecalls.Main.arithmeticNumeric");
+  const std::string_view nestedNumeric =
+      functionText(result.nirText, "demo.inlinecalls.Main.nestedNumeric");
+  const std::string_view ordinaryNumeric =
+      functionText(result.nirText, "demo.inlinecalls.Main.ordinaryNumeric");
+  const std::string_view longNumeric =
+      functionText(result.nirText, "demo.inlinecalls.Main.longNumeric");
+  const std::string_view directInlineInteger =
+      functionText(result.nirText, "demo.inlinecalls.Main.directInlineInteger");
   const std::string_view ordinaryConstantConditional =
       functionText(result.nirText, "demo.inlinecalls.Main.ordinaryConstantConditional");
   const std::string_view nestedOrdinaryConstantConditional = functionText(
@@ -1103,6 +1159,8 @@ object Main {
               "inline-context-effect\ninline-context-effect\n"
               "contextual-inline:explicit-inline:explicit-inline\n"
               "nested-contextual-inline:member-int:member-int\n"
+              "numeric-high\nnumeric-low\nnumeric-computed\nnumeric-arithmetic\n"
+              "nested-numeric-high\nordinary-numeric-even\nlong-high\n6\n"
               "ordinary-true:constant\n"
               "nested-ordinary-false:nested\n"
               "condition-effect\nordinary-true:dynamic\n"
@@ -1128,8 +1186,9 @@ object Main {
       !structuralInvalid.ok &&
       contains(structuralInvalid.diagnosticsText,
                "inline parameters are only supported on inline methods") &&
-      contains(invalid.diagnosticsText,
-               "inline if condition must be a compile-time Boolean constant") &&
+      countOccurrences(
+          invalid.diagnosticsText,
+          "inline if condition must be a compile-time Boolean constant") == 3 &&
       contains(invalid.diagnosticsText,
                "inline value initializer must use literals, operators, and "
                "previously defined inline values") &&
@@ -1469,6 +1528,39 @@ object Main {
                 "%demo.inlinecalls.Selectors.nestedContextualInline") &&
       !contains(nestedContextualInlineParameter,
                 "%demo.inlinecalls.Selectors.contextualInline") &&
+      contains(numericHigh, "\"numeric-high\"") &&
+      !contains(numericHigh, "numeric-low") &&
+      !contains(numericHigh, "%demo.inlinecalls.Selectors.numericChoice") &&
+      contains(numericLow, "\"numeric-low\"") &&
+      !contains(numericLow, "numeric-high") &&
+      !contains(numericLow, "%demo.inlinecalls.Selectors.numericChoice") &&
+      contains(computedNumeric, "\"numeric-computed\"") &&
+      !contains(computedNumeric, "numeric-unexpected") &&
+      !contains(computedNumeric,
+                "%demo.inlinecalls.Selectors.computedNumericChoice") &&
+      contains(arithmeticNumeric, "\"numeric-arithmetic\"") &&
+      !contains(arithmeticNumeric, "numeric-too-large") &&
+      !contains(arithmeticNumeric,
+                "%demo.inlinecalls.Selectors.arithmeticNumericChoice") &&
+      contains(nestedNumeric, "\"nested-\"") &&
+      contains(nestedNumeric, "\"numeric-high\"") &&
+      !contains(nestedNumeric, "numeric-low") &&
+      !contains(nestedNumeric,
+                "%demo.inlinecalls.Selectors.nestedNumericChoice") &&
+      !contains(nestedNumeric, "%demo.inlinecalls.Selectors.numericChoice") &&
+      contains(ordinaryNumeric, "\"ordinary-numeric-even\"") &&
+      !contains(ordinaryNumeric, "ordinary-numeric-odd") &&
+      !contains(ordinaryNumeric,
+                "%demo.inlinecalls.Selectors.ordinaryNumericChoice") &&
+      contains(longNumeric, "\"long-high\"") &&
+      !contains(longNumeric, "long-low") &&
+      !contains(longNumeric, "%demo.inlinecalls.Selectors.longNumericChoice") &&
+      contains(directInlineInteger, "5") &&
+      contains(directInlineInteger, "1") &&
+      !contains(directInlineInteger,
+                "%demo.inlinecalls.Selectors.numericThresholdAlias") &&
+      !contains(directInlineInteger,
+                "%demo.inlinecalls.Selectors.numericThreshold") &&
       contains(ordinaryConstantConditional, "\"ordinary-true:\"") &&
       !contains(ordinaryConstantConditional, "ordinary-false:") &&
       !contains(ordinaryConstantConditional,
@@ -1652,6 +1744,15 @@ object Main {
                    std::string(explicitContextualInlineParameter) +
                    "', nested-contextual-inline-parameter='" +
                    std::string(nestedContextualInlineParameter) +
+                   "', numeric-high='" + std::string(numericHigh) +
+                   "', numeric-low='" + std::string(numericLow) +
+                   "', computed-numeric='" + std::string(computedNumeric) +
+                   "', arithmetic-numeric='" + std::string(arithmeticNumeric) +
+                   "', nested-numeric='" + std::string(nestedNumeric) +
+                   "', ordinary-numeric='" + std::string(ordinaryNumeric) +
+                   "', long-numeric='" + std::string(longNumeric) +
+                   "', direct-inline-integer='" +
+                   std::string(directInlineInteger) +
                    "', ordinary-constant-conditional='" +
                    std::string(ordinaryConstantConditional) +
                    "', nested-ordinary-constant-conditional='" +

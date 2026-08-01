@@ -3,9 +3,12 @@
 #include "scalanative/support/StdNames.h"
 
 #include <algorithm>
+#include <charconv>
 #include <cstddef>
+#include <cstdint>
 #include <functional>
 #include <iterator>
+#include <limits>
 #include <optional>
 #include <string_view>
 #include <unordered_set>
@@ -17,6 +20,95 @@ namespace {
 constexpr std::string_view SummonName = "summon";
 constexpr std::string_view ImplicitlyName = "implicitly";
 constexpr std::size_t MaxInlineExpansionDepth = 32;
+
+bool isIntegerConstantType(SimpleTypeKind kind) {
+  return kind == SimpleTypeKind::Byte || kind == SimpleTypeKind::Short ||
+         kind == SimpleTypeKind::Int || kind == SimpleTypeKind::Long;
+}
+
+std::optional<std::int64_t> parseIntegerConstant(std::string_view text) {
+  std::string normalized;
+  normalized.reserve(text.size());
+  for (char ch : text) {
+    if (ch != '_') {
+      normalized.push_back(ch);
+    }
+  }
+  if (!normalized.empty() &&
+      (normalized.back() == 'l' || normalized.back() == 'L')) {
+    normalized.pop_back();
+  }
+
+  int base = 10;
+  std::size_t firstDigit = 0;
+  if (normalized.size() > 2 && normalized[0] == '0' &&
+      (normalized[1] == 'x' || normalized[1] == 'X')) {
+    base = 16;
+    firstDigit = 2;
+  }
+  if (firstDigit == normalized.size()) {
+    return std::nullopt;
+  }
+
+  std::int64_t value = 0;
+  const char* begin = normalized.data() + firstDigit;
+  const char* end = normalized.data() + normalized.size();
+  const auto [parsed, error] = std::from_chars(begin, end, value, base);
+  return error == std::errc{} && parsed == end
+             ? std::optional<std::int64_t>{value}
+             : std::nullopt;
+}
+
+std::optional<std::int64_t> checkedIntegerAdd(std::int64_t left,
+                                              std::int64_t right) {
+  constexpr std::int64_t minimum = std::numeric_limits<std::int64_t>::min();
+  constexpr std::int64_t maximum = std::numeric_limits<std::int64_t>::max();
+  if ((right > 0 && left > maximum - right) ||
+      (right < 0 && left < minimum - right)) {
+    return std::nullopt;
+  }
+  return left + right;
+}
+
+std::optional<std::int64_t> checkedIntegerSubtract(std::int64_t left,
+                                                   std::int64_t right) {
+  constexpr std::int64_t minimum = std::numeric_limits<std::int64_t>::min();
+  constexpr std::int64_t maximum = std::numeric_limits<std::int64_t>::max();
+  if ((right < 0 && left > maximum + right) ||
+      (right > 0 && left < minimum + right)) {
+    return std::nullopt;
+  }
+  return left - right;
+}
+
+std::optional<std::int64_t> checkedIntegerMultiply(std::int64_t left,
+                                                   std::int64_t right) {
+  constexpr std::uint64_t positiveLimit =
+      static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max());
+  constexpr std::uint64_t negativeLimit = positiveLimit + 1;
+  const auto magnitude = [](std::int64_t value) {
+    return value < 0
+               ? static_cast<std::uint64_t>(-(value + 1)) + std::uint64_t{1}
+               : static_cast<std::uint64_t>(value);
+  };
+
+  const bool negative = (left < 0) != (right < 0);
+  const std::uint64_t leftMagnitude = magnitude(left);
+  const std::uint64_t rightMagnitude = magnitude(right);
+  const std::uint64_t limit = negative ? negativeLimit : positiveLimit;
+  if (rightMagnitude != 0 && leftMagnitude > limit / rightMagnitude) {
+    return std::nullopt;
+  }
+
+  const std::uint64_t resultMagnitude = leftMagnitude * rightMagnitude;
+  if (!negative) {
+    return static_cast<std::int64_t>(resultMagnitude);
+  }
+  if (resultMagnitude == negativeLimit) {
+    return std::numeric_limits<std::int64_t>::min();
+  }
+  return -static_cast<std::int64_t>(resultMagnitude);
+}
 
 bool isClassLikeDeclaration(AstDeclarationKind kind) {
   return kind == AstDeclarationKind::Object || kind == AstDeclarationKind::Class ||
@@ -1865,6 +1957,11 @@ TypedDeclaration Typechecker::typecheckDeclaration(const AstDeclaration& declara
       symbol.specializedBooleanValue =
           constantBooleanValue(declaration.initializer, signatureScope);
     }
+    if (declaration.isInline && declaration.kind == AstDeclarationKind::Val &&
+        isIntegerConstantType(typed.inferredType.kind)) {
+      symbol.specializedIntegerValue =
+          constantIntegerValue(declaration.initializer, signatureScope);
+    }
     if (auto enclosing = globalSymbols_.find(owner);
         enclosing != globalSymbols_.end() &&
         enclosing->second.kind == AstDeclarationKind::Object) {
@@ -2137,6 +2234,11 @@ TypedDeclaration Typechecker::typecheckDeclaration(const AstDeclaration& declara
         typedMember.inferredType.kind == SimpleTypeKind::Boolean) {
       updated.specializedBooleanValue =
           constantBooleanValue(member.initializer, memberScope);
+    }
+    if (typedMember.isInline && typedMember.kind == AstDeclarationKind::Val &&
+        isIntegerConstantType(typedMember.inferredType.kind)) {
+      updated.specializedIntegerValue =
+          constantIntegerValue(member.initializer, memberScope);
     }
     updated.isAnonymousGiven = typedMember.isAnonymousGiven;
     updated.isModuleMember = declaration.kind == AstDeclarationKind::Object &&
@@ -4596,29 +4698,210 @@ Typechecker::constantBooleanValue(const AstExpression& expression,
       return std::nullopt;
     }
     {
-      const std::optional<bool> left =
-          constantBooleanValue(expression.children.front(), scope);
-      const std::optional<bool> right =
-          constantBooleanValue(expression.children.back(), scope);
-      if (!left.has_value() || !right.has_value()) {
-        return std::nullopt;
+      if (expression.text == "&&" || expression.text == "||" ||
+          expression.text == "==" || expression.text == "!=") {
+        const std::optional<bool> left =
+            constantBooleanValue(expression.children.front(), scope);
+        const std::optional<bool> right =
+            constantBooleanValue(expression.children.back(), scope);
+        if (left.has_value() && right.has_value()) {
+          if (expression.text == "&&") {
+            return *left && *right;
+          }
+          if (expression.text == "||") {
+            return *left || *right;
+          }
+          if (expression.text == "==") {
+            return *left == *right;
+          }
+          return *left != *right;
+        }
       }
-      if (expression.text == "&&") {
-        return *left && *right;
-      }
-      if (expression.text == "||") {
-        return *left || *right;
-      }
-      if (expression.text == "==") {
-        return *left == *right;
-      }
-      if (expression.text == "!=") {
-        return *left != *right;
+
+      if (expression.text == "==" || expression.text == "!=" ||
+          expression.text == "<" || expression.text == ">" ||
+          expression.text == "<=" || expression.text == ">=") {
+        const std::optional<std::int64_t> left =
+            constantIntegerValue(expression.children.front(), scope);
+        const std::optional<std::int64_t> right =
+            constantIntegerValue(expression.children.back(), scope);
+        if (!left.has_value() || !right.has_value()) {
+          return std::nullopt;
+        }
+        if (expression.text == "==") {
+          return *left == *right;
+        }
+        if (expression.text == "!=") {
+          return *left != *right;
+        }
+        if (expression.text == "<") {
+          return *left < *right;
+        }
+        if (expression.text == ">") {
+          return *left > *right;
+        }
+        if (expression.text == "<=") {
+          return *left <= *right;
+        }
+        return *left >= *right;
       }
     }
     return std::nullopt;
   default:
     return std::nullopt;
+  }
+}
+
+std::optional<std::int64_t>
+Typechecker::constantIntegerValue(const AstExpression& expression,
+                                  const Scope& scope) const {
+  const auto fitsType = [&](std::int64_t value) {
+    const SimpleTypeKind kind = constantIntegerType(expression, scope);
+    return kind == SimpleTypeKind::Long ||
+           (kind == SimpleTypeKind::Int &&
+            value >= std::numeric_limits<std::int32_t>::min() &&
+            value <= std::numeric_limits<std::int32_t>::max()) ||
+           (kind == SimpleTypeKind::Short &&
+            value >= std::numeric_limits<std::int16_t>::min() &&
+            value <= std::numeric_limits<std::int16_t>::max()) ||
+           (kind == SimpleTypeKind::Byte &&
+            value >= std::numeric_limits<std::int8_t>::min() &&
+            value <= std::numeric_limits<std::int8_t>::max());
+  };
+
+  switch (expression.kind) {
+  case AstExpressionKind::IntegerLiteral: {
+    const std::optional<std::int64_t> value =
+        parseIntegerConstant(expression.text);
+    return value.has_value() && fitsType(*value) ? value : std::nullopt;
+  }
+  case AstExpressionKind::Identifier:
+    if (auto symbol = scope.find(expression.text); symbol != scope.end()) {
+      return symbol->second.specializedIntegerValue;
+    }
+    return std::nullopt;
+  case AstExpressionKind::Select:
+    if (expression.children.size() == 1 &&
+        expression.children.front().kind == AstExpressionKind::Identifier) {
+      if (auto receiver = scope.find(expression.children.front().text);
+          receiver != scope.end()) {
+        if (std::optional<SymbolInfo> member = resolvedMemberForReceiverType(
+                receiver->second.type, expression.text)) {
+          return member->specializedIntegerValue;
+        }
+      }
+    }
+    return std::nullopt;
+  case AstExpressionKind::Unary:
+    if (expression.children.size() == 1 &&
+        (expression.text == "+" || expression.text == "-")) {
+      const std::optional<std::int64_t> operand =
+          constantIntegerValue(expression.children.front(), scope);
+      if (!operand.has_value()) {
+        return std::nullopt;
+      }
+      if (expression.text == "+") {
+        return operand;
+      }
+      if (*operand != std::numeric_limits<std::int64_t>::min()) {
+        const std::int64_t result = -*operand;
+        return fitsType(result) ? std::optional<std::int64_t>{result}
+                                : std::nullopt;
+      }
+    }
+    return std::nullopt;
+  case AstExpressionKind::Binary:
+    if (expression.children.size() == 2) {
+      const std::optional<std::int64_t> left =
+          constantIntegerValue(expression.children.front(), scope);
+      const std::optional<std::int64_t> right =
+          constantIntegerValue(expression.children.back(), scope);
+      if (!left.has_value() || !right.has_value()) {
+        return std::nullopt;
+      }
+      std::optional<std::int64_t> result;
+      if (expression.text == "+") {
+        result = checkedIntegerAdd(*left, *right);
+      }
+      if (expression.text == "-") {
+        result = checkedIntegerSubtract(*left, *right);
+      }
+      if (expression.text == "*") {
+        result = checkedIntegerMultiply(*left, *right);
+      }
+      if (expression.text == "/" && *right != 0 &&
+          !(*left == std::numeric_limits<std::int64_t>::min() && *right == -1)) {
+        result = *left / *right;
+      }
+      if (expression.text == "%" && *right != 0) {
+        if (*left == std::numeric_limits<std::int64_t>::min() && *right == -1) {
+          return std::int64_t{0};
+        }
+        result = *left % *right;
+      }
+      if (result.has_value()) {
+        return fitsType(*result) ? result : std::nullopt;
+      }
+    }
+    return std::nullopt;
+  default:
+    return std::nullopt;
+  }
+}
+
+SimpleTypeKind
+Typechecker::constantIntegerType(const AstExpression& expression,
+                                 const Scope& scope) const {
+  switch (expression.kind) {
+  case AstExpressionKind::IntegerLiteral:
+    return !expression.text.empty() &&
+                   (expression.text.back() == 'l' || expression.text.back() == 'L')
+               ? SimpleTypeKind::Long
+               : SimpleTypeKind::Int;
+  case AstExpressionKind::Identifier:
+    if (auto symbol = scope.find(expression.text);
+        symbol != scope.end() && isIntegerConstantType(symbol->second.type.kind)) {
+      return symbol->second.type.kind;
+    }
+    return SimpleTypeKind::Unknown;
+  case AstExpressionKind::Select:
+    if (expression.children.size() == 1 &&
+        expression.children.front().kind == AstExpressionKind::Identifier) {
+      if (auto receiver = scope.find(expression.children.front().text);
+          receiver != scope.end()) {
+        if (std::optional<SymbolInfo> member = resolvedMemberForReceiverType(
+                receiver->second.type, expression.text);
+            member.has_value() && isIntegerConstantType(member->type.kind)) {
+          return member->type.kind;
+        }
+      }
+    }
+    return SimpleTypeKind::Unknown;
+  case AstExpressionKind::Unary:
+    if (expression.children.size() == 1) {
+      const SimpleTypeKind operand =
+          constantIntegerType(expression.children.front(), scope);
+      return operand == SimpleTypeKind::Byte || operand == SimpleTypeKind::Short
+                 ? SimpleTypeKind::Int
+                 : operand;
+    }
+    return SimpleTypeKind::Unknown;
+  case AstExpressionKind::Binary:
+    if (expression.children.size() == 2) {
+      const SimpleTypeKind left =
+          constantIntegerType(expression.children.front(), scope);
+      const SimpleTypeKind right =
+          constantIntegerType(expression.children.back(), scope);
+      if (!isIntegerConstantType(left) || !isIntegerConstantType(right)) {
+        return SimpleTypeKind::Unknown;
+      }
+      return left == SimpleTypeKind::Long || right == SimpleTypeKind::Long
+                 ? SimpleTypeKind::Long
+                 : SimpleTypeKind::Int;
+    }
+    return SimpleTypeKind::Unknown;
+  default:
+    return SimpleTypeKind::Unknown;
   }
 }
 
@@ -4667,17 +4950,41 @@ std::optional<TypeInfo> Typechecker::recordInlineApplication(
               : nullptr;
       const bool inlineParameter = index < symbol.inlineParameters.size() &&
                                    symbol.inlineParameters[index];
+      const SimpleTypeKind parameterKind =
+          index < symbol.parameterTypes.size()
+              ? symbol.parameterTypes[index].kind
+              : SimpleTypeKind::Unknown;
       const bool booleanInlineParameter =
-          inlineParameter && index < symbol.parameterTypes.size() &&
-          symbol.parameterTypes[index].kind == SimpleTypeKind::Boolean;
-      if (!booleanInlineParameter || sourceArgument == nullptr ||
-          constantBooleanValue(*sourceArgument, scope).has_value() ||
-          sourceArgument->kind != AstExpressionKind::Identifier) {
+          inlineParameter && parameterKind == SimpleTypeKind::Boolean;
+      const bool integerInlineParameter =
+          inlineParameter && isIntegerConstantType(parameterKind);
+      const bool hasConstantArgument =
+          sourceArgument != nullptr &&
+          (booleanInlineParameter
+               ? constantBooleanValue(*sourceArgument, scope).has_value()
+           : integerInlineParameter
+               ? constantIntegerValue(*sourceArgument, scope).has_value()
+               : false);
+      if ((!booleanInlineParameter && !integerInlineParameter) ||
+          sourceArgument == nullptr || hasConstantArgument) {
         continue;
       }
-      if (auto parameter = scope.find(sourceArgument->text);
-          parameter != scope.end() && parameter->second.isInlineParameter &&
-          !parameter->second.specializedBooleanValue.has_value()) {
+      const std::function<bool(const AstExpression&)>
+          containsUnresolvedInlineParameter = [&](const AstExpression& candidate) {
+            if (candidate.kind == AstExpressionKind::Identifier) {
+              if (auto parameter = scope.find(candidate.text);
+                  parameter != scope.end() &&
+                  parameter->second.isInlineParameter) {
+                return (booleanInlineParameter &&
+                        !parameter->second.specializedBooleanValue.has_value()) ||
+                       (integerInlineParameter &&
+                        !parameter->second.specializedIntegerValue.has_value());
+              }
+            }
+            return std::any_of(candidate.children.begin(), candidate.children.end(),
+                               containsUnresolvedInlineParameter);
+          };
+      if (containsUnresolvedInlineParameter(*sourceArgument)) {
         return std::nullopt;
       }
     }
@@ -4803,6 +5110,11 @@ std::optional<TypeInfo> Typechecker::recordInlineApplication(
           sourceArgument == nullptr
               ? std::nullopt
               : constantBooleanValue(*sourceArgument, scope);
+    } else if (isIntegerConstantType(type.kind)) {
+      parameter.specializedIntegerValue =
+          sourceArgument == nullptr
+              ? std::nullopt
+              : constantIntegerValue(*sourceArgument, scope);
     }
     parameter.isLexicalValue = true;
     inlineScope[name] = std::move(parameter);

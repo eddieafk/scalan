@@ -1035,19 +1035,22 @@ Current scaffold status:
   `using inline` parameters resolved from inferred givens, explicit `using`
   expressions, or nested contextual forwarding. Ordinary and contextual
   non-inline parameters retain their single-evaluation local binding.
-  Call-site rechecking tracks compile-time Boolean arguments for both ordinary
-  and inline parameters. An ordinary `if` formed from those values is
-  opportunistically reduced, while `inline if` requires a constant condition
-  and diagnoses a dynamic one. Conditions support `!`, `&&`, `||`, `==`, and
-  `!=`; successful reduction records and emits only the selected branch.
-  Dynamic ordinary conditions retain a runtime conditional and preserve
-  by-value single evaluation. Ordinary constant parameters propagate through
-  nested inline calls and can refine transparent-inline results to the selected
-  concrete branch type.
+  Call-site rechecking tracks compile-time Boolean and integer arguments for
+  both ordinary and inline parameters. An ordinary `if` formed from those
+  values is opportunistically reduced, while `inline if` requires a constant
+  condition and diagnoses a dynamic one. Boolean conditions support `!`, `&&`,
+  `||`, `==`, and `!=`. `Byte`, `Short`, `Int`, and `Long` constants propagate
+  through unary `+`/`-`, checked `+`, `-`, `*`, `/`, and `%` arithmetic, and
+  `==`, `!=`, `<`, `>`, `<=`, and `>=` comparisons. Overflow and zero divisors
+  do not fold. Successful reduction records and emits only the selected
+  branch. Dynamic ordinary conditions retain a runtime conditional and
+  preserve by-value single evaluation. Ordinary constant parameters propagate
+  through nested inline calls and can refine transparent-inline results to the
+  selected concrete branch type.
   Constants propagate through nested inline calls and work with generic evidence
   selection, contextual and curried calls, effectful instance receivers, and
-  transparent-result refinement. Symbolic Boolean inline parameters defer
-  nested specialization until the enclosing call site. Non-constant Boolean
+  transparent-result refinement. Symbolic Boolean and integer inline parameters
+  defer nested specialization until the enclosing call site. Non-constant
   arguments remain valid unless an `inline if` requires reduction. In this
   bounded slice both branches must still typecheck at the original definition
   site. Partially applied calls and the remaining Scala 3 inline surface stay
@@ -1057,13 +1060,13 @@ Current scaffold status:
   composed with supported unary/binary operators. An initializer can also refer
   by identifier or object selection to an earlier validated inline value, so
   dependency-ordered aliases and compound constant chains remain compile-time
-  values. Boolean results propagate through those chains for ordinary and
-  mandatory conditional reduction. NIR substitutes every alias from its
-  definition owner, preventing caller-local shadowing and leaving no accessor
-  call. Dynamic and missing initializers, ordinary-value references, forward,
-  self, and cyclic inline-value references, class/trait-owned inline values,
-  `inline var`, and abstract inline values remain outside this bounded slice and
-  receive focused diagnostics where applicable.
+  values. Boolean and integer results propagate through those chains for
+  ordinary and mandatory conditional reduction. NIR substitutes every alias
+  from its definition owner, preventing caller-local shadowing and leaving no
+  accessor call. Dynamic and missing initializers, ordinary-value references,
+  forward, self, and cyclic inline-value references, class/trait-owned inline
+  values, `inline var`, and abstract inline values remain outside this bounded
+  slice and receive focused diagnostics where applicable.
   Recursive inline applications reuse the same nested metadata tree and unfold
   when compile-time branch reduction reaches them. The expansion depth is capped
   at Scala 3's default of 32, so terminating Boolean recursion emits no residual
@@ -1090,7 +1093,8 @@ Current scaffold status:
   selection, terminating recursive/contextual/transparent expansion,
   general repeated/discarded inline arguments, inferred/explicit/nested
   contextual inline evidence, nested ordinary-parameter shadowing, depth-limit
-  and ordinary constant/dynamic/nested/transparent conditionals, mandatory
+  and ordinary constant/dynamic/nested/transparent conditionals, integer
+  arithmetic/comparison and Int/Long alias conditions, mandatory
   constant/placement failures, direct Boolean/String, compound-condition, and
   dependency-ordered inline-value aliases, definition-site shadowing, invalid
   ordinary/forward/self references, initializer/owner/mutability forms,
