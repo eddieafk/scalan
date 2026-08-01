@@ -281,12 +281,6 @@ bool AstValidator::validateDeclaration(const AstDeclaration& declaration,
                         "inline parameters are only supported on inline methods");
       ok = false;
     }
-    if (i < declaration.contextualParameters.size() &&
-        declaration.contextualParameters[i]) {
-      diagnostics.error(declaration.span,
-                        "contextual inline parameters are not supported yet");
-      ok = false;
-    }
   }
   for (std::size_t i = 0; i < declaration.contextualParameters.size(); ++i) {
     if (!declaration.contextualParameters[i]) {

@@ -196,6 +196,24 @@ object Selectors {
     } else {
       new PreciseResult("recursive-transparent")
     }
+
+  inline def repeatedInline(inline value: String): String =
+    value + ":" + value
+
+  inline def discardedInline(inline value: String): String =
+    "discarded-inline"
+
+  inline def ordinaryShadow(value: String): String =
+    value + ":" + value
+
+  inline def shadowedInline(inline value: String): String =
+    ordinaryShadow("shadowed")
+
+  inline def contextualInline[A]()(using inline named: Named[A]): String =
+    "contextual-inline:" + named.label() + ":" + named.label()
+
+  inline def nestedContextualInline[A]()(using inline named: Named[A]): String =
+    "nested-" + contextualInline[A]()
 }
 
 class InstanceSelectors(val instancePrefix: String) {
@@ -342,6 +360,11 @@ object Main {
     "plain"
   }
 
+  def nextInlineNamed(): Named[String] = {
+    println("inline-context-effect")
+    new NamedValue[String]("explicit-inline")
+  }
+
   def main(args: Array[String]): Unit = {
     println(Selectors.selected[Int])
 
@@ -464,5 +487,11 @@ object Main {
     println(Selectors.recursiveChoose(true, true, nextNonGeneric()))
     println(Selectors.recursiveContextual[Int](true))
     println(Selectors.recursiveRefined(true).preciseOnly())
+    println(Selectors.repeatedInline(nextValue()))
+    println(Selectors.discardedInline(nextValue()))
+    println(Selectors.shadowedInline(nextValue()))
+    println(Selectors.contextualInline[Int]())
+    println(Selectors.contextualInline[String]()(using nextInlineNamed()))
+    println(Selectors.nestedContextualInline[Int]())
   }
 }

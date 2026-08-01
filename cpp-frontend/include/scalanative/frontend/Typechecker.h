@@ -141,6 +141,7 @@ struct TypedInlineApplication {
   AstExpression body;
   std::vector<std::string> parameterNames;
   std::vector<TypeInfo> parameterTypes;
+  std::vector<bool> inlineParameters;
   std::vector<AstExpression> arguments;
   std::vector<TypedContextArgument> contextualArguments;
   TypeInfo resultType;
@@ -427,7 +428,6 @@ private:
   std::string currentPackageName_;
   std::size_t zoneInferenceDepth_ = 0;
   std::size_t inlineExpansionDepth_ = 0;
-  bool inlineExpansionHasInvalidArgument_ = false;
 };
 
 [[nodiscard]] const char* simpleTypeKindName(SimpleTypeKind kind);

@@ -1518,7 +1518,6 @@ TypedModule Typechecker::typecheck(const AstModule& module) {
   currentPackageName_ = module.packageName;
   zoneInferenceDepth_ = 0;
   inlineExpansionDepth_ = 0;
-  inlineExpansionHasInvalidArgument_ = false;
   TypedModule typed;
   typed.packageName = module.packageName;
   Scope scope;
@@ -1652,16 +1651,6 @@ TypedDeclaration Typechecker::typecheckDeclaration(const AstDeclaration& declara
     if (!typed.hasInitializer) {
       diagnostics_.error(declaration.span,
                          "inline method requires an implementation");
-    }
-  }
-  for (std::size_t i = 0; i < typed.inlineParameters.size(); ++i) {
-    if (!typed.inlineParameters[i]) {
-      continue;
-    }
-    if (i >= typed.parameterTypes.size() ||
-        typed.parameterTypes[i].kind != SimpleTypeKind::Boolean) {
-      diagnostics_.error(declaration.span,
-                         "inline parameters currently require type Boolean");
     }
   }
   for (std::size_t i = 0; i < typed.parameters.size(); ++i) {
@@ -4594,7 +4583,10 @@ std::optional<TypeInfo> Typechecker::recordInlineApplication(
               : nullptr;
       const bool inlineParameter = index < symbol.inlineParameters.size() &&
                                    symbol.inlineParameters[index];
-      if (!inlineParameter || sourceArgument == nullptr ||
+      const bool booleanInlineParameter =
+          inlineParameter && index < symbol.parameterTypes.size() &&
+          symbol.parameterTypes[index].kind == SimpleTypeKind::Boolean;
+      if (!booleanInlineParameter || sourceArgument == nullptr ||
           constantBooleanValue(*sourceArgument, scope).has_value() ||
           sourceArgument->kind != AstExpressionKind::Identifier) {
         continue;
@@ -4638,10 +4630,6 @@ std::optional<TypeInfo> Typechecker::recordInlineApplication(
                            " exceeded while expanding " + symbol.name);
     return std::nullopt;
   }
-
-  const bool outerInvalidInlineArgument =
-      inlineExpansionHasInvalidArgument_;
-  inlineExpansionHasInvalidArgument_ = false;
 
   Scope inlineScope = scope;
   std::unordered_map<std::string, TypeInfo> substitutions;
@@ -4726,18 +4714,11 @@ std::optional<TypeInfo> Typechecker::recordInlineApplication(
     if (!materializedContextParameter && sourceArgumentIndex < arguments.size()) {
       sourceArgument = &arguments[sourceArgumentIndex++];
     }
-    if (parameter.isInlineParameter) {
+    if (parameter.isInlineParameter && type.kind == SimpleTypeKind::Boolean) {
       parameter.inlineBooleanValue =
           sourceArgument == nullptr
               ? std::nullopt
               : constantBooleanValue(*sourceArgument, scope);
-      if (!parameter.inlineBooleanValue.has_value()) {
-        diagnostics_.error(
-            sourceArgument == nullptr ? expression.span : sourceArgument->span,
-            "argument for inline parameter " + name +
-                " must be a compile-time Boolean constant");
-        inlineExpansionHasInvalidArgument_ = true;
-      }
     }
     parameter.isLexicalValue = true;
     inlineScope[name] = std::move(parameter);
@@ -4769,6 +4750,7 @@ std::optional<TypeInfo> Typechecker::recordInlineApplication(
   application.body = symbol.inlineBody;
   application.parameterNames = std::move(parameterNames);
   application.parameterTypes = std::move(parameterTypes);
+  application.inlineParameters = symbol.inlineParameters;
   application.arguments = arguments;
   application.contextualArguments = contextualArguments;
   application.resultType = resultType;
@@ -4784,7 +4766,6 @@ std::optional<TypeInfo> Typechecker::recordInlineApplication(
   expressionTypes_ = std::move(outerExpressionTypes);
   contextApplications_ = std::move(outerContextApplications);
   inlineApplications_ = std::move(outerInlineApplications);
-  inlineExpansionHasInvalidArgument_ = outerInvalidInlineArgument;
 
   const auto sameSpan = [&](const TypedInlineApplication& candidate) {
     return candidate.expressionKind == expression.kind &&
@@ -6761,11 +6742,9 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
         return inferExpressionType(expression.children[selectedBranch], scope,
                                    expectedType);
       }
-      if (!inlineExpansionHasInvalidArgument_) {
-        diagnostics_.error(
-            expression.children[0].span,
-            "inline if condition must be a compile-time Boolean constant");
-      }
+      diagnostics_.error(
+          expression.children[0].span,
+          "inline if condition must be a compile-time Boolean constant");
     }
     if (expression.children.size() == 2) {
       (void)inferExpressionType(expression.children[1], scope, expectedType);

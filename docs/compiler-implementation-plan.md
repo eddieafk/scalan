@@ -1028,18 +1028,24 @@ Current scaffold status:
   transparent-result refinement. Inline-application identity includes both
   source span and expression kind so synthesized contextual expressions cannot
   alias their enclosing call metadata.
-  Boolean `inline` parameters are represented separately from runtime parameter
-  signatures and require compile-time literal or propagated Boolean arguments.
-  Call-site rechecking reduces `inline if` conditions formed from those values,
-  including `!`, `&&`, `||`, `==`, and `!=`, records the selected branch, and
-  emits only that branch. Constants propagate through nested inline calls and
-  work with generic evidence selection, contextual and curried calls,
-  effectful instance receivers, and transparent-result refinement. Symbolic
-  inline parameters defer nested specialization until the enclosing call site.
-  In this bounded slice both branches must still typecheck at the original
-  definition site. Inline parameters currently require `Boolean`, and
-  contextual inline parameters are rejected. Partially applied calls and the
-  remaining Scala 3 inline surface stay future milestones.
+  `inline` parameters are represented separately from ordinary runtime
+  parameters and support every type already handled by the frontend. NIR
+  substitutes their call-site expression into the expanded body: repeated uses
+  duplicate evaluation, while unused arguments disappear. This also applies to
+  `using inline` parameters resolved from inferred givens, explicit `using`
+  expressions, or nested contextual forwarding. Ordinary and contextual
+  non-inline parameters retain their single-evaluation local binding.
+  Call-site rechecking tracks compile-time Boolean inline arguments and reduces
+  `inline if` conditions formed from those values, including `!`, `&&`, `||`,
+  `==`, and `!=`, records the selected branch, and emits only that branch.
+  Constants propagate through nested inline calls and work with generic evidence
+  selection, contextual and curried calls, effectful instance receivers, and
+  transparent-result refinement. Symbolic Boolean inline parameters defer
+  nested specialization until the enclosing call site. Non-constant Boolean
+  arguments remain valid unless an `inline if` requires reduction. In this
+  bounded slice both branches must still typecheck at the original definition
+  site. Partially applied calls and the remaining Scala 3 inline surface stay
+  future milestones.
   Recursive inline applications reuse the same nested metadata tree and unfold
   when compile-time branch reduction reaches them. The expansion depth is capped
   at Scala 3's default of 32, so terminating Boolean recursion emits no residual
@@ -1064,7 +1070,9 @@ Current scaffold status:
   curried/instance/nested/transparent forms, Boolean inline-parameter true,
   false, negated, nested, generic/contextual/curried/instance and transparent
   selection, terminating recursive/contextual/transparent expansion,
-  depth-limit and constant/type/placement failures, malformed clause shapes,
+  general repeated/discarded inline arguments, inferred/explicit/nested
+  contextual inline evidence, nested ordinary-parameter shadowing, depth-limit
+  and constant/placement failures, malformed clause shapes,
   malformed cases, unmatched search, ambiguity propagation, and unsupported
   inline forms.
 - Anonymous givens and block-local named or anonymous givens now use the same

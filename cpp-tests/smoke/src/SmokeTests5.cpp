@@ -247,6 +247,24 @@ object Selectors {
     } else {
       new PreciseResult("recursive-transparent")
     }
+
+  inline def repeatedInline(inline value: String): String =
+    value + ":" + value
+
+  inline def discardedInline(inline value: String): String =
+    "discarded-inline"
+
+  inline def ordinaryShadow(value: String): String =
+    value + ":" + value
+
+  inline def shadowedInline(inline value: String): String =
+    ordinaryShadow("shadowed")
+
+  inline def contextualInline[A]()(using inline named: Named[A]): String =
+    "contextual-inline:" + named.label() + ":" + named.label()
+
+  inline def nestedContextualInline[A]()(using inline named: Named[A]): String =
+    "nested-" + contextualInline[A]()
 }
 
 class InstanceSelectors(val instancePrefix: String) {
@@ -391,6 +409,11 @@ object Main {
   def nextNonGeneric(): String = {
     println("non-generic-effect")
     "plain"
+  }
+
+  def nextInlineNamed(): Named[String] = {
+    println("inline-context-effect")
+    new NamedValue[String]("explicit-inline")
   }
 
   def intSelected: String = Selectors.selected[Int]
@@ -542,6 +565,18 @@ object Main {
     Selectors.recursiveContextual[Int](true)
   def recursiveTransparentChoice: String =
     Selectors.recursiveRefined(true).preciseOnly()
+  def repeatedInlineParameter: String =
+    Selectors.repeatedInline(nextValue())
+  def discardedInlineParameter: String =
+    Selectors.discardedInline(nextValue())
+  def shadowedInlineParameter: String =
+    Selectors.shadowedInline(nextValue())
+  def inferredContextualInlineParameter: String =
+    Selectors.contextualInline[Int]()
+  def explicitContextualInlineParameter: String =
+    Selectors.contextualInline[String]()(using nextInlineNamed())
+  def nestedContextualInlineParameter: String =
+    Selectors.nestedContextualInline[Int]()
 
   def main(args: Array[String]): Unit = {
     println(intSelected)
@@ -618,6 +653,12 @@ object Main {
     println(recursiveInlineChoice)
     println(recursiveContextualChoice)
     println(recursiveTransparentChoice)
+    println(repeatedInlineParameter)
+    println(discardedInlineParameter)
+    println(shadowedInlineParameter)
+    println(inferredContextualInlineParameter)
+    println(explicitContextualInlineParameter)
+    println(nestedContextualInlineParameter)
   }
 }
 )";
@@ -637,8 +678,6 @@ object Main {
   transparent def unsupportedTransparent[A](): String = "transparent"
   inline def missingBody[A]: String
   inline def recursive[A]: String = recursive[A]
-  inline def invalidInlineParameterType(
-      inline count: Int): String = "invalid-type"
   def runtimeCondition(): Boolean = true
   inline def requiresConstant(inline condition: Boolean): String =
     inline if (condition) "constant" else "not-constant"
@@ -848,6 +887,18 @@ object Main {
       functionText(result.nirText, "demo.inlinecalls.Main.recursiveContextualChoice");
   const std::string_view recursiveTransparentChoice =
       functionText(result.nirText, "demo.inlinecalls.Main.recursiveTransparentChoice");
+  const std::string_view repeatedInlineParameter =
+      functionText(result.nirText, "demo.inlinecalls.Main.repeatedInlineParameter");
+  const std::string_view discardedInlineParameter =
+      functionText(result.nirText, "demo.inlinecalls.Main.discardedInlineParameter");
+  const std::string_view shadowedInlineParameter =
+      functionText(result.nirText, "demo.inlinecalls.Main.shadowedInlineParameter");
+  const std::string_view inferredContextualInlineParameter = functionText(
+      result.nirText, "demo.inlinecalls.Main.inferredContextualInlineParameter");
+  const std::string_view explicitContextualInlineParameter = functionText(
+      result.nirText, "demo.inlinecalls.Main.explicitContextualInlineParameter");
+  const std::string_view nestedContextualInlineParameter = functionText(
+      result.nirText, "demo.inlinecalls.Main.nestedContextualInlineParameter");
 
   const bool valid =
       status == 0 &&
@@ -917,7 +968,14 @@ object Main {
               "non-generic-effect\n"
               "recursive-step:recursive-step:recursive-done:plain:plain\n"
               "recursive-context:recursive-context-done:member-int\n"
-              "recursive-transparent\n" &&
+              "recursive-transparent\n"
+              "effect\neffect\nvalue:value\n"
+              "discarded-inline\n"
+              "shadowed:shadowed\n"
+              "contextual-inline:member-int:member-int\n"
+              "inline-context-effect\ninline-context-effect\n"
+              "contextual-inline:explicit-inline:explicit-inline\n"
+              "nested-contextual-inline:member-int:member-int\n" &&
       !invalid.ok &&
       contains(invalid.diagnosticsText,
                "no given value found for context parameter value of type") &&
@@ -936,11 +994,6 @@ object Main {
       !structuralInvalid.ok &&
       contains(structuralInvalid.diagnosticsText,
                "inline parameters are only supported on inline methods") &&
-      contains(invalid.diagnosticsText,
-               "inline parameters currently require type Boolean") &&
-      contains(invalid.diagnosticsText,
-               "argument for inline parameter condition must be a compile-time "
-               "Boolean constant") &&
       contains(invalid.diagnosticsText,
                "inline if condition must be a compile-time Boolean constant") &&
       contains(structuralInvalid.diagnosticsText,
@@ -1249,7 +1302,31 @@ object Main {
       contains(recursiveTransparentChoice, "demo.inlinecalls.PreciseResult") &&
       contains(recursiveTransparentChoice, ".preciseOnly") &&
       !contains(recursiveTransparentChoice,
-                "%demo.inlinecalls.Selectors.recursiveRefined");
+                "%demo.inlinecalls.Selectors.recursiveRefined") &&
+      countOccurrences(repeatedInlineParameter, "nextValue") == 2 &&
+      !contains(repeatedInlineParameter, "let %value") &&
+      !contains(repeatedInlineParameter,
+                "%demo.inlinecalls.Selectors.repeatedInline") &&
+      countOccurrences(discardedInlineParameter, "nextValue") == 0 &&
+      !contains(discardedInlineParameter,
+                "%demo.inlinecalls.Selectors.discardedInline") &&
+      contains(shadowedInlineParameter, "\"shadowed\"") &&
+      countOccurrences(shadowedInlineParameter, "nextValue") == 0 &&
+      !contains(shadowedInlineParameter,
+                "%demo.inlinecalls.Selectors.shadowedInline") &&
+      !contains(shadowedInlineParameter,
+                "%demo.inlinecalls.Selectors.ordinaryShadow") &&
+      countOccurrences(inferredContextualInlineParameter, "Main.intNamed") == 2 &&
+      !contains(inferredContextualInlineParameter,
+                "%demo.inlinecalls.Selectors.contextualInline") &&
+      countOccurrences(explicitContextualInlineParameter, "nextInlineNamed") == 2 &&
+      !contains(explicitContextualInlineParameter,
+                "%demo.inlinecalls.Selectors.contextualInline") &&
+      countOccurrences(nestedContextualInlineParameter, "Main.intNamed") == 2 &&
+      !contains(nestedContextualInlineParameter,
+                "%demo.inlinecalls.Selectors.nestedContextualInline") &&
+      !contains(nestedContextualInlineParameter,
+                "%demo.inlinecalls.Selectors.contextualInline");
   return valid
              ? 0
              : fail(
@@ -1357,7 +1434,19 @@ object Main {
                    "', recursive-contextual-choice='" +
                    std::string(recursiveContextualChoice) +
                    "', recursive-transparent-choice='" +
-                   std::string(recursiveTransparentChoice) + "')");
+                   std::string(recursiveTransparentChoice) +
+                   "', repeated-inline-parameter='" +
+                   std::string(repeatedInlineParameter) +
+                   "', discarded-inline-parameter='" +
+                   std::string(discardedInlineParameter) +
+                   "', shadowed-inline-parameter='" +
+                   std::string(shadowedInlineParameter) +
+                   "', inferred-contextual-inline-parameter='" +
+                   std::string(inferredContextualInlineParameter) +
+                   "', explicit-contextual-inline-parameter='" +
+                   std::string(explicitContextualInlineParameter) +
+                   "', nested-contextual-inline-parameter='" +
+                   std::string(nestedContextualInlineParameter) + "')");
 }
 
 } // namespace

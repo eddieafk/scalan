@@ -25,6 +25,7 @@ struct ValueContext {
   std::unordered_map<std::string, std::string> importAliases;
   std::unordered_set<std::string> implicitThisMembers;
   std::unordered_set<std::string> localNames;
+  std::unordered_map<std::string, nir::Value> inlineValues;
   std::vector<support::SourceSpan> lexicalScopes;
   const std::vector<frontend::TypedDeclaration>* declarations = nullptr;
   const std::vector<frontend::TypedExpressionInfo>* expressionTypes = nullptr;
@@ -38,6 +39,11 @@ struct ValueContext {
   bool stackableSuper = false;
   bool hasImplicitReceiver = false;
 };
+
+void bindLocalName(ValueContext& context, const std::string& name) {
+  context.localNames.insert(name);
+  context.inlineValues.erase(name);
+}
 
 struct MaterializedTraitValue {
   const frontend::TypedDeclaration* owner = nullptr;
@@ -1985,7 +1991,7 @@ nir::Value scopedBodyValueFor(const frontend::AstExpression& expression,
       values.push_back(
           nir::localLetValue(child.text, type, std::move(initializer), child.span));
     }
-    blockContext.localNames.insert(child.text);
+    bindLocalName(blockContext, child.text);
   }
   return nir::blockValue(std::move(values), expression.span);
 }
@@ -2019,7 +2025,7 @@ nir::Value inlineApplicationValueFor(
                                     application.receiver, callSiteContext);
     values.push_back(nir::localLetValue(
         "this", receiverType, std::move(receiver), application.receiver.span));
-    inlineContext.localNames.insert("this");
+    bindLocalName(inlineContext, "this");
   }
   std::size_t sourceArgumentIndex = 0;
   for (std::size_t parameterIndex = 0;
@@ -2066,9 +2072,17 @@ nir::Value inlineApplicationValueFor(
     } else {
       value = nir::unknownValue("<missing-inline-argument>", application.span);
     }
+    const bool inlineParameter =
+        parameterIndex < application.inlineParameters.size() &&
+        application.inlineParameters[parameterIndex];
+    if (inlineParameter) {
+      inlineContext.inlineValues[name] = std::move(value);
+      inlineContext.localNames.insert(name);
+      continue;
+    }
     values.push_back(nir::localLetValue(name, runtimeType, std::move(value),
                                         argumentSpan));
-    inlineContext.localNames.insert(name);
+    bindLocalName(inlineContext, name);
   }
   values.push_back(scopedBodyValueFor(application.body, inlineContext));
   return nir::blockValue(std::move(values), application.span);
@@ -2117,7 +2131,7 @@ void appendExpressionSetup(const frontend::AstExpression& expression,
                               child.span, blockContext.lexicalScopes);
           }
         }
-        blockContext.localNames.insert(child.text);
+        bindLocalName(blockContext, child.text);
         continue;
       }
       appendExpressionSetup(child, body, blockContext);
@@ -2179,6 +2193,10 @@ nir::Value valueFor(const frontend::AstExpression& expression,
   case AstExpressionKind::Empty:
     return nir::unitValue(expression.span);
   case AstExpressionKind::Identifier:
+    if (auto inlineValue = context.inlineValues.find(expression.text);
+        inlineValue != context.inlineValues.end()) {
+      return inlineValue->second;
+    }
     if (expression.text == support::StdNames::NotImplemented) {
       return nir::throwValue(
           nir::newValue(std::string(support::StdNames::ScalaNotImplementedError),
@@ -2329,7 +2347,7 @@ nir::Value valueFor(const frontend::AstExpression& expression,
         return nir::unknownValue("<malformed-try-child>", child.span);
       }
       ValueContext handlerContext = context;
-      handlerContext.localNames.insert(child.text);
+      bindLocalName(handlerContext, child.text);
       const frontend::TypeInfo* handlerSemanticType = annotatedTypeFor(child, context);
       const std::string handlerResultType = handlerSemanticType == nullptr
                                                 ? resultType
@@ -2379,7 +2397,7 @@ nir::Value valueFor(const frontend::AstExpression& expression,
     values.push_back(nir::localLetValue(
         branch.text, runtimeTypeName(contextual.type),
         materializeContextArgument(contextual, expression, context), branch.span));
-    branchContext.localNames.insert(branch.text);
+    bindLocalName(branchContext, branch.text);
     values.push_back(scopedBodyValueFor(branch.children.front(), branchContext));
     return nir::blockValue(std::move(values), expression.span);
   }
@@ -2395,7 +2413,7 @@ nir::Value valueFor(const frontend::AstExpression& expression,
         const frontend::AstExpression& child = expression.children[i];
         if (child.kind == AstExpressionKind::LocalDeclaration &&
             child.localMethod == nullptr) {
-          blockContext.localNames.insert(child.text);
+          bindLocalName(blockContext, child.text);
         }
       }
       return valueFor(expression.children.back(), blockContext);
@@ -3472,7 +3490,7 @@ nir::FunctionBody bodyFor(const frontend::TypedDeclaration& declaration,
   ValueContext bodyContext = context;
   if (!receiverType.empty()) {
     (void)body.addParameter("this", receiverType, declaration.span);
-    bodyContext.localNames.insert("this");
+    bindLocalName(bodyContext, "this");
   }
   for (std::size_t i = 0; i < declaration.parameters.size(); ++i) {
     const std::string& parameter = declaration.parameters[i];
@@ -3512,7 +3530,7 @@ nir::FunctionBody bodyFor(const frontend::TypedDeclaration& declaration,
     } else {
       (void)body.addParameter(name, type, declaration.span);
     }
-    bodyContext.localNames.insert(name);
+    bindLocalName(bodyContext, name);
   }
   appendExpressionSetup(declaration.initializer, body, bodyContext);
   ValueContext resultContext = bodyContext;
@@ -3526,7 +3544,7 @@ nir::FunctionBody bodyFor(const frontend::TypedDeclaration& declaration,
       const frontend::AstExpression& child = resultExpression->children[i];
       if (child.kind == frontend::AstExpressionKind::LocalDeclaration &&
           child.localMethod == nullptr) {
-        resultContext.localNames.insert(child.text);
+        bindLocalName(resultContext, child.text);
       }
     }
     resultExpression = &resultExpression->children.back();
@@ -3670,7 +3688,7 @@ void appendMaterializedTraitInitializerItems(
         implicitThisMembersFor(module.declarations, value->owner->symbolName);
     traitContext.superTypes = value->owner->parentTypes;
     traitContext.superType = superTypeName(*value->owner);
-    traitContext.localNames.insert("this");
+    bindLocalName(traitContext, "this");
     appendExpressionSetup(value->member->initializer, body, traitContext);
     nir::Value initializer = valueFor(value->member->initializer, traitContext);
     if (const std::string primitive = boxedPrimitiveType(value->member->inferredType);
@@ -3747,7 +3765,7 @@ nir::FunctionBody constructorBodyFor(const frontend::TypedModule& module,
   nir::FunctionBodyBuilder body;
   ValueContext bodyContext = context;
   (void)body.addParameter("this", receiverType, declaration.span);
-  bodyContext.localNames.insert("this");
+  bindLocalName(bodyContext, "this");
   appendParentInitialization(module, declaration, body, bodyContext);
   appendMaterializedTraitInitializerItems(module, declaration, body, bodyContext);
   appendClassInitializerItems(declaration, body, bodyContext);
