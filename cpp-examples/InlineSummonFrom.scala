@@ -214,6 +214,25 @@ object Selectors {
 
   inline def nestedContextualInline[A]()(using inline named: Named[A]): String =
     "nested-" + contextualInline[A]()
+
+  inline def ordinaryConditional(condition: Boolean, value: String): String =
+    if (condition) {
+      "ordinary-true:" + value
+    } else {
+      "ordinary-false:" + value
+    }
+
+  inline def nestedOrdinaryConditional(
+      condition: Boolean, value: String): String =
+    "nested-" + ordinaryConditional(condition, value)
+
+  transparent inline def ordinaryRefined(
+      condition: Boolean): TransparentResult =
+    if (condition) {
+      new PreciseResult("ordinary-transparent-true")
+    } else {
+      new FallbackResult("ordinary-transparent-false")
+    }
 }
 
 class InstanceSelectors(val instancePrefix: String) {
@@ -365,6 +384,11 @@ object Main {
     new NamedValue[String]("explicit-inline")
   }
 
+  def nextCondition(): Boolean = {
+    println("condition-effect")
+    true
+  }
+
   def main(args: Array[String]): Unit = {
     println(Selectors.selected[Int])
 
@@ -493,5 +517,10 @@ object Main {
     println(Selectors.contextualInline[Int]())
     println(Selectors.contextualInline[String]()(using nextInlineNamed()))
     println(Selectors.nestedContextualInline[Int]())
+    println(Selectors.ordinaryConditional(true, "constant"))
+    println(Selectors.nestedOrdinaryConditional(false, "nested"))
+    println(Selectors.ordinaryConditional(nextCondition(), "dynamic"))
+    println(Selectors.ordinaryRefined(true).preciseOnly())
+    println(Selectors.ordinaryRefined(false).fallbackOnly())
   }
 }

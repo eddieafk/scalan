@@ -265,6 +265,25 @@ object Selectors {
 
   inline def nestedContextualInline[A]()(using inline named: Named[A]): String =
     "nested-" + contextualInline[A]()
+
+  inline def ordinaryConditional(condition: Boolean, value: String): String =
+    if (condition) {
+      "ordinary-true:" + value
+    } else {
+      "ordinary-false:" + value
+    }
+
+  inline def nestedOrdinaryConditional(
+      condition: Boolean, value: String): String =
+    "nested-" + ordinaryConditional(condition, value)
+
+  transparent inline def ordinaryRefined(
+      condition: Boolean): TransparentResult =
+    if (condition) {
+      new PreciseResult("ordinary-transparent-true")
+    } else {
+      new FallbackResult("ordinary-transparent-false")
+    }
 }
 
 class InstanceSelectors(val instancePrefix: String) {
@@ -414,6 +433,11 @@ object Main {
   def nextInlineNamed(): Named[String] = {
     println("inline-context-effect")
     new NamedValue[String]("explicit-inline")
+  }
+
+  def nextCondition(): Boolean = {
+    println("condition-effect")
+    true
   }
 
   def intSelected: String = Selectors.selected[Int]
@@ -577,6 +601,16 @@ object Main {
     Selectors.contextualInline[String]()(using nextInlineNamed())
   def nestedContextualInlineParameter: String =
     Selectors.nestedContextualInline[Int]()
+  def ordinaryConstantConditional: String =
+    Selectors.ordinaryConditional(true, "constant")
+  def nestedOrdinaryConstantConditional: String =
+    Selectors.nestedOrdinaryConditional(false, "nested")
+  def ordinaryRuntimeConditional: String =
+    Selectors.ordinaryConditional(nextCondition(), "dynamic")
+  def ordinaryTransparentTrue: String =
+    Selectors.ordinaryRefined(true).preciseOnly()
+  def ordinaryTransparentFalse: String =
+    Selectors.ordinaryRefined(false).fallbackOnly()
 
   def main(args: Array[String]): Unit = {
     println(intSelected)
@@ -659,6 +693,11 @@ object Main {
     println(inferredContextualInlineParameter)
     println(explicitContextualInlineParameter)
     println(nestedContextualInlineParameter)
+    println(ordinaryConstantConditional)
+    println(nestedOrdinaryConstantConditional)
+    println(ordinaryRuntimeConditional)
+    println(ordinaryTransparentTrue)
+    println(ordinaryTransparentFalse)
   }
 }
 )";
@@ -684,7 +723,7 @@ object Main {
   def invalidInlineArgument: String = requiresConstant(runtimeCondition())
   inline def requiresInlineCondition(condition: Boolean): String =
     inline if (condition) "constant" else "not-constant"
-  def invalidInlineCondition: String = requiresInlineCondition(true)
+  def invalidInlineCondition: String = requiresInlineCondition(runtimeCondition())
   inline val unsupported: String = "value"
 }
 
@@ -899,6 +938,16 @@ object Main {
       result.nirText, "demo.inlinecalls.Main.explicitContextualInlineParameter");
   const std::string_view nestedContextualInlineParameter = functionText(
       result.nirText, "demo.inlinecalls.Main.nestedContextualInlineParameter");
+  const std::string_view ordinaryConstantConditional =
+      functionText(result.nirText, "demo.inlinecalls.Main.ordinaryConstantConditional");
+  const std::string_view nestedOrdinaryConstantConditional = functionText(
+      result.nirText, "demo.inlinecalls.Main.nestedOrdinaryConstantConditional");
+  const std::string_view ordinaryRuntimeConditional =
+      functionText(result.nirText, "demo.inlinecalls.Main.ordinaryRuntimeConditional");
+  const std::string_view ordinaryTransparentTrue =
+      functionText(result.nirText, "demo.inlinecalls.Main.ordinaryTransparentTrue");
+  const std::string_view ordinaryTransparentFalse =
+      functionText(result.nirText, "demo.inlinecalls.Main.ordinaryTransparentFalse");
 
   const bool valid =
       status == 0 &&
@@ -975,7 +1024,12 @@ object Main {
               "contextual-inline:member-int:member-int\n"
               "inline-context-effect\ninline-context-effect\n"
               "contextual-inline:explicit-inline:explicit-inline\n"
-              "nested-contextual-inline:member-int:member-int\n" &&
+              "nested-contextual-inline:member-int:member-int\n"
+              "ordinary-true:constant\n"
+              "nested-ordinary-false:nested\n"
+              "condition-effect\nordinary-true:dynamic\n"
+              "ordinary-transparent-true\n"
+              "ordinary-transparent-false\n" &&
       !invalid.ok &&
       contains(invalid.diagnosticsText,
                "no given value found for context parameter value of type") &&
@@ -1326,7 +1380,32 @@ object Main {
       !contains(nestedContextualInlineParameter,
                 "%demo.inlinecalls.Selectors.nestedContextualInline") &&
       !contains(nestedContextualInlineParameter,
-                "%demo.inlinecalls.Selectors.contextualInline");
+                "%demo.inlinecalls.Selectors.contextualInline") &&
+      contains(ordinaryConstantConditional, "\"ordinary-true:\"") &&
+      !contains(ordinaryConstantConditional, "ordinary-false:") &&
+      !contains(ordinaryConstantConditional,
+                "%demo.inlinecalls.Selectors.ordinaryConditional") &&
+      contains(nestedOrdinaryConstantConditional, "\"ordinary-false:\"") &&
+      !contains(nestedOrdinaryConstantConditional, "ordinary-true:") &&
+      !contains(nestedOrdinaryConstantConditional,
+                "%demo.inlinecalls.Selectors.nestedOrdinaryConditional") &&
+      !contains(nestedOrdinaryConstantConditional,
+                "%demo.inlinecalls.Selectors.ordinaryConditional") &&
+      countOccurrences(ordinaryRuntimeConditional, "nextCondition") == 1 &&
+      contains(ordinaryRuntimeConditional, "ordinary-true:") &&
+      contains(ordinaryRuntimeConditional, "ordinary-false:") &&
+      !contains(ordinaryRuntimeConditional,
+                "%demo.inlinecalls.Selectors.ordinaryConditional") &&
+      contains(ordinaryTransparentTrue, "demo.inlinecalls.PreciseResult") &&
+      contains(ordinaryTransparentTrue, ".preciseOnly") &&
+      !contains(ordinaryTransparentTrue, "demo.inlinecalls.FallbackResult") &&
+      !contains(ordinaryTransparentTrue,
+                "%demo.inlinecalls.Selectors.ordinaryRefined") &&
+      contains(ordinaryTransparentFalse, "demo.inlinecalls.FallbackResult") &&
+      contains(ordinaryTransparentFalse, ".fallbackOnly") &&
+      !contains(ordinaryTransparentFalse, "demo.inlinecalls.PreciseResult") &&
+      !contains(ordinaryTransparentFalse,
+                "%demo.inlinecalls.Selectors.ordinaryRefined");
   return valid
              ? 0
              : fail(
@@ -1446,7 +1525,17 @@ object Main {
                    "', explicit-contextual-inline-parameter='" +
                    std::string(explicitContextualInlineParameter) +
                    "', nested-contextual-inline-parameter='" +
-                   std::string(nestedContextualInlineParameter) + "')");
+                   std::string(nestedContextualInlineParameter) +
+                   "', ordinary-constant-conditional='" +
+                   std::string(ordinaryConstantConditional) +
+                   "', nested-ordinary-constant-conditional='" +
+                   std::string(nestedOrdinaryConstantConditional) +
+                   "', ordinary-runtime-conditional='" +
+                   std::string(ordinaryRuntimeConditional) +
+                   "', ordinary-transparent-true='" +
+                   std::string(ordinaryTransparentTrue) +
+                   "', ordinary-transparent-false='" +
+                   std::string(ordinaryTransparentFalse) + "')");
 }
 
 } // namespace

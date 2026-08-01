@@ -1035,9 +1035,15 @@ Current scaffold status:
   `using inline` parameters resolved from inferred givens, explicit `using`
   expressions, or nested contextual forwarding. Ordinary and contextual
   non-inline parameters retain their single-evaluation local binding.
-  Call-site rechecking tracks compile-time Boolean inline arguments and reduces
-  `inline if` conditions formed from those values, including `!`, `&&`, `||`,
-  `==`, and `!=`, records the selected branch, and emits only that branch.
+  Call-site rechecking tracks compile-time Boolean arguments for both ordinary
+  and inline parameters. An ordinary `if` formed from those values is
+  opportunistically reduced, while `inline if` requires a constant condition
+  and diagnoses a dynamic one. Conditions support `!`, `&&`, `||`, `==`, and
+  `!=`; successful reduction records and emits only the selected branch.
+  Dynamic ordinary conditions retain a runtime conditional and preserve
+  by-value single evaluation. Ordinary constant parameters propagate through
+  nested inline calls and can refine transparent-inline results to the selected
+  concrete branch type.
   Constants propagate through nested inline calls and work with generic evidence
   selection, contextual and curried calls, effectful instance receivers, and
   transparent-result refinement. Symbolic Boolean inline parameters defer
@@ -1072,7 +1078,8 @@ Current scaffold status:
   selection, terminating recursive/contextual/transparent expansion,
   general repeated/discarded inline arguments, inferred/explicit/nested
   contextual inline evidence, nested ordinary-parameter shadowing, depth-limit
-  and constant/placement failures, malformed clause shapes,
+  and ordinary constant/dynamic/nested/transparent conditionals, mandatory
+  constant/placement failures, malformed clause shapes,
   malformed cases, unmatched search, ambiguity propagation, and unsupported
   inline forms.
 - Anonymous givens and block-local named or anonymous givens now use the same

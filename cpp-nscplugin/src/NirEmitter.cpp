@@ -3438,20 +3438,18 @@ nir::Value valueFor(const frontend::AstExpression& expression,
     return nir::assignValue(expressionValueFor(expression.children[0], context, true),
                             std::move(assignedValue), expression.span);
   }
-  case AstExpressionKind::If:
+  case AstExpressionKind::If: {
     if (expression.children.size() < 2) {
       return nir::unknownValue("<malformed-if>", expression.span);
     }
-    if (expression.isInline) {
-      const frontend::TypedContextApplication* application =
-          contextApplicationFor(expression, context);
-      if (application != nullptr && application->hasSelectedBranch) {
-        if (application->selectedBranch >= expression.children.size()) {
-          return nir::unitValue(expression.span);
-        }
-        return scopedBodyValueFor(
-            expression.children[application->selectedBranch], context);
+    const frontend::TypedContextApplication* application =
+        contextApplicationFor(expression, context);
+    if (application != nullptr && application->hasSelectedBranch) {
+      if (application->selectedBranch >= expression.children.size()) {
+        return nir::unitValue(expression.span);
       }
+      return scopedBodyValueFor(expression.children[application->selectedBranch],
+                                context);
     }
     if (expression.children.size() == 2) {
       return nir::ifValue(expressionValueFor(expression.children[0], context),
@@ -3472,6 +3470,7 @@ nir::Value valueFor(const frontend::AstExpression& expression,
                           std::move(thenValue), std::move(elseValue), resultType,
                           expression.span);
     }
+  }
   case AstExpressionKind::While:
     if (expression.children.size() != 2) {
       return nir::unknownValue("<malformed-while>", expression.span);

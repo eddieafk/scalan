@@ -191,7 +191,7 @@ struct SymbolInfo {
   std::size_t captureParameterCount = 0;
   std::size_t contextPrerequisiteCount = 0;
   std::size_t contextualNestingDepth = 0;
-  std::optional<bool> inlineBooleanValue;
+  std::optional<bool> specializedBooleanValue;
   AstExpression inlineBody;
 };
 

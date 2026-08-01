@@ -4496,7 +4496,7 @@ Typechecker::constantBooleanValue(const AstExpression& expression,
     return std::nullopt;
   case AstExpressionKind::Identifier:
     if (auto symbol = scope.find(expression.text); symbol != scope.end()) {
-      return symbol->second.inlineBooleanValue;
+      return symbol->second.specializedBooleanValue;
     }
     return std::nullopt;
   case AstExpressionKind::Unary:
@@ -4593,7 +4593,7 @@ std::optional<TypeInfo> Typechecker::recordInlineApplication(
       }
       if (auto parameter = scope.find(sourceArgument->text);
           parameter != scope.end() && parameter->second.isInlineParameter &&
-          !parameter->second.inlineBooleanValue.has_value()) {
+          !parameter->second.specializedBooleanValue.has_value()) {
         return std::nullopt;
       }
     }
@@ -4714,8 +4714,8 @@ std::optional<TypeInfo> Typechecker::recordInlineApplication(
     if (!materializedContextParameter && sourceArgumentIndex < arguments.size()) {
       sourceArgument = &arguments[sourceArgumentIndex++];
     }
-    if (parameter.isInlineParameter && type.kind == SimpleTypeKind::Boolean) {
-      parameter.inlineBooleanValue =
+    if (type.kind == SimpleTypeKind::Boolean) {
+      parameter.specializedBooleanValue =
           sourceArgument == nullptr
               ? std::nullopt
               : constantBooleanValue(*sourceArgument, scope);
@@ -6731,7 +6731,7 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
                            "if condition requires a Boolean value");
       }
     }
-    if (expression.isInline && inlineExpansionDepth_ != 0) {
+    if (inlineExpansionDepth_ != 0) {
       if (std::optional<bool> condition =
               constantBooleanValue(expression.children[0], scope)) {
         const std::size_t selectedBranch = *condition ? 1 : 2;
@@ -6742,9 +6742,11 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
         return inferExpressionType(expression.children[selectedBranch], scope,
                                    expectedType);
       }
-      diagnostics_.error(
-          expression.children[0].span,
-          "inline if condition must be a compile-time Boolean constant");
+      if (expression.isInline) {
+        diagnostics_.error(
+            expression.children[0].span,
+            "inline if condition must be a compile-time Boolean constant");
+      }
     }
     if (expression.children.size() == 2) {
       (void)inferExpressionType(expression.children[1], scope, expectedType);
