@@ -411,8 +411,11 @@ bool AstValidator::validateExpression(const AstExpression& expression,
     ok = false;
   }
   if (expression.isInline && !allowInlineExpressions) {
-    diagnostics.error(expression.span,
-                      "inline if is only supported inside an inline method");
+    diagnostics.error(
+        expression.span,
+        expression.text == "match"
+            ? "inline match is only supported inside an inline method"
+            : "inline if is only supported inside an inline method");
     ok = false;
   }
   switch (expression.kind) {

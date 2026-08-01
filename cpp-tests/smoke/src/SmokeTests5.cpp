@@ -295,6 +295,37 @@ object Selectors {
   inline def longNumericChoice(inline value: Long): String =
     inline if (value >= 100L) "long-high" else "long-low"
 
+  inline def booleanInlineMatch(inline value: Boolean): String =
+    inline value match {
+      case true => "match-true"
+      case _ => "match-false"
+    }
+
+  inline def numericInlineMatch(inline value: Int): String =
+    inline value match {
+      case 0 => "match-zero"
+      case 1 | 2 => "match-small"
+      case other => "match-other"
+    }
+
+  inline def computedInlineMatch(inline value: Int): String =
+    inline (value + 1) match {
+      case 4 => "match-computed"
+      case _ => "match-computed-other"
+    }
+
+  inline def longInlineMatch(inline value: Long): String =
+    inline value match {
+      case 100L => "match-long"
+      case _ => "match-long-other"
+    }
+
+  inline def aliasedInlineMatch(): String =
+    inline numericThresholdAlias match {
+      case 6 => "match-alias"
+      case _ => "match-alias-other"
+    }
+
   inline def ordinaryConditional(condition: Boolean, value: String): String =
     if (condition) {
       "ordinary-true:" + value
@@ -649,6 +680,14 @@ object Main {
   def ordinaryNumeric: String = Selectors.ordinaryNumericChoice(6)
   def longNumeric: String = Selectors.longNumericChoice(120L)
   def directInlineInteger: Int = Selectors.numericThresholdAlias
+  def booleanInlineMatchTrue: String = Selectors.booleanInlineMatch(true)
+  def booleanInlineMatchFalse: String = Selectors.booleanInlineMatch(false)
+  def numericInlineMatchZero: String = Selectors.numericInlineMatch(0)
+  def numericInlineMatchAlternative: String = Selectors.numericInlineMatch(2)
+  def numericInlineMatchFallback: String = Selectors.numericInlineMatch(9)
+  def computedInlineMatch: String = Selectors.computedInlineMatch(3)
+  def longInlineMatch: String = Selectors.longInlineMatch(100L)
+  def aliasedInlineMatch: String = Selectors.aliasedInlineMatch()
   def ordinaryConstantConditional: String =
     Selectors.ordinaryConditional(true, "constant")
   def nestedOrdinaryConstantConditional: String =
@@ -760,6 +799,14 @@ object Main {
     println(ordinaryNumeric)
     println(longNumeric)
     println(directInlineInteger)
+    println(booleanInlineMatchTrue)
+    println(booleanInlineMatchFalse)
+    println(numericInlineMatchZero)
+    println(numericInlineMatchAlternative)
+    println(numericInlineMatchFallback)
+    println(computedInlineMatch)
+    println(longInlineMatch)
+    println(aliasedInlineMatch)
     println(ordinaryConstantConditional)
     println(nestedOrdinaryConstantConditional)
     println(ordinaryRuntimeConditional)
@@ -809,6 +856,12 @@ object Main {
   inline def requiresNumeric(inline value: Int): String =
     inline if (value >= 0) "non-negative" else "negative"
   def invalidNumericCondition: String = requiresNumeric(runtimeNumber())
+  inline def requiresInlineMatch(inline value: Int): String =
+    inline value match {
+      case 0 => "zero"
+      case _ => "other"
+    }
+  def invalidInlineMatch: String = requiresInlineMatch(runtimeNumber())
   inline val dynamicInlineValue: Boolean = runtimeCondition()
   inline val missingInlineValue: Boolean
 }
@@ -821,10 +874,33 @@ object Main {
   def misplacedInlineParameter(inline condition: Boolean): String = "invalid"
   def misplacedInlineIf(condition: Boolean): String =
     inline if (condition) "invalid" else "invalid"
+  def misplacedInlineMatch(value: Int): String =
+    inline value match {
+      case 0 => "zero"
+      case _ => "other"
+    }
 }
 
 class UnsupportedInlineValueOwner {
   inline val value: Boolean = true
+}
+
+)";
+  constexpr const char* inlineMatchParserInvalidSource =
+      R"(package demo.invalidinlinematchparser
+
+object Main {
+  inline def guarded(inline value: Int): String =
+    inline value match {
+      case 0 if true => "zero"
+      case _ => "other"
+    }
+
+  inline def stringPattern(inline value: String): String =
+    inline value match {
+      case "later" => "selected"
+      case _ => "other"
+    }
 }
 
 )";
@@ -866,6 +942,11 @@ object Main {
   const scalanative::tools::build::BuildResult parserInvalid =
       driver.buildSource("ParserInvalidInlineVal.scala", parserInvalidSource, {},
                          parserInvalidDiagnostics);
+  scalanative::support::DiagnosticEngine inlineMatchParserInvalidDiagnostics;
+  const scalanative::tools::build::BuildResult inlineMatchParserInvalid =
+      driver.buildSource("ParserInvalidInlineMatch.scala",
+                         inlineMatchParserInvalidSource, {},
+                         inlineMatchParserInvalidDiagnostics);
 
   if (!result.ok) {
     if (contains(result.diagnosticsText, "clang toolchain not found")) {
@@ -1056,6 +1137,22 @@ object Main {
       functionText(result.nirText, "demo.inlinecalls.Main.longNumeric");
   const std::string_view directInlineInteger =
       functionText(result.nirText, "demo.inlinecalls.Main.directInlineInteger");
+  const std::string_view booleanInlineMatchTrue =
+      functionText(result.nirText, "demo.inlinecalls.Main.booleanInlineMatchTrue");
+  const std::string_view booleanInlineMatchFalse =
+      functionText(result.nirText, "demo.inlinecalls.Main.booleanInlineMatchFalse");
+  const std::string_view numericInlineMatchZero =
+      functionText(result.nirText, "demo.inlinecalls.Main.numericInlineMatchZero");
+  const std::string_view numericInlineMatchAlternative = functionText(
+      result.nirText, "demo.inlinecalls.Main.numericInlineMatchAlternative");
+  const std::string_view numericInlineMatchFallback = functionText(
+      result.nirText, "demo.inlinecalls.Main.numericInlineMatchFallback");
+  const std::string_view computedInlineMatch =
+      functionText(result.nirText, "demo.inlinecalls.Main.computedInlineMatch");
+  const std::string_view longInlineMatch =
+      functionText(result.nirText, "demo.inlinecalls.Main.longInlineMatch");
+  const std::string_view aliasedInlineMatch =
+      functionText(result.nirText, "demo.inlinecalls.Main.aliasedInlineMatch");
   const std::string_view ordinaryConstantConditional =
       functionText(result.nirText, "demo.inlinecalls.Main.ordinaryConstantConditional");
   const std::string_view nestedOrdinaryConstantConditional = functionText(
@@ -1161,6 +1258,8 @@ object Main {
               "nested-contextual-inline:member-int:member-int\n"
               "numeric-high\nnumeric-low\nnumeric-computed\nnumeric-arithmetic\n"
               "nested-numeric-high\nordinary-numeric-even\nlong-high\n6\n"
+              "match-true\nmatch-false\nmatch-zero\nmatch-small\nmatch-other\n"
+              "match-computed\nmatch-long\nmatch-alias\n"
               "ordinary-true:constant\n"
               "nested-ordinary-false:nested\n"
               "condition-effect\nordinary-true:dynamic\n"
@@ -1190,17 +1289,28 @@ object Main {
           invalid.diagnosticsText,
           "inline if condition must be a compile-time Boolean constant") == 3 &&
       contains(invalid.diagnosticsText,
+               "inline match selector must be a compile-time Boolean or integer "
+               "constant") &&
+      contains(invalid.diagnosticsText,
                "inline value initializer must use literals, operators, and "
                "previously defined inline values") &&
       contains(invalid.diagnosticsText, "inline value requires an initializer") &&
       contains(structuralInvalid.diagnosticsText,
                "inline if is only supported inside an inline method") &&
       contains(structuralInvalid.diagnosticsText,
+               "inline match is only supported inside an inline method") &&
+      contains(structuralInvalid.diagnosticsText,
                "inline values are currently supported only at top level or in "
                "objects") &&
       !parserInvalid.ok &&
       contains(parserInvalid.diagnosticsText,
                "'inline' must modify a def or val in this milestone") &&
+      !inlineMatchParserInvalid.ok &&
+      contains(inlineMatchParserInvalid.diagnosticsText,
+               "inline match guards are not supported yet") &&
+      contains(inlineMatchParserInvalid.diagnosticsText,
+               "inline match currently supports Boolean and integer literal "
+               "patterns plus a final wildcard or binding case") &&
       contains(intSelected, "call %demo.inlinecalls.Main.intNamed()") &&
       contains(intSelected, "call %demo.inlinecalls.Selectors.prefix()") &&
       !contains(intSelected, "%demo.inlinecalls.Selectors.selected") &&
@@ -1561,6 +1671,41 @@ object Main {
                 "%demo.inlinecalls.Selectors.numericThresholdAlias") &&
       !contains(directInlineInteger,
                 "%demo.inlinecalls.Selectors.numericThreshold") &&
+      contains(booleanInlineMatchTrue, "\"match-true\"") &&
+      !contains(booleanInlineMatchTrue, "match-false") &&
+      !contains(booleanInlineMatchTrue,
+                "%demo.inlinecalls.Selectors.booleanInlineMatch") &&
+      contains(booleanInlineMatchFalse, "\"match-false\"") &&
+      !contains(booleanInlineMatchFalse, "match-true") &&
+      !contains(booleanInlineMatchFalse,
+                "%demo.inlinecalls.Selectors.booleanInlineMatch") &&
+      contains(numericInlineMatchZero, "\"match-zero\"") &&
+      !contains(numericInlineMatchZero, "match-small") &&
+      !contains(numericInlineMatchZero, "match-other") &&
+      !contains(numericInlineMatchZero,
+                "%demo.inlinecalls.Selectors.numericInlineMatch") &&
+      contains(numericInlineMatchAlternative, "\"match-small\"") &&
+      !contains(numericInlineMatchAlternative, "match-zero") &&
+      !contains(numericInlineMatchAlternative, "match-other") &&
+      !contains(numericInlineMatchAlternative,
+                "%demo.inlinecalls.Selectors.numericInlineMatch") &&
+      contains(numericInlineMatchFallback, "\"match-other\"") &&
+      !contains(numericInlineMatchFallback, "match-zero") &&
+      !contains(numericInlineMatchFallback, "match-small") &&
+      !contains(numericInlineMatchFallback,
+                "%demo.inlinecalls.Selectors.numericInlineMatch") &&
+      contains(computedInlineMatch, "\"match-computed\"") &&
+      !contains(computedInlineMatch, "match-computed-other") &&
+      !contains(computedInlineMatch,
+                "%demo.inlinecalls.Selectors.computedInlineMatch") &&
+      contains(longInlineMatch, "\"match-long\"") &&
+      !contains(longInlineMatch, "match-long-other") &&
+      !contains(longInlineMatch,
+                "%demo.inlinecalls.Selectors.longInlineMatch") &&
+      contains(aliasedInlineMatch, "\"match-alias\"") &&
+      !contains(aliasedInlineMatch, "match-alias-other") &&
+      !contains(aliasedInlineMatch,
+                "%demo.inlinecalls.Selectors.aliasedInlineMatch") &&
       contains(ordinaryConstantConditional, "\"ordinary-true:\"") &&
       !contains(ordinaryConstantConditional, "ordinary-false:") &&
       !contains(ordinaryConstantConditional,

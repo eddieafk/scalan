@@ -6918,6 +6918,13 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
         symbol.isAnonymousGiven = local.isAnonymousGiven;
         symbol.contextualNestingDepth = contextualNestingDepth;
         symbol.isLexicalValue = true;
+        if (!local.mutableLocal && !local.children.empty() &&
+            local.text.starts_with("$match")) {
+          symbol.specializedBooleanValue =
+              constantBooleanValue(local.children.front(), blockScope);
+          symbol.specializedIntegerValue =
+              constantIntegerValue(local.children.front(), blockScope);
+        }
         blockScope[local.text] = std::move(symbol);
       };
       for (std::size_t i = 0; i + 1 < expression.children.size(); ++i) {
@@ -7139,9 +7146,12 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
                                    expectedType);
       }
       if (expression.isInline) {
-        diagnostics_.error(
-            expression.children[0].span,
-            "inline if condition must be a compile-time Boolean constant");
+        diagnostics_.error(expression.children[0].span,
+                           expression.text == "match"
+                               ? "inline match selector must be a compile-time "
+                                 "Boolean or integer constant"
+                               : "inline if condition must be a compile-time "
+                                 "Boolean constant");
       }
     }
     if (expression.children.size() == 2) {

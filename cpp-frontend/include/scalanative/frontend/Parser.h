@@ -70,7 +70,9 @@ private:
   [[nodiscard]] AstExpression parseStableModuleReference(const Token& first);
   [[nodiscard]] AstExpression parseSummonFromExpression(const Token& identifier);
   [[nodiscard]] AstExpression parseMatchExpression(AstExpression selector,
-                                                   const Token& keyword);
+                                                   const Token& keyword,
+                                                   bool isInline = false,
+                                                   support::SourceSpan inlineSpan = {});
   [[nodiscard]] int precedence(const Token& token) const;
   bool consume(TokenKind kind, const std::string& message);
   [[nodiscard]] std::string parseQualifiedName();

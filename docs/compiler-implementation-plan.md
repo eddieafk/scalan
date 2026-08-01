@@ -1047,6 +1047,15 @@ Current scaffold status:
   preserve by-value single evaluation. Ordinary constant parameters propagate
   through nested inline calls and can refine transparent-inline results to the
   selected concrete branch type.
+  Braced Scala 3 `inline match` expressions reuse the ordinary match lowering
+  for compile-time Boolean and integer selectors.
+  Ordered Boolean/integer literal cases, literal alternatives, and a required
+  final wildcard or binding are supported; each lowered case has distinct
+  branch-selection metadata and only the selected body reaches NIR. A dynamic
+  selector is rejected during call-site specialization. Guards, type tests,
+  singleton objects, strings, floating-point values, characters, `null`, and
+  indentation-only match syntax remain later milestones and receive focused
+  diagnostics where applicable.
   Constants propagate through nested inline calls and work with generic evidence
   selection, contextual and curried calls, effectful instance receivers, and
   transparent-result refinement. Symbolic Boolean and integer inline parameters

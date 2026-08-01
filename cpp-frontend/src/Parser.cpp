@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <optional>
 #include <utility>
 
 namespace scalanative::frontend {
@@ -1315,6 +1316,12 @@ AstExpression Parser::parseUnaryExpression() {
 }
 
 AstExpression Parser::parsePostfixExpression() {
+  std::optional<Token> inlineMatchModifier;
+  if (check(TokenKind::Identifier) && peek().text == "inline" &&
+      current_ + 1 < tokens_.size() &&
+      tokens_[current_ + 1].kind != TokenKind::KeywordIf) {
+    inlineMatchModifier = advance();
+  }
   AstExpression expression = parsePrimaryExpression();
 
   while (!isAtEnd()) {
@@ -1419,11 +1426,20 @@ AstExpression Parser::parsePostfixExpression() {
     }
 
     if (match(TokenKind::KeywordMatch)) {
-      expression = parseMatchExpression(std::move(expression), previous());
+      const bool isInlineMatch = inlineMatchModifier.has_value();
+      expression = parseMatchExpression(
+          std::move(expression), previous(), isInlineMatch,
+          isInlineMatch ? inlineMatchModifier->span : support::SourceSpan{});
+      inlineMatchModifier.reset();
       continue;
     }
 
     break;
+  }
+
+  if (inlineMatchModifier.has_value()) {
+    diagnostics_.error(inlineMatchModifier->span,
+                       "'inline' expression must modify an if or match expression");
   }
 
   return expression;
@@ -1927,7 +1943,8 @@ AstExpression Parser::parseSummonFromExpression(const Token& identifier) {
 }
 
 AstExpression Parser::parseMatchExpression(AstExpression selector,
-                                           const Token& keyword) {
+                                           const Token& keyword, bool isInline,
+                                           support::SourceSpan inlineSpan) {
   struct MatchCase {
     AstExpression pattern;
     AstExpression body;
@@ -2076,6 +2093,26 @@ AstExpression Parser::parseMatchExpression(AstExpression selector,
       current.guard = parseExpression();
     }
 
+    if (isInline) {
+      const auto supportedLiteral = [](const AstExpression& pattern) {
+        return pattern.kind == AstExpressionKind::BooleanLiteral ||
+               pattern.kind == AstExpressionKind::IntegerLiteral;
+      };
+      if (current.hasGuard) {
+        diagnostics_.error(current.pattern.span,
+                           "inline match guards are not supported yet");
+      }
+      if (!current.isWildcard && current.bindingName.empty() &&
+          (!current.typePattern.empty() || !supportedLiteral(current.pattern) ||
+           !std::all_of(current.alternativePatterns.begin(),
+                        current.alternativePatterns.end(), supportedLiteral))) {
+        diagnostics_.error(
+            current.pattern.span,
+            "inline match currently supports Boolean and integer literal "
+            "patterns plus a final wildcard or binding case");
+      }
+    }
+
     consume(TokenKind::Arrow, "expected '=>' after match pattern");
     current.body =
         match(TokenKind::LeftBrace) ? parseBlockExpression() : parseExpression();
@@ -2103,11 +2140,19 @@ AstExpression Parser::parseMatchExpression(AstExpression selector,
     diagnostics_.error(keyword.span,
                        "match expression requires a final wildcard or binding case");
   }
+  if (isInline &&
+      std::none_of(cases.begin(), cases.end(),
+                   [&](const MatchCase& current) { return !isCatchAll(current); })) {
+    diagnostics_.error(
+        keyword.span,
+        "inline match requires at least one literal case before its catch-all");
+  }
 
   const std::string selectorName = "$match" + std::to_string(nextSyntheticLocal_++);
   const auto bindSelector = [&](std::string name, AstExpression expression,
                                 support::SourceSpan span,
                                 const std::string& declaredType) {
+    const support::SourceSpan expressionSpan = expression.span;
     AstExpression binding;
     binding.kind = AstExpressionKind::LocalDeclaration;
     binding.text = std::move(name);
@@ -2135,7 +2180,7 @@ AstExpression Parser::parseMatchExpression(AstExpression selector,
 
     AstExpression block;
     block.kind = AstExpressionKind::Block;
-    block.span = span;
+    block.span = expressionSpan.isValid() ? expressionSpan : span;
     block.children.push_back(std::move(binding));
     block.children.push_back(std::move(expression));
     return block;
@@ -2241,11 +2286,20 @@ AstExpression Parser::parseMatchExpression(AstExpression selector,
 
     AstExpression branch;
     branch.kind = AstExpressionKind::If;
-    branch.span = keyword.span;
+    branch.span = current->pattern.span;
+    branch.span.length = 0;
+    branch.text = isInline ? "match" : "";
     branch.children.push_back(std::move(condition));
     branch.children.push_back(std::move(body));
     branch.children.push_back(std::move(fallback));
     fallback = std::move(branch);
+  }
+
+  if (isInline && fallback.kind == AstExpressionKind::If) {
+    fallback.isInline = true;
+    if (inlineSpan.isValid()) {
+      fallback.span = inlineSpan;
+    }
   }
 
   AstExpression binding;

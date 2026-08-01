@@ -244,6 +244,37 @@ object Selectors {
   inline def longNumericChoice(inline value: Long): String =
     inline if (value >= 100L) "long-high" else "long-low"
 
+  inline def booleanInlineMatch(inline value: Boolean): String =
+    inline value match {
+      case true => "match-true"
+      case _ => "match-false"
+    }
+
+  inline def numericInlineMatch(inline value: Int): String =
+    inline value match {
+      case 0 => "match-zero"
+      case 1 | 2 => "match-small"
+      case other => "match-other"
+    }
+
+  inline def computedInlineMatch(inline value: Int): String =
+    inline (value + 1) match {
+      case 4 => "match-computed"
+      case _ => "match-computed-other"
+    }
+
+  inline def longInlineMatch(inline value: Long): String =
+    inline value match {
+      case 100L => "match-long"
+      case _ => "match-long-other"
+    }
+
+  inline def aliasedInlineMatch(): String =
+    inline numericThresholdAlias match {
+      case 6 => "match-alias"
+      case _ => "match-alias-other"
+    }
+
   inline def ordinaryConditional(condition: Boolean, value: String): String =
     if (condition) {
       "ordinary-true:" + value
@@ -570,6 +601,14 @@ object Main {
     println(Selectors.ordinaryNumericChoice(6))
     println(Selectors.longNumericChoice(120L))
     println(Selectors.numericThresholdAlias)
+    println(Selectors.booleanInlineMatch(true))
+    println(Selectors.booleanInlineMatch(false))
+    println(Selectors.numericInlineMatch(0))
+    println(Selectors.numericInlineMatch(2))
+    println(Selectors.numericInlineMatch(9))
+    println(Selectors.computedInlineMatch(3))
+    println(Selectors.longInlineMatch(100L))
+    println(Selectors.aliasedInlineMatch())
     println(Selectors.ordinaryConditional(true, "constant"))
     println(Selectors.nestedOrdinaryConditional(false, "nested"))
     println(Selectors.ordinaryConditional(nextCondition(), "dynamic"))
