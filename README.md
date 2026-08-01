@@ -95,8 +95,9 @@ build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
 # refinement. General and contextual `inline` parameters use substitution
 # semantics; compile-time Boolean arguments reduce ordinary or mandatory
 # `inline if` branches, including bounded recursive inline expansion. Stable
-# top-level and object `inline val` constants are substituted directly and can
-# drive branches.
+# top-level and object `inline val` constants, including dependency-ordered
+# aliases of earlier inline values, are substituted directly and can drive
+# branches.
 build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
   --output /tmp/inline-summon-from \
   cpp-examples/InlineSummonFrom.scala

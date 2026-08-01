@@ -1357,8 +1357,17 @@ std::string receiverTypeFor(const frontend::AstExpression& expression,
 
   switch (expression.kind) {
   case AstExpressionKind::Identifier:
-    return {};
   case AstExpressionKind::ModuleReference:
+    if (context.declarations != nullptr &&
+        !context.localNames.contains(expression.text)) {
+      const std::string resolved = qualifyTypeName(expression.text, context);
+      const frontend::TypedDeclaration* declaration =
+          findDeclarationBySymbol(*context.declarations, resolved);
+      if (declaration != nullptr &&
+          declaration->kind == frontend::AstDeclarationKind::Object) {
+        return declaration->symbolName;
+      }
+    }
     return {};
   case AstExpressionKind::This:
     return context.currentOwner;
@@ -2004,6 +2013,22 @@ nir::Value expressionValueFor(const frontend::AstExpression& expression,
   return valueFor(expression, context, preserveCallable);
 }
 
+nir::Value inlineValueInitializerFor(
+    const frontend::TypedDeclaration& declaration,
+    const ValueContext& referenceContext) {
+  ValueContext definitionContext = referenceContext;
+  const std::size_t separator = declaration.symbolName.rfind('.');
+  definitionContext.currentOwner =
+      separator == std::string::npos
+          ? std::string{}
+          : declaration.symbolName.substr(0, separator);
+  definitionContext.localNames.clear();
+  definitionContext.inlineValues.clear();
+  definitionContext.implicitThisMembers.clear();
+  definitionContext.hasImplicitReceiver = false;
+  return expressionValueFor(declaration.initializer, definitionContext);
+}
+
 nir::Value inlineApplicationValueFor(
     const frontend::TypedInlineApplication& application,
     const ValueContext& callSiteContext) {
@@ -2212,7 +2237,7 @@ nir::Value valueFor(const frontend::AstExpression& expression,
         declaration != nullptr && declaration->isInline &&
         declaration->kind == frontend::AstDeclarationKind::Val &&
         declaration->hasInitializer) {
-      return expressionValueFor(declaration->initializer, context);
+      return inlineValueInitializerFor(*declaration, context);
     }
     if (expression.text == support::StdNames::NotImplemented) {
       return nir::throwValue(
@@ -2489,7 +2514,7 @@ nir::Value valueFor(const frontend::AstExpression& expression,
       if (selectedDeclaration != nullptr && selectedDeclaration->isInline &&
           selectedDeclaration->kind == frontend::AstDeclarationKind::Val &&
           selectedDeclaration->hasInitializer) {
-        return expressionValueFor(selectedDeclaration->initializer, context);
+        return inlineValueInitializerFor(*selectedDeclaration, context);
       }
       if (selectedDeclaration != nullptr &&
           selectedDeclaration->kind == frontend::AstDeclarationKind::Object) {

@@ -257,6 +257,9 @@ private:
   [[nodiscard]] TypeInfo inferExpressionTypeImpl(const AstExpression& expression,
                                                  Scope& scope,
                                                  const TypeInfo* expectedType);
+  [[nodiscard]] bool
+  isSupportedInlineValueInitializer(const AstExpression& expression,
+                                    const Scope& scope) const;
   [[nodiscard]] std::optional<bool>
   constantBooleanValue(const AstExpression& expression, const Scope& scope) const;
   [[nodiscard]] TypeInfo inferNewType(const AstExpression& expression, Scope& scope);
@@ -420,6 +423,7 @@ private:
   std::vector<TypedExpressionInfo> expressionTypes_;
   std::vector<TypedContextApplication> contextApplications_;
   std::vector<TypedInlineApplication> inlineApplications_;
+  std::unordered_set<std::string> validatedInlineValueSymbols_;
   std::unordered_set<std::string> directZoneReceiverEscapes_;
   std::unordered_map<std::string, std::vector<AstExpression>> receiverMethodCallSites_;
   std::unordered_map<std::string, std::unordered_set<std::string>>

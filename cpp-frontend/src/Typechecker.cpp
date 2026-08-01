@@ -18,24 +18,6 @@ constexpr std::string_view SummonName = "summon";
 constexpr std::string_view ImplicitlyName = "implicitly";
 constexpr std::size_t MaxInlineExpansionDepth = 32;
 
-bool isSupportedInlineValueInitializer(const AstExpression& expression) {
-  switch (expression.kind) {
-  case AstExpressionKind::IntegerLiteral:
-  case AstExpressionKind::FloatingLiteral:
-  case AstExpressionKind::StringLiteral:
-  case AstExpressionKind::CharLiteral:
-  case AstExpressionKind::BooleanLiteral:
-    return true;
-  case AstExpressionKind::Unary:
-  case AstExpressionKind::Binary:
-    return !expression.children.empty() &&
-           std::all_of(expression.children.begin(), expression.children.end(),
-                       isSupportedInlineValueInitializer);
-  default:
-    return false;
-  }
-}
-
 bool isClassLikeDeclaration(AstDeclarationKind kind) {
   return kind == AstDeclarationKind::Object || kind == AstDeclarationKind::Class ||
          kind == AstDeclarationKind::Trait;
@@ -1529,6 +1511,7 @@ TypedModule Typechecker::typecheck(const AstModule& module) {
   expressionTypes_.clear();
   contextApplications_.clear();
   inlineApplications_.clear();
+  validatedInlineValueSymbols_.clear();
   directZoneReceiverEscapes_.clear();
   receiverMethodCallSites_.clear();
   implicitReceiverMethodNames_.clear();
@@ -1665,6 +1648,7 @@ TypedDeclaration Typechecker::typecheckDeclaration(const AstDeclaration& declara
   typed.parameterClauseSizes = declaration.parameterClauseSizes;
   typed.contextualParameterClauses =
       declaration.contextualParameterClauses;
+  bool inlineValueInitializerSupported = true;
   if (typed.isInline) {
     if (typed.kind == AstDeclarationKind::Def && !typed.hasInitializer) {
       diagnostics_.error(declaration.span,
@@ -1673,10 +1657,14 @@ TypedDeclaration Typechecker::typecheckDeclaration(const AstDeclaration& declara
       if (!typed.hasInitializer) {
         diagnostics_.error(declaration.span,
                            "inline value requires an initializer");
-      } else if (!isSupportedInlineValueInitializer(declaration.initializer)) {
+        inlineValueInitializerSupported = false;
+      } else if (!isSupportedInlineValueInitializer(declaration.initializer,
+                                                     signatureScope)) {
         diagnostics_.error(
             declaration.initializer.span,
-            "inline value initializer must be a self-contained constant expression");
+            "inline value initializer must use literals, operators, and "
+            "previously defined inline values");
+        inlineValueInitializerSupported = false;
       }
     }
   }
@@ -1891,6 +1879,10 @@ TypedDeclaration Typechecker::typecheckDeclaration(const AstDeclaration& declara
         companionTypeNames_.contains(qualify(owner, declaration.name));
     if (!companionObject) {
       scope[declaration.name] = std::move(symbol);
+    }
+    if (declaration.isInline && declaration.kind == AstDeclarationKind::Val &&
+        declaration.hasInitializer && inlineValueInitializerSupported) {
+      validatedInlineValueSymbols_.insert(typed.symbolName);
     }
   }
 
@@ -4517,6 +4509,48 @@ TypeInfo Typechecker::inferExpressionType(const AstExpression& expression, Scope
     }
   }
   return type;
+}
+
+bool Typechecker::isSupportedInlineValueInitializer(
+    const AstExpression& expression, const Scope& scope) const {
+  const auto isValidatedInlineValue = [&](const SymbolInfo* symbol) {
+    return symbol != nullptr && symbol->kind == AstDeclarationKind::Val &&
+           symbol->isInline &&
+           validatedInlineValueSymbols_.contains(symbol->symbolName);
+  };
+
+  switch (expression.kind) {
+  case AstExpressionKind::IntegerLiteral:
+  case AstExpressionKind::FloatingLiteral:
+  case AstExpressionKind::StringLiteral:
+  case AstExpressionKind::CharLiteral:
+  case AstExpressionKind::BooleanLiteral:
+    return true;
+  case AstExpressionKind::Identifier: {
+    const auto symbol = scope.find(expression.text);
+    return symbol != scope.end() && isValidatedInlineValue(&symbol->second);
+  }
+  case AstExpressionKind::Select:
+    if (expression.children.size() == 1 &&
+        expression.children.front().kind == AstExpressionKind::Identifier) {
+      const auto receiver = scope.find(expression.children.front().text);
+      if (receiver != scope.end()) {
+        const std::optional<SymbolInfo> member = resolvedMemberForReceiverType(
+            receiver->second.type, expression.text);
+        return member.has_value() && isValidatedInlineValue(&*member);
+      }
+    }
+    return false;
+  case AstExpressionKind::Unary:
+    return expression.children.size() == 1 &&
+           isSupportedInlineValueInitializer(expression.children.front(), scope);
+  case AstExpressionKind::Binary:
+    return expression.children.size() == 2 &&
+           isSupportedInlineValueInitializer(expression.children.front(), scope) &&
+           isSupportedInlineValueInitializer(expression.children.back(), scope);
+  default:
+    return false;
+  }
 }
 
 std::optional<bool>

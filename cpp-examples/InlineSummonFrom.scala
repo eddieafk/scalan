@@ -23,12 +23,16 @@ class FallbackResult(val value: String) extends TransparentResult {
 }
 
 inline val topLevelBanner: String = "top-inline"
+inline val topLevelBannerAlias: String = topLevelBanner
 
 object Selectors {
   val prefix: String = "selected:"
   inline val enabled: Boolean = true
   inline val foldedEnabled: Boolean = !false && true
   inline val banner: String = "inline-val"
+  inline val enabledAlias: Boolean = enabled
+  inline val foldedEnabledAlias: Boolean = enabledAlias && foldedEnabled
+  inline val bannerAlias: String = banner
 
   inline def selected[A]: String =
     summonFrom {
@@ -243,6 +247,14 @@ object Selectors {
     if (foldedEnabled) banner + ":" + value else "inline-val-disabled"
 }
 
+object InlineAliases {
+  inline val enabled: Boolean = Selectors.foldedEnabledAlias
+  inline val banner: String = Selectors.bannerAlias
+
+  inline def configured(value: String): String =
+    if (enabled) banner + ":" + value else "inline-alias-disabled"
+}
+
 class InstanceSelectors(val instancePrefix: String) {
   inline def selected[A](): String =
     summonFrom {
@@ -397,6 +409,11 @@ object Main {
     true
   }
 
+  def shadowedInlineAlias(): String = {
+    val banner: String = "caller-shadow"
+    Selectors.bannerAlias
+  }
+
   def main(args: Array[String]): Unit = {
     println(Selectors.selected[Int])
 
@@ -534,5 +551,9 @@ object Main {
     println(Selectors.banner)
     println(Selectors.configured("configured"))
     println(topLevelBanner)
+    println(topLevelBannerAlias)
+    println(InlineAliases.banner)
+    println(InlineAliases.configured("alias"))
+    println(shadowedInlineAlias())
   }
 }

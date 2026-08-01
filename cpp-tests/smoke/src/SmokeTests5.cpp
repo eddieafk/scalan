@@ -74,12 +74,16 @@ class FallbackResult(val value: String) extends TransparentResult {
 }
 
 inline val topLevelBanner: String = "top-inline"
+inline val topLevelBannerAlias: String = topLevelBanner
 
 object Selectors {
   val prefix: String = "selected:"
   inline val enabled: Boolean = true
   inline val foldedEnabled: Boolean = !false && true
   inline val banner: String = "inline-val"
+  inline val enabledAlias: Boolean = enabled
+  inline val foldedEnabledAlias: Boolean = enabledAlias && foldedEnabled
+  inline val bannerAlias: String = banner
 
   inline def selected[A]: String =
     summonFrom {
@@ -292,6 +296,14 @@ object Selectors {
 
   inline def configured(value: String): String =
     if (foldedEnabled) banner + ":" + value else "inline-val-disabled"
+}
+
+object InlineAliases {
+  inline val enabled: Boolean = Selectors.foldedEnabledAlias
+  inline val banner: String = Selectors.bannerAlias
+
+  inline def configured(value: String): String =
+    if (enabled) banner + ":" + value else "inline-alias-disabled"
 }
 
 class InstanceSelectors(val instancePrefix: String) {
@@ -623,6 +635,13 @@ object Main {
   def directInlineString: String = Selectors.banner
   def inlineValConfigured: String = Selectors.configured("configured")
   def directTopLevelInlineString: String = topLevelBanner
+  def directTopLevelInlineAlias: String = topLevelBannerAlias
+  def directSelectedInlineAlias: String = InlineAliases.banner
+  def inlineAliasConfigured: String = InlineAliases.configured("alias")
+  def shadowedInlineAlias: String = {
+    val banner: String = "caller-shadow"
+    Selectors.bannerAlias
+  }
 
   def main(args: Array[String]): Unit = {
     println(intSelected)
@@ -714,11 +733,21 @@ object Main {
     println(directInlineString)
     println(inlineValConfigured)
     println(directTopLevelInlineString)
+    println(directTopLevelInlineAlias)
+    println(directSelectedInlineAlias)
+    println(inlineAliasConfigured)
+    println(shadowedInlineAlias)
   }
 }
 )";
   constexpr const char* invalidSource =
       R"(package demo.invalidinlinecalls
+
+val ordinaryConstantSource: Boolean = true
+inline val invalidOrdinaryReference: Boolean = ordinaryConstantSource
+inline val invalidForwardReference: Boolean = followingInlineValue
+inline val followingInlineValue: Boolean = true
+inline val invalidSelfReference: Boolean = invalidSelfReference
 
 object Main {
   trait Missing[A]
@@ -989,6 +1018,14 @@ object Main {
       functionText(result.nirText, "demo.inlinecalls.Main.inlineValConfigured");
   const std::string_view directTopLevelInlineString =
       functionText(result.nirText, "demo.inlinecalls.Main.directTopLevelInlineString");
+  const std::string_view directTopLevelInlineAlias =
+      functionText(result.nirText, "demo.inlinecalls.Main.directTopLevelInlineAlias");
+  const std::string_view directSelectedInlineAlias =
+      functionText(result.nirText, "demo.inlinecalls.Main.directSelectedInlineAlias");
+  const std::string_view inlineAliasConfigured =
+      functionText(result.nirText, "demo.inlinecalls.Main.inlineAliasConfigured");
+  const std::string_view shadowedInlineAlias =
+      functionText(result.nirText, "demo.inlinecalls.Main.shadowedInlineAlias");
 
   const bool valid =
       status == 0 &&
@@ -1071,7 +1108,8 @@ object Main {
               "condition-effect\nordinary-true:dynamic\n"
               "ordinary-transparent-true\n"
               "ordinary-transparent-false\n"
-              "true\ninline-val\ninline-val:configured\ntop-inline\n" &&
+              "true\ninline-val\ninline-val:configured\ntop-inline\n"
+              "top-inline\ninline-val\ninline-val:alias\ninline-val\n" &&
       !invalid.ok &&
       contains(invalid.diagnosticsText,
                "no given value found for context parameter value of type") &&
@@ -1093,8 +1131,8 @@ object Main {
       contains(invalid.diagnosticsText,
                "inline if condition must be a compile-time Boolean constant") &&
       contains(invalid.diagnosticsText,
-               "inline value initializer must be a self-contained constant "
-               "expression") &&
+               "inline value initializer must use literals, operators, and "
+               "previously defined inline values") &&
       contains(invalid.diagnosticsText, "inline value requires an initializer") &&
       contains(structuralInvalid.diagnosticsText,
                "inline if is only supported inside an inline method") &&
@@ -1467,7 +1505,32 @@ object Main {
       !contains(inlineValConfigured, "%demo.inlinecalls.Selectors.banner") &&
       !contains(inlineValConfigured, "%demo.inlinecalls.Selectors.configured") &&
       contains(directTopLevelInlineString, "\"top-inline\"") &&
-      !contains(directTopLevelInlineString, "%demo.inlinecalls.topLevelBanner");
+      !contains(directTopLevelInlineString, "%demo.inlinecalls.topLevelBanner") &&
+      contains(directTopLevelInlineAlias, "\"top-inline\"") &&
+      !contains(directTopLevelInlineAlias,
+                "%demo.inlinecalls.topLevelBannerAlias") &&
+      !contains(directTopLevelInlineAlias, "%demo.inlinecalls.topLevelBanner") &&
+      contains(directSelectedInlineAlias, "\"inline-val\"") &&
+      !contains(directSelectedInlineAlias,
+                "%demo.inlinecalls.InlineAliases.banner") &&
+      !contains(directSelectedInlineAlias,
+                "%demo.inlinecalls.Selectors.bannerAlias") &&
+      !contains(directSelectedInlineAlias,
+                "%demo.inlinecalls.Selectors.banner") &&
+      contains(inlineAliasConfigured, "\"inline-val\"") &&
+      contains(inlineAliasConfigured, "\"alias\"") &&
+      !contains(inlineAliasConfigured, "inline-alias-disabled") &&
+      !contains(inlineAliasConfigured,
+                "%demo.inlinecalls.InlineAliases.enabled") &&
+      !contains(inlineAliasConfigured,
+                "%demo.inlinecalls.InlineAliases.banner") &&
+      !contains(inlineAliasConfigured,
+                "%demo.inlinecalls.InlineAliases.configured") &&
+      contains(shadowedInlineAlias, "\"caller-shadow\"") &&
+      contains(shadowedInlineAlias, "\"inline-val\"") &&
+      !contains(shadowedInlineAlias,
+                "%demo.inlinecalls.Selectors.bannerAlias") &&
+      !contains(shadowedInlineAlias, "%demo.inlinecalls.Selectors.banner");
   return valid
              ? 0
              : fail(
@@ -1603,7 +1666,15 @@ object Main {
                    "', direct-inline-string='" + std::string(directInlineString) +
                    "', inline-val-configured='" + std::string(inlineValConfigured) +
                    "', direct-top-level-inline-string='" +
-                   std::string(directTopLevelInlineString) + "')");
+                   std::string(directTopLevelInlineString) +
+                   "', direct-top-level-inline-alias='" +
+                   std::string(directTopLevelInlineAlias) +
+                   "', direct-selected-inline-alias='" +
+                   std::string(directSelectedInlineAlias) +
+                   "', inline-alias-configured='" +
+                   std::string(inlineAliasConfigured) +
+                   "', shadowed-inline-alias='" +
+                   std::string(shadowedInlineAlias) + "')");
 }
 
 } // namespace
