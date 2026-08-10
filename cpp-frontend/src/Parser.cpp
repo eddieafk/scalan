@@ -2116,16 +2116,26 @@ AstExpression Parser::parseMatchExpression(AstExpression selector,
           current.bindingName.empty() && supportedLiteral(current.pattern) &&
           std::all_of(current.alternativePatterns.begin(),
                       current.alternativePatterns.end(), supportedLiteral);
+      const bool supportedSingletonPattern =
+          current.typePattern.empty() && !current.isWildcard &&
+          current.bindingName.empty() &&
+          current.pattern.kind == AstExpressionKind::ModuleReference &&
+          std::all_of(current.alternativePatterns.begin(),
+                      current.alternativePatterns.end(),
+                      [](const AstExpression& pattern) {
+                        return pattern.kind == AstExpressionKind::ModuleReference;
+                      });
       const bool supportedCatchAll =
           current.typePattern.empty() &&
           (current.isWildcard || !current.bindingName.empty());
       if (!supportedTypePattern && !supportedLiteralPattern &&
-          !supportedCatchAll) {
+          !supportedSingletonPattern && !supportedCatchAll) {
         diagnostics_.error(
             current.pattern.span,
             "inline match currently supports Boolean, integer, floating-point, "
-            "String, and Char literals, type-pattern alternatives with consistent "
-            "bindings, and a final wildcard or binding");
+            "String, and Char literals, singleton object patterns, type-pattern "
+            "alternatives with consistent bindings, and a final wildcard or "
+            "binding");
       }
     }
 

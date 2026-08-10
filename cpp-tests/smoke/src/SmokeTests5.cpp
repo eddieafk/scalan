@@ -1389,8 +1389,9 @@ object Main {
                "alternative") &&
       contains(inlineMatchParserInvalid.diagnosticsText,
                "inline match currently supports Boolean, integer, floating-point, "
-               "String, and Char literals, type-pattern alternatives with consistent "
-               "bindings, and a final wildcard or binding") &&
+               "String, and Char literals, singleton object patterns, type-pattern "
+               "alternatives with consistent bindings, and a final wildcard or "
+               "binding") &&
       contains(intSelected, "call %demo.inlinecalls.Main.intNamed()") &&
       contains(intSelected, "call %demo.inlinecalls.Selectors.prefix()") &&
       !contains(intSelected, "%demo.inlinecalls.Selectors.selected") &&

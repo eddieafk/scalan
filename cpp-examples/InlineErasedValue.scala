@@ -18,6 +18,14 @@ class FallbackResult(val value: String) extends ErasedResult {
 
 class Other
 
+trait InlineSignal
+object Ready extends InlineSignal
+object Waiting extends InlineSignal
+object InlineState {
+  object Stopped extends InlineSignal
+}
+class OtherSignal extends InlineSignal
+
 object TypeDefaults {
   transparent inline def nameOf[T]: String =
     inline erasedValue[T] match {
@@ -76,6 +84,13 @@ object TypeDefaults {
       case _ => "bound-alternative-fallback"
     }
 
+  inline def singletonChoice(value: Any): String =
+    inline value match {
+      case Ready => "singleton-ready"
+      case Waiting | InlineState.Stopped => "singleton-known"
+      case _ => "singleton-fallback"
+    }
+
   transparent inline def alternativeResultFor[T]: ErasedResult =
     inline erasedValue[T] match {
       case _: String | _: Int => new PreciseResult("alternative-precise")
@@ -108,6 +123,11 @@ object Main {
     println(TypeDefaults.boundAlternativeChoice("text"))
     println(TypeDefaults.boundAlternativeChoice(7))
     println(TypeDefaults.boundAlternativeChoice(2.5))
+    println(TypeDefaults.singletonChoice(Ready))
+    println(TypeDefaults.singletonChoice(Waiting))
+    println(TypeDefaults.singletonChoice(InlineState.Stopped))
+    println(TypeDefaults.singletonChoice(new OtherSignal))
+    println(TypeDefaults.singletonChoice(7))
     println(TypeDefaults.alternativeResultFor[Int].preciseOnly())
   }
 }

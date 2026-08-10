@@ -5166,6 +5166,43 @@ Typechecker::constantBooleanValue(const AstExpression& expression,
         if (left.has_value() && right.has_value()) {
           return expression.text == "==" ? *left == *right : *left != *right;
         }
+
+        const auto singletonComparison =
+            [&](const AstExpression& pattern,
+                const AstExpression& value) -> std::optional<bool> {
+          if (pattern.kind != AstExpressionKind::ModuleReference) {
+            return std::nullopt;
+          }
+          const std::optional<TypeInfo> singleton =
+              specializedStaticType(pattern, scope);
+          const std::optional<TypeInfo> actual =
+              specializedStaticType(value, scope);
+          if (!singleton.has_value() || !actual.has_value()) {
+            return std::nullopt;
+          }
+          const std::string singletonName =
+              singleton->runtimeName.empty() ? singleton->name
+                                             : singleton->runtimeName;
+          auto symbol = globalSymbols_.find(singletonName);
+          if (symbol == globalSymbols_.end() ||
+              symbol->second.kind != AstDeclarationKind::Object) {
+            return std::nullopt;
+          }
+          if (actual->kind == SimpleTypeKind::Null ||
+              isBoxablePrimitiveType(actual->kind)) {
+            return false;
+          }
+          return staticTypeTestValue(*actual, *singleton);
+        };
+        std::optional<bool> singleton = singletonComparison(
+            expression.children.front(), expression.children.back());
+        if (!singleton.has_value()) {
+          singleton = singletonComparison(expression.children.back(),
+                                            expression.children.front());
+        }
+        if (singleton.has_value()) {
+          return expression.text == "==" ? *singleton : !*singleton;
+        }
       }
 
       if (expression.text == "==" || expression.text == "!=" ||

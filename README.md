@@ -96,9 +96,11 @@ build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
 # semantics; compile-time Boolean, integer, and floating-point arguments reduce
 # ordinary or mandatory `inline if` branches, including bounded recursive inline
 # expansion. Braced `inline match` expressions reduce ordered Boolean, integer,
-# Float, Double, String, and Char literal cases, literal alternatives, and a final
-# wildcard or binding at the call site, including escaped literals and stable
-# inline selectors. Compile-time guards use ordered short-circuit reduction, so
+# Float, Double, String, and Char literal cases, literal alternatives, singleton
+# object patterns and alternatives, and a final wildcard or binding at the call
+# site, including escaped literals and stable inline selectors. Singleton cases
+# compare exact call-site module identity, including qualified nested objects.
+# Compile-time guards use ordered short-circuit reduction, so
 # a guard belonging to a nonmatching case need not itself be constant. Guards
 # can reference typed or untyped selector bindings when those bindings carry a
 # reducible call-site value, including constants passed through a widened `Any`

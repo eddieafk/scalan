@@ -75,6 +75,14 @@ class FallbackResult(val value: String) extends ErasedResult {
 
 class Other
 
+trait InlineSignal
+object Ready extends InlineSignal
+object Waiting extends InlineSignal
+object InlineState {
+  object Stopped extends InlineSignal
+}
+class OtherSignal extends InlineSignal
+
 trait Named[A] {
   def label(): String
 }
@@ -224,6 +232,21 @@ object TypeKinds {
       case selected: String | selected: Int =>
         new PreciseResult("bound-alternative-precise:" + selected.toString)
       case _ => new FallbackResult("bound-alternative-result-fallback")
+    }
+
+  inline def singletonChoice(
+      value: Any,
+      inline enabled: Boolean): String =
+    inline value match {
+      case Ready if enabled => "singleton-ready"
+      case Waiting | InlineState.Stopped => "singleton-known"
+      case _ => "singleton-fallback"
+    }
+
+  transparent inline def singletonResult(value: Any): ErasedResult =
+    inline value match {
+      case Ready | Waiting => new PreciseResult("singleton-precise")
+      case _ => new FallbackResult("singleton-result-fallback")
     }
 
   inline def requireSeven[N](inline message: String): String =
@@ -419,6 +442,20 @@ object Main {
     TypeKinds.boundAlternativeChoice(2.5, runtimeGuard())
   def boundAlternativePrecise: String =
     TypeKinds.boundAlternativeResult(7).preciseOnly()
+  def singletonReady: String = TypeKinds.singletonChoice(Ready, true)
+  def singletonRejected: String = TypeKinds.singletonChoice(Ready, false)
+  def singletonWaiting: String = TypeKinds.singletonChoice(Waiting, true)
+  def singletonQualified: String =
+    TypeKinds.singletonChoice(InlineState.Stopped, true)
+  def singletonFallback: String =
+    TypeKinds.singletonChoice(new OtherSignal, true)
+  def singletonScalarFallback: String = TypeKinds.singletonChoice(7, true)
+  def singletonSkipped: String =
+    TypeKinds.singletonChoice(new OtherSignal, runtimeGuard())
+  def singletonPrecise: String =
+    TypeKinds.singletonResult(Ready).preciseOnly()
+  def singletonResultFallback: String =
+    TypeKinds.singletonResult(new OtherSignal).fallbackOnly()
   def acceptedSeven: String = TypeKinds.requireSeven[7]("ignored-seven")
   def acceptedTrue: String = TypeKinds.qualifiedRequire[true]("ignored-true")
   def acceptedCondition: String =
@@ -507,6 +544,15 @@ object Main {
     println(boundAlternativeRejected)
     println(boundAlternativeSkipped)
     println(boundAlternativePrecise)
+    println(singletonReady)
+    println(singletonRejected)
+    println(singletonWaiting)
+    println(singletonQualified)
+    println(singletonFallback)
+    println(singletonScalarFallback)
+    println(singletonSkipped)
+    println(singletonPrecise)
+    println(singletonResultFallback)
     println(acceptedSeven)
     println(acceptedTrue)
     println(acceptedCondition)
@@ -621,6 +667,7 @@ object Main {
   def runtimeDouble(): Double = 1.0
   def runtimeFloat(): Float = 1.0F
   def runtimeBoolean(): Boolean = true
+  def runtimeSignal(): InlineSignal = Ready
 
   inline def requiresStringMatch(inline value: String): String =
     inline value match {
@@ -684,6 +731,12 @@ object Main {
       case _ => "other"
     }
 
+  inline def requiresSingleton(value: InlineSignal): String =
+    inline value match {
+      case Ready => "ready"
+      case _ => "other"
+    }
+
   val unresolvedStringMatch = requiresStringMatch(runtimeString())
   val unresolvedCharMatch = requiresCharMatch(runtimeChar())
   val unresolvedDoubleMatch = requiresDoubleMatch(runtimeDouble())
@@ -695,6 +748,7 @@ object Main {
     requiresTypedBindingGuard("known", runtimeBoolean())
   val unresolvedBoundAlternative =
     requiresBoundAlternative("known", runtimeBoolean())
+  val unresolvedSingleton = requiresSingleton(runtimeSignal())
 
   val escaped = erasedValue[String]
   val qualifiedEscaped = scala.compiletime.erasedValue[Int]
@@ -855,6 +909,24 @@ object Main {
       result.nirText, "demo.inlineerased.Main.boundAlternativeSkipped");
   const std::string_view boundAlternativePrecise = functionText(
       result.nirText, "demo.inlineerased.Main.boundAlternativePrecise");
+  const std::string_view singletonReady =
+      functionText(result.nirText, "demo.inlineerased.Main.singletonReady");
+  const std::string_view singletonRejected =
+      functionText(result.nirText, "demo.inlineerased.Main.singletonRejected");
+  const std::string_view singletonWaiting =
+      functionText(result.nirText, "demo.inlineerased.Main.singletonWaiting");
+  const std::string_view singletonQualified =
+      functionText(result.nirText, "demo.inlineerased.Main.singletonQualified");
+  const std::string_view singletonFallback =
+      functionText(result.nirText, "demo.inlineerased.Main.singletonFallback");
+  const std::string_view singletonScalarFallback = functionText(
+      result.nirText, "demo.inlineerased.Main.singletonScalarFallback");
+  const std::string_view singletonSkipped =
+      functionText(result.nirText, "demo.inlineerased.Main.singletonSkipped");
+  const std::string_view singletonPrecise =
+      functionText(result.nirText, "demo.inlineerased.Main.singletonPrecise");
+  const std::string_view singletonResultFallback = functionText(
+      result.nirText, "demo.inlineerased.Main.singletonResultFallback");
   const std::string_view acceptedSeven =
       functionText(result.nirText, "demo.inlineerased.Main.acceptedSeven");
   const std::string_view acceptedTrue =
@@ -1104,6 +1176,27 @@ object Main {
       contains(boundAlternativePrecise, ".preciseOnly") &&
       !contains(boundAlternativePrecise, "is-instance-of") &&
       !contains(boundAlternativePrecise, "String | Int") &&
+      selectedLiteral(singletonReady, "\"singleton-ready\"",
+                      "singleton-fallback") &&
+      selectedLiteral(singletonRejected, "\"singleton-fallback\"",
+                      "singleton-ready") &&
+      selectedLiteral(singletonWaiting, "\"singleton-known\"",
+                      "singleton-fallback") &&
+      selectedLiteral(singletonQualified, "\"singleton-known\"",
+                      "singleton-fallback") &&
+      selectedLiteral(singletonFallback, "\"singleton-fallback\"",
+                      "singleton-known") &&
+      selectedLiteral(singletonScalarFallback, "\"singleton-fallback\"",
+                      "singleton-known") &&
+      selectedLiteral(singletonSkipped, "\"singleton-fallback\"",
+                      "singleton-ready") &&
+      !contains(singletonSkipped, "runtimeGuard") &&
+      selectedLiteral(singletonPrecise, "demo.inlineerased.PreciseResult",
+                      "FallbackResult") &&
+      contains(singletonPrecise, ".preciseOnly") &&
+      selectedLiteral(singletonResultFallback,
+                      "demo.inlineerased.FallbackResult", "PreciseResult") &&
+      contains(singletonResultFallback, ".fallbackOnly") &&
       fullyReduced(alternativeString) &&
       contains(alternativeString, "\"alternative-string-int\"") &&
       !contains(alternativeString, "alternative-other") &&
@@ -1147,6 +1240,11 @@ object Main {
                     "bound-alternative-fallback\n"
                     "bound-alternative-fallback\n"
                     "bound-alternative-precise:7\n"
+                    "singleton-ready\nsingleton-fallback\n"
+                    "singleton-known\nsingleton-known\n"
+                    "singleton-fallback\nsingleton-fallback\n"
+                    "singleton-fallback\n"
+                    "singleton-precise\nsingleton-result-fallback\n"
                     "accepted-seven\naccepted-true\n"
                     "accepted-condition\n"
                     "string\nint\nlong\nother\nalias-string\n"
@@ -1214,7 +1312,7 @@ object Main {
       countOccurrences(
           invalid.diagnosticsText,
           "inline match selector must be reducible from a compile-time value or "
-          "static type") == 10 &&
+          "static type") == 11 &&
       fullyReduced(stringName) && contains(stringName, "\"string\"") &&
       !contains(stringName, "\"other\"") && fullyReduced(intName) &&
       contains(intName, "\"int\"") && fullyReduced(longName) &&
@@ -1289,6 +1387,23 @@ object Main {
                       std::string(boundAlternativeSkipped) +
                       "', bound-alternative-precise='" +
                       std::string(boundAlternativePrecise) +
+                      "', singleton-ready='" + std::string(singletonReady) +
+                      "', singleton-rejected='" +
+                      std::string(singletonRejected) +
+                      "', singleton-waiting='" +
+                      std::string(singletonWaiting) +
+                      "', singleton-qualified='" +
+                      std::string(singletonQualified) +
+                      "', singleton-fallback='" +
+                      std::string(singletonFallback) +
+                      "', singleton-scalar-fallback='" +
+                      std::string(singletonScalarFallback) +
+                      "', singleton-skipped='" +
+                      std::string(singletonSkipped) +
+                      "', singleton-precise='" +
+                      std::string(singletonPrecise) +
+                      "', singleton-result-fallback='" +
+                      std::string(singletonResultFallback) +
                       "', accepted-seven='" + std::string(acceptedSeven) +
                       "', accepted-true='" + std::string(acceptedTrue) +
                       "', accepted-condition='" +
