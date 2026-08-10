@@ -13,6 +13,9 @@ struct StdNames final {
   inline static constexpr std::string_view CompiletimeError = "error";
   inline static constexpr std::string_view ScalaCompiletimeError =
       "scala.compiletime.error";
+  inline static constexpr std::string_view RequireConst = "requireConst";
+  inline static constexpr std::string_view ScalaCompiletimeRequireConst =
+      "scala.compiletime.requireConst";
   inline static constexpr std::string_view ErasedValue = "erasedValue";
   inline static constexpr std::string_view ScalaCompiletimeErasedValue =
       "scala.compiletime.erasedValue";

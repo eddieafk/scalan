@@ -56,6 +56,8 @@ import scala.compiletime.{erasedValue => erased}
 import scala.compiletime.constValue
 import scala.compiletime.{constValue => constant}
 import scala.compiletime.{error => compiletimeError}
+import scala.compiletime.requireConst
+import scala.compiletime.{requireConst => ensureConst}
 import scala.compiletime.summonInline
 import scala.compiletime.{summonInline => inlineSummon}
 import scala.compiletime.summonFrom
@@ -357,6 +359,30 @@ object TypeKinds {
     inline if (condition) "accepted-condition"
     else compiletimeError(message)
 
+  inline def requireInteger(inline value: Int): Int = {
+    requireConst(value + 1)
+    value * 2
+  }
+
+  inline def requireString(inline value: String): String = {
+    ensureConst("required:" + value)
+    "verified-" + value
+  }
+
+  inline def requireQualifiedChar(inline value: Char): Char = {
+    scala.compiletime.requireConst(value)
+    value
+  }
+
+  inline def skipDynamicRequirement(
+      inline skip: Boolean,
+      value: String): String =
+    inline if (skip) "requirement-skipped"
+    else {
+      requireConst(value)
+      value
+    }
+
   transparent inline def nameOf[T]: String =
     inline erasedValue[T] match {
       case _: String => "string"
@@ -469,6 +495,7 @@ object Main {
   given longEvidence: Named[Long] = new NamedValue[Long]("summoned-long")
 
   def runtimeGuard(): Boolean = true
+  def runtimeText(): String = "runtime-text"
 
   def directConstant: Int = constValue[11]
   def intConstant: Int = TypeKinds.valueOf[42]
@@ -590,6 +617,24 @@ object Main {
   def acceptedTrue: String = TypeKinds.qualifiedRequire[true]("ignored-true")
   def acceptedCondition: String =
     TypeKinds.requireCondition(true, "ignored-condition")
+  def directRequired: String = {
+    requireConst("direct-" + "constant")
+    "direct-required"
+  }
+  def directScalarRequirements: String = {
+    requireConst(true && !false)
+    requireConst(130.toByte)
+    requireConst(40000.toShort)
+    requireConst(9000000000L + 1L)
+    requireConst(1.25F)
+    requireConst(2.5)
+    "scalar-requirements"
+  }
+  def requiredInteger: Int = TypeKinds.requireInteger(4)
+  def requiredString: String = TypeKinds.requireString("text")
+  def requiredQualifiedChar: Char = TypeKinds.requireQualifiedChar('x')
+  def skippedRequirement: String =
+    TypeKinds.skipDynamicRequirement(true, runtimeText())
   def stringName: String = TypeKinds.nameOf[String]
   def intName: String = TypeKinds.nameOf[Int]
   def longName: String = TypeKinds.nameOf[Long]
@@ -725,6 +770,12 @@ object Main {
     println(acceptedSeven)
     println(acceptedTrue)
     println(acceptedCondition)
+    println(directRequired)
+    println(directScalarRequirements)
+    println(requiredInteger)
+    println(requiredString)
+    println(requiredQualifiedChar)
+    println(skippedRequirement)
     println(stringName)
     println(intName)
     println(longName)
@@ -780,6 +831,8 @@ import scala.compiletime.erasedValue
 import scala.compiletime.constValue
 import scala.compiletime.error
 import scala.compiletime.{error => compiletimeError}
+import scala.compiletime.requireConst
+import scala.compiletime.{requireConst => ensureConst}
 import scala.compiletime.summonInline
 import scala.compiletime.{summonInline => inlineSummon}
 
@@ -822,6 +875,20 @@ object Main {
   val wrongErrorType = error(1)
   val malformedError = error()
 
+  inline def deferredRequirement(inline value: Int): Int = {
+    requireConst(value)
+    value
+  }
+
+  val dynamicRequired = requireConst(runtimeDouble())
+  val aliasedDynamicRequired = ensureConst(runtimeString())
+  val qualifiedDynamicRequired =
+    scala.compiletime.requireConst(runtimeChar())
+  val deferredDynamicRequired = deferredRequirement(runtimeInt())
+  val wrongRequiredType = requireConst(new NamedValue[Int])
+  val malformedRequired = requireConst()
+  val tooManyRequired = requireConst(1, 2)
+
   val nonConstant = constValue[String]
   val malformedConstant = constValue[1, 2]
 
@@ -841,6 +908,7 @@ object Main {
   val malformedSummon = summonInline[Named[Int], Named[String]]
 
   def runtimeString(): String = "runtime"
+  def runtimeInt(): Int = 1
   def runtimeChar(): Char = 'r'
   def runtimeDouble(): Double = 1.0
   def runtimeFloat(): Float = 1.0F
@@ -1205,6 +1273,18 @@ object Main {
       functionText(result.nirText, "demo.inlineerased.Main.acceptedTrue");
   const std::string_view acceptedCondition =
       functionText(result.nirText, "demo.inlineerased.Main.acceptedCondition");
+  const std::string_view directRequired =
+      functionText(result.nirText, "demo.inlineerased.Main.directRequired");
+  const std::string_view directScalarRequirements = functionText(
+      result.nirText, "demo.inlineerased.Main.directScalarRequirements");
+  const std::string_view requiredInteger =
+      functionText(result.nirText, "demo.inlineerased.Main.requiredInteger");
+  const std::string_view requiredString =
+      functionText(result.nirText, "demo.inlineerased.Main.requiredString");
+  const std::string_view requiredQualifiedChar = functionText(
+      result.nirText, "demo.inlineerased.Main.requiredQualifiedChar");
+  const std::string_view skippedRequirement = functionText(
+      result.nirText, "demo.inlineerased.Main.skippedRequirement");
   const std::string_view intName =
       functionText(result.nirText, "demo.inlineerased.Main.intName");
   const std::string_view longName =
@@ -1296,6 +1376,7 @@ object Main {
     return !function.empty() && !contains(function, "$match") &&
            !contains(function, "is-instance-of") &&
            !contains(function, "compiletime.error") &&
+           !contains(function, "requireConst") &&
            !contains(function, "constValue") &&
            !contains(function, "erasedValue") &&
            !contains(function, "summonInline") && !contains(function, "TypeKinds.");
@@ -1337,6 +1418,21 @@ object Main {
       contains(acceptedCondition, "\"accepted-condition\"") &&
       !contains(acceptedCondition, "ignored-condition") &&
       !contains(acceptedCondition, "NotImplementedError");
+  const bool requireConstErased =
+      fullyReduced(directRequired) &&
+      contains(directRequired, "\"direct-required\"") &&
+      !contains(directRequired, "direct-constant") &&
+      fullyReduced(directScalarRequirements) &&
+      contains(directScalarRequirements, "\"scalar-requirements\"") &&
+      !contains(directScalarRequirements, "intToByte") &&
+      !contains(directScalarRequirements, "intToShort") &&
+      fullyReduced(requiredInteger) && fullyReduced(requiredString) &&
+      contains(requiredString, "\"verified-\"") &&
+      !contains(requiredString, "required:") &&
+      fullyReduced(requiredQualifiedChar) &&
+      contains(requiredQualifiedChar, "'x'") &&
+      fullyReduced(skippedRequirement) &&
+      contains(skippedRequirement, "\"requirement-skipped\"");
   const bool summonInlineReduced =
       fullyReduced(directSummoned) && contains(directSummoned, ".label") &&
       fullyReduced(inlineSummoned) && contains(inlineSummoned, ".label") &&
@@ -1632,7 +1728,9 @@ object Main {
                     "nested-indented-false\nnested-indented-outer\n"
                     "ordinary-indented-one\nordinary-indented-other\n"
                     "accepted-seven\naccepted-true\n"
-                    "accepted-condition\n"
+                    "accepted-condition\ndirect-required\nscalar-requirements\n"
+                    "8\nverified-text\nx\n"
+                    "requirement-skipped\n"
                     "string\nint\nlong\nother\nalias-string\n"
                     "alias-other\n"
                     "precise\nfallback\nalternative-string-int\n"
@@ -1672,6 +1770,16 @@ object Main {
       contains(invalid.diagnosticsText,
                "compiletime.error requires exactly one String argument") &&
       compiletimeErrorsErased &&
+      countOccurrences(
+          invalid.diagnosticsText,
+          "requireConst requires a compile-time constant value") == 4 &&
+      contains(
+          invalid.diagnosticsText,
+          "requireConst argument must have type Boolean, Byte, Short, Int, Long, "
+          "Float, Double, Char, or String") &&
+      countOccurrences(invalid.diagnosticsText,
+                       "requireConst requires exactly one argument") == 2 &&
+      requireConstErased &&
       countOccurrences(
           invalid.diagnosticsText,
           "no given value found for context parameter evidence of type") >= 3 &&

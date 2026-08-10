@@ -2550,6 +2550,19 @@ void Typechecker::addRuntimeBuiltins(Scope& scope) {
   compiletimeError.contextualParameterClauses = {false};
   globalSymbols_[compiletimeError.symbolName] = std::move(compiletimeError);
 
+  SymbolInfo requireConst;
+  requireConst.kind = AstDeclarationKind::Def;
+  requireConst.name = std::string(support::StdNames::RequireConst);
+  requireConst.symbolName =
+      std::string(support::StdNames::ScalaCompiletimeRequireConst);
+  requireConst.type = TypeInfo{SimpleTypeKind::Unit, "Unit"};
+  requireConst.parameters = {"x: Object"};
+  requireConst.parameterTypes = {TypeInfo{SimpleTypeKind::Object, "Object"}};
+  requireConst.inlineParameters = {true};
+  requireConst.parameterClauseSizes = {1};
+  requireConst.contextualParameterClauses = {false};
+  globalSymbols_[requireConst.symbolName] = std::move(requireConst);
+
   SymbolInfo constValue;
   constValue.kind = AstDeclarationKind::Def;
   constValue.name = std::string(support::StdNames::ConstValue);
@@ -5004,6 +5017,36 @@ bool Typechecker::isCompiletimeErrorCallee(const AstExpression& expression,
          *path == support::StdNames::ScalaCompiletimeError;
 }
 
+bool Typechecker::isRequireConstCallee(const AstExpression& expression,
+                                       const Scope& scope) const {
+  if (expression.kind == AstExpressionKind::Identifier) {
+    const auto symbol = scope.find(expression.text);
+    return symbol != scope.end() &&
+           symbol->second.symbolName ==
+               support::StdNames::ScalaCompiletimeRequireConst;
+  }
+
+  std::function<std::optional<std::string>(const AstExpression&)> qualifiedPath;
+  qualifiedPath = [&](const AstExpression& candidate)
+      -> std::optional<std::string> {
+    if (candidate.kind == AstExpressionKind::Identifier) {
+      return candidate.text;
+    }
+    if (candidate.kind != AstExpressionKind::Select ||
+        candidate.children.size() != 1) {
+      return std::nullopt;
+    }
+    std::optional<std::string> receiver =
+        qualifiedPath(candidate.children.front());
+    return receiver.has_value()
+               ? std::optional<std::string>(*receiver + "." + candidate.text)
+               : std::nullopt;
+  };
+  const std::optional<std::string> path = qualifiedPath(expression);
+  return path.has_value() &&
+         *path == support::StdNames::ScalaCompiletimeRequireConst;
+}
+
 bool Typechecker::isSummonInlineCallee(const AstExpression& expression,
                                        const Scope& scope) const {
   if (expression.kind == AstExpressionKind::Identifier) {
@@ -5660,6 +5703,27 @@ Typechecker::constantIntegerValue(const AstExpression& expression,
     return std::nullopt;
   case AstExpressionKind::Select:
     if (expression.children.size() == 1 &&
+        (expression.text == support::StdNames::ToByte ||
+         expression.text == support::StdNames::ToShort ||
+         expression.text == support::StdNames::ToInt)) {
+      const std::optional<std::int64_t> operand =
+          constantIntegerValue(expression.children.front(), scope);
+      if (!operand.has_value()) {
+        return std::nullopt;
+      }
+      if (expression.text == support::StdNames::ToInt) {
+        return static_cast<std::int32_t>(*operand);
+      }
+      const std::int64_t modulus =
+          expression.text == support::StdNames::ToByte ? 256 : 65536;
+      const std::int64_t signBit = modulus / 2;
+      std::int64_t narrowed = *operand % modulus;
+      if (narrowed < 0) {
+        narrowed += modulus;
+      }
+      return narrowed >= signBit ? narrowed - modulus : narrowed;
+    }
+    if (expression.children.size() == 1 &&
         expression.children.front().kind == AstExpressionKind::Identifier) {
       if (auto receiver = scope.find(expression.children.front().text);
           receiver != scope.end()) {
@@ -5753,6 +5817,17 @@ Typechecker::constantIntegerType(const AstExpression& expression,
     }
     return SimpleTypeKind::Unknown;
   case AstExpressionKind::Select:
+    if (expression.children.size() == 1) {
+      if (expression.text == support::StdNames::ToByte) {
+        return SimpleTypeKind::Byte;
+      }
+      if (expression.text == support::StdNames::ToShort) {
+        return SimpleTypeKind::Short;
+      }
+      if (expression.text == support::StdNames::ToInt) {
+        return SimpleTypeKind::Int;
+      }
+    }
     if (expression.children.size() == 1 &&
         expression.children.front().kind == AstExpressionKind::Identifier) {
       if (auto receiver = scope.find(expression.children.front().text);
@@ -6583,6 +6658,70 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
   case AstExpressionKind::Call: {
     if (expression.children.empty()) {
       return TypeInfo{SimpleTypeKind::Unknown, "Unknown"};
+    }
+    if (isRequireConstCallee(expression.children.front(), scope)) {
+      const TypeInfo unit{SimpleTypeKind::Unit, "Unit"};
+      if (expression.children.size() != 2) {
+        diagnostics_.error(expression.span,
+                           "requireConst requires exactly one argument");
+        for (std::size_t index = 1; index < expression.children.size(); ++index) {
+          (void)inferExpressionType(expression.children[index], scope);
+        }
+        return unit;
+      }
+
+      const AstExpression& argument = expression.children.back();
+      const TypeInfo argumentType = inferExpressionType(argument, scope);
+      const bool supportedType =
+          argumentType.kind == SimpleTypeKind::Boolean ||
+          argumentType.kind == SimpleTypeKind::Byte ||
+          argumentType.kind == SimpleTypeKind::Short ||
+          argumentType.kind == SimpleTypeKind::Int ||
+          argumentType.kind == SimpleTypeKind::Long ||
+          argumentType.kind == SimpleTypeKind::Float ||
+          argumentType.kind == SimpleTypeKind::Double ||
+          argumentType.kind == SimpleTypeKind::Char ||
+          argumentType.kind == SimpleTypeKind::String;
+      if (argumentType.kind != SimpleTypeKind::Unknown && !supportedType) {
+        diagnostics_.error(
+            argument.span,
+            "requireConst argument must have type Boolean, Byte, Short, Int, "
+            "Long, Float, Double, Char, or String");
+        return unit;
+      }
+
+      if (inlineDefinitionDepth_ == 0 && supportedType) {
+        bool isConstant = false;
+        switch (argumentType.kind) {
+        case SimpleTypeKind::Boolean:
+          isConstant = constantBooleanValue(argument, scope).has_value();
+          break;
+        case SimpleTypeKind::Byte:
+        case SimpleTypeKind::Short:
+        case SimpleTypeKind::Int:
+        case SimpleTypeKind::Long:
+          isConstant = constantIntegerValue(argument, scope).has_value();
+          break;
+        case SimpleTypeKind::Float:
+        case SimpleTypeKind::Double:
+          isConstant = constantFloatingValue(argument, scope).has_value();
+          break;
+        case SimpleTypeKind::Char:
+          isConstant = constantCharValue(argument, scope).has_value();
+          break;
+        case SimpleTypeKind::String:
+          isConstant = constantStringValue(argument, scope).has_value();
+          break;
+        default:
+          break;
+        }
+        if (!isConstant) {
+          diagnostics_.error(
+              argument.span,
+              "requireConst requires a compile-time constant value");
+        }
+      }
+      return unit;
     }
     if (isCompiletimeErrorCallee(expression.children.front(), scope)) {
       if (expression.children.size() != 2) {

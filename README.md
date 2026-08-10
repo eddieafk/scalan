@@ -123,6 +123,12 @@ build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
 # Generic inline definitions defer the intrinsic until specialization, so
 # constant inline matches and transparent result refinement emit only the
 # selected result.
+# Compiler-owned `scala.compiletime.requireConst(value)` accepts Boolean, Byte,
+# Short, Int, Long, Float, Double, Char, and String expressions and verifies
+# them after inline substitution and constant folding. Canonical, renamed, and
+# qualified calls return `Unit` during typechecking and are erased with their
+# arguments from successful caller NIR; dynamic values receive a compile-time
+# diagnostic.
 # Compiler-owned `scala.compiletime.error(message)` supports literal, aliased,
 # and concatenated constant String messages. Calls inside inline definitions
 # are deferred to specialization and report only when the selected expansion

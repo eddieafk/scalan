@@ -1126,6 +1126,16 @@ Current scaffold status:
   Focused runtime,
   diagnostics, import-resolution, transparent-type, and NIR coverage shares
   `SmokeTests6.cpp` with the related `erasedValue` slice.
+  Compiler-owned `scala.compiletime.requireConst(value)` accepts Boolean, Byte,
+  Short, Int, Long, Float, Double, Char, and String arguments through canonical,
+  renamed, or qualified calls. It reuses inline substitution and constant
+  folding, including integral arithmetic and constant narrowing conversions,
+  then produces `Unit` without evaluating or retaining its argument in NIR.
+  Calls inside inline definitions are deferred until specialization, so only a
+  surviving call requires a constant; dynamic values, unsupported types, and
+  malformed arity receive focused diagnostics. Runtime, dead-branch,
+  diagnostic, import-resolution, and NIR-erasure coverage remains isolated in
+  `SmokeTests6.cpp`.
   Compiler-owned `scala.compiletime.error(message)` now emits user-defined
   diagnostics when a call survives inline expansion. Exact imports, aliases,
   and the qualified spelling resolve to the intrinsic. Literal Strings,

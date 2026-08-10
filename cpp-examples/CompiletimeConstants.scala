@@ -3,6 +3,8 @@ package demo.inlineconstant
 import scala.compiletime.constValue
 import scala.compiletime.{constValue => constant}
 import scala.compiletime.{error => compiletimeError}
+import scala.compiletime.requireConst
+import scala.compiletime.{requireConst => ensureConst}
 
 trait ConstantResult {
   def text(): String
@@ -98,6 +100,21 @@ object Constants {
       inline message: String): String =
     inline if (condition) "accepted-condition"
     else compiletimeError(message)
+
+  inline def verifiedTwice(inline value: Int): Int = {
+    requireConst(value + 1)
+    value * 2
+  }
+
+  inline def verifiedLabel(inline value: String): String = {
+    ensureConst("verified:" + value)
+    "constant-" + value
+  }
+
+  inline def verifiedChar(inline value: Char): Char = {
+    scala.compiletime.requireConst(value)
+    value
+  }
 }
 
 object Main {
@@ -130,5 +147,8 @@ object Main {
     println(Constants.requireSeven[7]("not seven"))
     println(Constants.requireTrue[true]("not true"))
     println(Constants.requireCondition(true, "condition failed"))
+    println(Constants.verifiedTwice(4))
+    println(Constants.verifiedLabel("text"))
+    println(Constants.verifiedChar('z'))
   }
 }
