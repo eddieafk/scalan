@@ -53,6 +53,8 @@ int smokeInlineErasedValue() {
 
 import scala.compiletime.erasedValue
 import scala.compiletime.{erasedValue => erased}
+import scala.compiletime.codeOf
+import scala.compiletime.{codeOf => sourceOf}
 import scala.compiletime.constValue
 import scala.compiletime.{constValue => constant}
 import scala.compiletime.{error => compiletimeError}
@@ -383,6 +385,18 @@ object TypeKinds {
       value
     }
 
+  inline def expressionCode(inline value: Any): String =
+    codeOf(value)
+
+  inline def aliasedExpressionCode(inline value: Any): String =
+    sourceOf(value)
+
+  inline def nestedExpressionCode(inline value: Any): String =
+    expressionCode(value)
+
+  inline def qualifiedExpressionCode(inline value: Any): String =
+    scala.compiletime.codeOf(value)
+
   transparent inline def nameOf[T]: String =
     inline erasedValue[T] match {
       case _: String => "string"
@@ -496,6 +510,7 @@ object Main {
 
   def runtimeGuard(): Boolean = true
   def runtimeText(): String = "runtime-text"
+  def runtimeNumber(): Int = 6
 
   def directConstant: Int = constValue[11]
   def intConstant: Int = TypeKinds.valueOf[42]
@@ -635,6 +650,15 @@ object Main {
   def requiredQualifiedChar: Char = TypeKinds.requireQualifiedChar('x')
   def skippedRequirement: String =
     TypeKinds.skipDynamicRequirement(true, runtimeText())
+  def directCode: String = codeOf(runtimeNumber() + 2)
+  def inlineCode: String =
+    TypeKinds.expressionCode(runtimeNumber() + 3)
+  def aliasedCode: String =
+    TypeKinds.aliasedExpressionCode(runtimeNumber() - 4)
+  def nestedCode: String =
+    TypeKinds.nestedExpressionCode(runtimeNumber() * 5)
+  def qualifiedCode: String =
+    TypeKinds.qualifiedExpressionCode(new Other)
   def stringName: String = TypeKinds.nameOf[String]
   def intName: String = TypeKinds.nameOf[Int]
   def longName: String = TypeKinds.nameOf[Long]
@@ -776,6 +800,11 @@ object Main {
     println(requiredString)
     println(requiredQualifiedChar)
     println(skippedRequirement)
+    println(directCode)
+    println(inlineCode)
+    println(aliasedCode)
+    println(nestedCode)
+    println(qualifiedCode)
     println(stringName)
     println(intName)
     println(longName)
@@ -828,6 +857,7 @@ object Main {
   constexpr const char* invalidSource = R"(package demo.invaliderased
 
 import scala.compiletime.erasedValue
+import scala.compiletime.codeOf
 import scala.compiletime.constValue
 import scala.compiletime.error
 import scala.compiletime.{error => compiletimeError}
@@ -850,6 +880,9 @@ object Main {
 
   inline def failAliased(inline message: String): Nothing =
     error(errorPrefix + message)
+
+  inline def failWithCode(inline value: Any): Nothing =
+    compiletimeError("rejected expression: " + codeOf(value))
 
   inline def failOnFalse[B](inline message: String): String =
     inline constValue[B] match {
@@ -874,6 +907,9 @@ object Main {
   def dynamicInlineError(message: String) = fail(message)
   val wrongErrorType = error(1)
   val malformedError = error()
+  val codeFailure = failWithCode(runtimeInt() + 1)
+  val malformedCode = codeOf()
+  val tooManyCode = codeOf(1, 2)
 
   inline def deferredRequirement(inline value: Int): Int = {
     requireConst(value)
@@ -1285,6 +1321,16 @@ object Main {
       result.nirText, "demo.inlineerased.Main.requiredQualifiedChar");
   const std::string_view skippedRequirement = functionText(
       result.nirText, "demo.inlineerased.Main.skippedRequirement");
+  const std::string_view directCode =
+      functionText(result.nirText, "demo.inlineerased.Main.directCode");
+  const std::string_view inlineCode =
+      functionText(result.nirText, "demo.inlineerased.Main.inlineCode");
+  const std::string_view aliasedCode =
+      functionText(result.nirText, "demo.inlineerased.Main.aliasedCode");
+  const std::string_view nestedCode =
+      functionText(result.nirText, "demo.inlineerased.Main.nestedCode");
+  const std::string_view qualifiedCode =
+      functionText(result.nirText, "demo.inlineerased.Main.qualifiedCode");
   const std::string_view intName =
       functionText(result.nirText, "demo.inlineerased.Main.intName");
   const std::string_view longName =
@@ -1375,6 +1421,7 @@ object Main {
   const auto fullyReduced = [](std::string_view function) {
     return !function.empty() && !contains(function, "$match") &&
            !contains(function, "is-instance-of") &&
+           !contains(function, "codeOf") &&
            !contains(function, "compiletime.error") &&
            !contains(function, "requireConst") &&
            !contains(function, "constValue") &&
@@ -1433,6 +1480,22 @@ object Main {
       contains(requiredQualifiedChar, "'x'") &&
       fullyReduced(skippedRequirement) &&
       contains(skippedRequirement, "\"requirement-skipped\"");
+  const bool codeOfReduced =
+      fullyReduced(directCode) &&
+      contains(directCode, "\"runtimeNumber() + 2\"") &&
+      !contains(directCode, "@demo.inlineerased.Main.runtimeNumber") &&
+      fullyReduced(inlineCode) &&
+      contains(inlineCode, "\"runtimeNumber() + 3\"") &&
+      !contains(inlineCode, "@demo.inlineerased.Main.runtimeNumber") &&
+      fullyReduced(aliasedCode) &&
+      contains(aliasedCode, "\"runtimeNumber() - 4\"") &&
+      !contains(aliasedCode, "@demo.inlineerased.Main.runtimeNumber") &&
+      fullyReduced(nestedCode) &&
+      contains(nestedCode, "\"runtimeNumber() * 5\"") &&
+      !contains(nestedCode, "@demo.inlineerased.Main.runtimeNumber") &&
+      fullyReduced(qualifiedCode) &&
+      contains(qualifiedCode, "\"new Other\"") &&
+      !contains(qualifiedCode, "demo.inlineerased.Other.<init>");
   const bool summonInlineReduced =
       fullyReduced(directSummoned) && contains(directSummoned, ".label") &&
       fullyReduced(inlineSummoned) && contains(inlineSummoned, ".label") &&
@@ -1731,6 +1794,8 @@ object Main {
                     "accepted-condition\ndirect-required\nscalar-requirements\n"
                     "8\nverified-text\nx\n"
                     "requirement-skipped\n"
+                    "runtimeNumber() + 2\nruntimeNumber() + 3\n"
+                    "runtimeNumber() - 4\nruntimeNumber() * 5\nnew Other\n"
                     "string\nint\nlong\nother\nalias-string\n"
                     "alias-other\n"
                     "precise\nfallback\nalternative-string-int\n"
@@ -1761,6 +1826,11 @@ object Main {
       contains(invalid.diagnosticsText, "condition failed") &&
       contains(invalid.diagnosticsText, "direct failure") &&
       contains(invalid.diagnosticsText, "constant value failure") &&
+      contains(invalid.diagnosticsText,
+               "rejected expression: runtimeInt() + 1") &&
+      countOccurrences(invalid.diagnosticsText,
+                       "codeOf requires exactly one argument") == 2 &&
+      codeOfReduced &&
       countOccurrences(
           invalid.diagnosticsText,
           "compiletime.error requires a compile-time constant String message") ==

@@ -844,6 +844,12 @@ bool isConstValueCallee(const frontend::AstExpression& expression,
                              support::StdNames::ScalaCompiletimeConstValue);
 }
 
+bool isCodeOfCallee(const frontend::AstExpression& expression,
+                    const ValueContext& context) {
+  return isCompiletimeCallee(expression, context,
+                             support::StdNames::ScalaCompiletimeCodeOf);
+}
+
 bool isCompiletimeErrorCallee(const frontend::AstExpression& expression,
                               const ValueContext& context) {
   return isCompiletimeCallee(expression, context,
@@ -2914,6 +2920,14 @@ nir::Value valueFor(const frontend::AstExpression& expression,
     if (const frontend::TypedInlineApplication* application =
             inlineApplicationFor(expression, context)) {
       return inlineApplicationValueFor(*application, context);
+    }
+    if (isCodeOfCallee(expression.children.front(), context)) {
+      const frontend::TypeInfo* code = annotatedTypeFor(expression, context);
+      if (code != nullptr && !code->singletonLiteral.empty()) {
+        return nir::literalValue(code->singletonLiteral, "String",
+                                 expression.span);
+      }
+      return nir::literalValue("\"\"", "String", expression.span);
     }
     if (isRequireConstCallee(expression.children.front(), context)) {
       return nir::unitValue(expression.span);

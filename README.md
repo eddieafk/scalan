@@ -129,6 +129,11 @@ build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
 # qualified calls return `Unit` during typechecking and are erased with their
 # arguments from successful caller NIR; dynamic values receive a compile-time
 # diagnostic.
+# Compiler-owned `scala.compiletime.codeOf(expression)` captures a canonical
+# source representation without evaluating the expression. Direct, renamed,
+# qualified, specialized-inline, and nested-inline calls become String literals
+# in caller NIR, and those literals can contribute to `compiletime.error`
+# messages.
 # Compiler-owned `scala.compiletime.error(message)` supports literal, aliased,
 # and concatenated constant String messages. Calls inside inline definitions
 # are deferred to specialization and report only when the selected expansion

@@ -32,7 +32,7 @@ CompileResult CompilerPipeline::compile(support::SourceManager& sources,
     return result;
   }
 
-  Typechecker typechecker(diagnostics);
+  Typechecker typechecker(diagnostics, &sources);
   result.typed = typechecker.typecheck(result.ast);
   result.phaseLog.push_back("typecheck: " +
                             std::to_string(result.typed.declarations.size()) +

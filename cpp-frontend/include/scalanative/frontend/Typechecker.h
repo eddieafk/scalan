@@ -201,12 +201,14 @@ struct SymbolInfo {
   std::optional<std::uint32_t> specializedCharValue;
   std::optional<bool> specializedNullValue;
   std::optional<TypeInfo> specializedStaticType;
+  std::optional<std::string> specializedCode;
   AstExpression inlineBody;
 };
 
 class Typechecker {
 public:
-  explicit Typechecker(support::DiagnosticEngine& diagnostics);
+  explicit Typechecker(support::DiagnosticEngine& diagnostics,
+                       const support::SourceManager* sources = nullptr);
 
   [[nodiscard]] TypedModule typecheck(const AstModule& module);
 
@@ -277,6 +279,8 @@ private:
                                         const Scope& scope) const;
   [[nodiscard]] bool isConstValueExpression(const AstExpression& expression,
                                             const Scope& scope) const;
+  [[nodiscard]] bool isCodeOfCallee(const AstExpression& expression,
+                                    const Scope& scope) const;
   [[nodiscard]] bool isCompiletimeErrorCallee(const AstExpression& expression,
                                               const Scope& scope) const;
   [[nodiscard]] bool isRequireConstCallee(const AstExpression& expression,
@@ -301,6 +305,9 @@ private:
   constantFloatingValue(const AstExpression& expression, const Scope& scope) const;
   [[nodiscard]] SimpleTypeKind
   constantIntegerType(const AstExpression& expression, const Scope& scope) const;
+  [[nodiscard]] std::optional<std::string>
+  sourceCodeForExpression(const AstExpression& expression,
+                          const Scope& scope) const;
   [[nodiscard]] TypeInfo inferNewType(const AstExpression& expression, Scope& scope);
   [[nodiscard]] TypeInfo inferSelectType(const AstExpression& expression, Scope& scope);
   [[nodiscard]] std::string inferArrayElementTypeName(const AstExpression& expression,
@@ -451,6 +458,7 @@ private:
                                            const std::string& name);
 
   support::DiagnosticEngine& diagnostics_;
+  const support::SourceManager* sources_ = nullptr;
   std::unordered_map<std::string, Scope> declaredMemberScopes_;
   std::unordered_map<std::string, Scope> memberScopes_;
   std::unordered_map<std::string, SymbolInfo> globalSymbols_;

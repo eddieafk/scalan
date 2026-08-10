@@ -7,6 +7,9 @@ namespace scalanative::support {
 struct StdNames final {
   inline static constexpr std::string_view ScalaPackage = "scala";
   inline static constexpr std::string_view ScalaCompiletime = "scala.compiletime";
+  inline static constexpr std::string_view CodeOf = "codeOf";
+  inline static constexpr std::string_view ScalaCompiletimeCodeOf =
+      "scala.compiletime.codeOf";
   inline static constexpr std::string_view ConstValue = "constValue";
   inline static constexpr std::string_view ScalaCompiletimeConstValue =
       "scala.compiletime.constValue";

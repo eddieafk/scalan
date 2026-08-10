@@ -2,6 +2,8 @@ package demo.inlineconstant
 
 import scala.compiletime.constValue
 import scala.compiletime.{constValue => constant}
+import scala.compiletime.codeOf
+import scala.compiletime.{codeOf => sourceOf}
 import scala.compiletime.{error => compiletimeError}
 import scala.compiletime.requireConst
 import scala.compiletime.{requireConst => ensureConst}
@@ -115,6 +117,15 @@ object Constants {
     scala.compiletime.requireConst(value)
     value
   }
+
+  inline def expressionCode(inline value: Any): String =
+    codeOf(value)
+
+  inline def aliasedExpressionCode(inline value: Any): String =
+    sourceOf(value)
+
+  inline def qualifiedExpressionCode(inline value: Any): String =
+    scala.compiletime.codeOf(value)
 }
 
 object Main {
@@ -150,5 +161,9 @@ object Main {
     println(Constants.verifiedTwice(4))
     println(Constants.verifiedLabel("text"))
     println(Constants.verifiedChar('z'))
+    println(codeOf(1 + 2))
+    println(Constants.expressionCode(2 * 3))
+    println(Constants.aliasedExpressionCode("source"))
+    println(Constants.qualifiedExpressionCode(new SevenResult("unused")))
   }
 }

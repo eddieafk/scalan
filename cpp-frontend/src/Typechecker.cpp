@@ -1,5 +1,6 @@
 #include "scalanative/frontend/Typechecker.h"
 
+#include "scalanative/support/SourceManager.h"
 #include "scalanative/support/StdNames.h"
 
 #include <algorithm>
@@ -213,6 +214,18 @@ std::string stringSingletonType(std::string_view value) {
   std::string literal{"\""};
   literal.reserve(value.size() + 2);
   for (char ch : value) {
+    if (ch == '\n') {
+      literal += "\\n";
+      continue;
+    }
+    if (ch == '\r') {
+      literal += "\\r";
+      continue;
+    }
+    if (ch == '\t') {
+      literal += "\\t";
+      continue;
+    }
     if (ch == '"' || ch == '\\') {
       literal.push_back('\\');
     }
@@ -1720,8 +1733,9 @@ standardDerivationDeclarations(const AstModule& module) {
 
 } // namespace
 
-Typechecker::Typechecker(support::DiagnosticEngine& diagnostics)
-    : diagnostics_(diagnostics) {}
+Typechecker::Typechecker(support::DiagnosticEngine& diagnostics,
+                         const support::SourceManager* sources)
+    : diagnostics_(diagnostics), sources_(sources) {}
 
 TypedModule Typechecker::typecheck(const AstModule& module) {
   declaredMemberScopes_.clear();
@@ -2562,6 +2576,19 @@ void Typechecker::addRuntimeBuiltins(Scope& scope) {
   requireConst.parameterClauseSizes = {1};
   requireConst.contextualParameterClauses = {false};
   globalSymbols_[requireConst.symbolName] = std::move(requireConst);
+
+  SymbolInfo codeOf;
+  codeOf.kind = AstDeclarationKind::Def;
+  codeOf.name = std::string(support::StdNames::CodeOf);
+  codeOf.symbolName = std::string(support::StdNames::ScalaCompiletimeCodeOf);
+  codeOf.type = TypeInfo{SimpleTypeKind::String, "String"};
+  codeOf.parameters = {"arg: Object"};
+  codeOf.parameterTypes = {TypeInfo{SimpleTypeKind::Object, "Object"}};
+  codeOf.inlineParameters = {true};
+  codeOf.parameterClauseSizes = {1};
+  codeOf.contextualParameterClauses = {false};
+  codeOf.isTransparent = true;
+  globalSymbols_[codeOf.symbolName] = std::move(codeOf);
 
   SymbolInfo constValue;
   constValue.kind = AstDeclarationKind::Def;
@@ -5017,6 +5044,34 @@ bool Typechecker::isCompiletimeErrorCallee(const AstExpression& expression,
          *path == support::StdNames::ScalaCompiletimeError;
 }
 
+bool Typechecker::isCodeOfCallee(const AstExpression& expression,
+                                 const Scope& scope) const {
+  if (expression.kind == AstExpressionKind::Identifier) {
+    const auto symbol = scope.find(expression.text);
+    return symbol != scope.end() &&
+           symbol->second.symbolName == support::StdNames::ScalaCompiletimeCodeOf;
+  }
+
+  std::function<std::optional<std::string>(const AstExpression&)> qualifiedPath;
+  qualifiedPath = [&](const AstExpression& candidate)
+      -> std::optional<std::string> {
+    if (candidate.kind == AstExpressionKind::Identifier) {
+      return candidate.text;
+    }
+    if (candidate.kind != AstExpressionKind::Select ||
+        candidate.children.size() != 1) {
+      return std::nullopt;
+    }
+    std::optional<std::string> receiver =
+        qualifiedPath(candidate.children.front());
+    return receiver.has_value()
+               ? std::optional<std::string>(*receiver + "." + candidate.text)
+               : std::nullopt;
+  };
+  const std::optional<std::string> path = qualifiedPath(expression);
+  return path.has_value() && *path == support::StdNames::ScalaCompiletimeCodeOf;
+}
+
 bool Typechecker::isRequireConstCallee(const AstExpression& expression,
                                        const Scope& scope) const {
   if (expression.kind == AstExpressionKind::Identifier) {
@@ -5391,6 +5446,12 @@ Typechecker::constantStringValue(const AstExpression& expression,
       }
     }
     return std::nullopt;
+  case AstExpressionKind::Call:
+    if (expression.children.size() == 2 &&
+        isCodeOfCallee(expression.children.front(), scope)) {
+      return sourceCodeForExpression(expression.children.back(), scope);
+    }
+    return std::nullopt;
   case AstExpressionKind::Binary:
     if (expression.text == "+" && expression.children.size() == 2) {
       const std::optional<std::string> left =
@@ -5405,6 +5466,130 @@ Typechecker::constantStringValue(const AstExpression& expression,
   default:
     return std::nullopt;
   }
+}
+
+std::optional<std::string>
+Typechecker::sourceCodeForExpression(const AstExpression& expression,
+                                     const Scope& scope) const {
+  if (expression.kind == AstExpressionKind::Identifier) {
+    if (auto symbol = scope.find(expression.text);
+        symbol != scope.end() && symbol->second.specializedCode.has_value()) {
+      return symbol->second.specializedCode;
+    }
+  }
+
+  const auto joinedChildren = [&](std::size_t first,
+                                  std::string_view separator)
+      -> std::optional<std::string> {
+    std::string result;
+    for (std::size_t index = first; index < expression.children.size(); ++index) {
+      const std::optional<std::string> child =
+          sourceCodeForExpression(expression.children[index], scope);
+      if (!child.has_value()) {
+        return std::nullopt;
+      }
+      if (index != first) {
+        result += separator;
+      }
+      result += *child;
+    }
+    return result;
+  };
+
+  switch (expression.kind) {
+  case AstExpressionKind::Identifier:
+  case AstExpressionKind::ModuleReference:
+  case AstExpressionKind::IntegerLiteral:
+  case AstExpressionKind::FloatingLiteral:
+  case AstExpressionKind::StringLiteral:
+  case AstExpressionKind::CharLiteral:
+  case AstExpressionKind::SymbolLiteral:
+  case AstExpressionKind::BooleanLiteral:
+  case AstExpressionKind::NullLiteral:
+    return expression.text;
+  case AstExpressionKind::This:
+    return expression.text.empty() ? std::optional<std::string>{"this"}
+                                   : expression.text;
+  case AstExpressionKind::Super:
+    return expression.text.empty() ? std::optional<std::string>{"super"}
+                                   : expression.text;
+  case AstExpressionKind::Call:
+    if (!expression.children.empty()) {
+      const std::optional<std::string> callee =
+          sourceCodeForExpression(expression.children.front(), scope);
+      const std::optional<std::string> arguments = joinedChildren(1, ", ");
+      if (callee.has_value() && arguments.has_value()) {
+        return *callee + "(" + *arguments + ")";
+      }
+    }
+    break;
+  case AstExpressionKind::Select:
+    if (expression.children.size() == 1) {
+      if (const std::optional<std::string> receiver =
+              sourceCodeForExpression(expression.children.front(), scope)) {
+        return *receiver + "." + expression.text;
+      }
+    }
+    break;
+  case AstExpressionKind::TypeApply:
+    if (expression.children.size() == 1) {
+      if (const std::optional<std::string> callee =
+              sourceCodeForExpression(expression.children.front(), scope)) {
+        return *callee + "[" + expression.declaredType + "]";
+      }
+    }
+    break;
+  case AstExpressionKind::Unary:
+    if (expression.children.size() == 1) {
+      if (const std::optional<std::string> operand =
+              sourceCodeForExpression(expression.children.front(), scope)) {
+        return expression.text + *operand;
+      }
+    }
+    break;
+  case AstExpressionKind::Binary:
+    if (expression.children.size() == 2) {
+      const std::optional<std::string> left =
+          sourceCodeForExpression(expression.children.front(), scope);
+      const std::optional<std::string> right =
+          sourceCodeForExpression(expression.children.back(), scope);
+      if (left.has_value() && right.has_value()) {
+        return *left + " " + expression.text + " " + *right;
+      }
+    }
+    break;
+  case AstExpressionKind::Assign:
+    if (expression.children.size() == 2) {
+      const std::optional<std::string> target =
+          sourceCodeForExpression(expression.children.front(), scope);
+      const std::optional<std::string> value =
+          sourceCodeForExpression(expression.children.back(), scope);
+      if (target.has_value() && value.has_value()) {
+        return *target + " = " + *value;
+      }
+    }
+    break;
+  case AstExpressionKind::New: {
+    std::string result = "new " + expression.text;
+    if (!expression.children.empty()) {
+      if (const std::optional<std::string> arguments = joinedChildren(0, ", ")) {
+        result += "(" + *arguments + ")";
+      } else {
+        break;
+      }
+    }
+    return result;
+  }
+  default:
+    break;
+  }
+
+  if (sources_ == nullptr || !expression.span.isValid()) {
+    return std::nullopt;
+  }
+  std::string code = sources_->snippet(expression.span);
+  return code.empty() ? std::nullopt
+                      : std::optional<std::string>{std::move(code)};
 }
 
 std::optional<std::uint32_t>
@@ -6112,6 +6297,8 @@ std::optional<TypeInfo> Typechecker::recordInlineApplication(
           constantStringValue(*sourceArgument, scope);
       parameter.specializedCharValue = constantCharValue(*sourceArgument, scope);
       parameter.specializedNullValue = constantNullValue(*sourceArgument, scope);
+      parameter.specializedCode =
+          sourceCodeForExpression(*sourceArgument, scope);
     } else if (materializedContextParameter) {
       auto contextual = std::find_if(
           contextualArguments.begin(), contextualArguments.end(),
@@ -6658,6 +6845,31 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
   case AstExpressionKind::Call: {
     if (expression.children.empty()) {
       return TypeInfo{SimpleTypeKind::Unknown, "Unknown"};
+    }
+    if (isCodeOfCallee(expression.children.front(), scope)) {
+      TypeInfo result{SimpleTypeKind::String, "String"};
+      if (expression.children.size() != 2) {
+        diagnostics_.error(expression.span,
+                           "codeOf requires exactly one argument");
+        for (std::size_t index = 1; index < expression.children.size(); ++index) {
+          (void)inferExpressionType(expression.children[index], scope);
+        }
+        return result;
+      }
+
+      const AstExpression& argument = expression.children.back();
+      (void)inferExpressionType(argument, scope);
+      if (inlineDefinitionDepth_ == 0) {
+        if (const std::optional<std::string> code =
+                sourceCodeForExpression(argument, scope)) {
+          result.singletonLiteral = stringSingletonType(*code);
+          result.stringSingleton = true;
+        } else {
+          diagnostics_.error(argument.span,
+                             "codeOf could not recover argument source code");
+        }
+      }
+      return result;
     }
     if (isRequireConstCallee(expression.children.front(), scope)) {
       const TypeInfo unit{SimpleTypeKind::Unit, "Unit"};

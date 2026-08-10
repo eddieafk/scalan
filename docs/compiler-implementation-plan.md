@@ -1136,6 +1136,16 @@ Current scaffold status:
   malformed arity receive focused diagnostics. Runtime, dead-branch,
   diagnostic, import-resolution, and NIR-erasure coverage remains isolated in
   `SmokeTests6.cpp`.
+  Compiler-owned `scala.compiletime.codeOf(expression)` captures a canonical
+  source representation without evaluating the expression. Exact imports,
+  aliases, and the qualified spelling resolve to the intrinsic. Inline
+  parameter source propagates through call-site specialization and nested
+  inline calls, while composite expressions are reconstructed from typed AST
+  structure because their parser spans identify the operator or keyword.
+  Results are typed String singleton literals, can participate in constant
+  concatenation for `compiletime.error`, and reach caller NIR without the
+  intrinsic or argument evaluation. Runtime, diagnostic, import-resolution,
+  nested-specialization, and NIR-erasure coverage remains in `SmokeTests6.cpp`.
   Compiler-owned `scala.compiletime.error(message)` now emits user-defined
   diagnostics when a call survives inline expansion. Exact imports, aliases,
   and the qualified spelling resolve to the intrinsic. Literal Strings,
