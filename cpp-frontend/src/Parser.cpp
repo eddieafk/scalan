@@ -2096,7 +2096,9 @@ AstExpression Parser::parseMatchExpression(AstExpression selector,
     if (isInline) {
       const auto supportedLiteral = [](const AstExpression& pattern) {
         return pattern.kind == AstExpressionKind::BooleanLiteral ||
-               pattern.kind == AstExpressionKind::IntegerLiteral;
+               pattern.kind == AstExpressionKind::IntegerLiteral ||
+               pattern.kind == AstExpressionKind::StringLiteral ||
+               pattern.kind == AstExpressionKind::CharLiteral;
       };
       const bool supportedTypePattern =
           !current.typePattern.empty() &&
@@ -2118,8 +2120,9 @@ AstExpression Parser::parseMatchExpression(AstExpression selector,
           !supportedCatchAll) {
         diagnostics_.error(
             current.pattern.span,
-            "inline match currently supports Boolean and integer literals, one "
-            "unguarded type pattern per case, and a final wildcard or binding");
+            "inline match currently supports Boolean, integer, String, and Char "
+            "literals, one unguarded type pattern per case, and a final wildcard "
+            "or binding");
       }
     }
 
@@ -2263,6 +2266,7 @@ AstExpression Parser::parseMatchExpression(AstExpression selector,
         comparison.kind = AstExpressionKind::Binary;
         comparison.text = "==";
         comparison.span = pattern.span;
+        comparison.span.length = 0;
         comparison.children.push_back(
             makeExpression(AstExpressionKind::Identifier, selectorName, selector.span));
         comparison.children.push_back(std::move(pattern));

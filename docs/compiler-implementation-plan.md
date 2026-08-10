@@ -1035,33 +1035,38 @@ Current scaffold status:
   `using inline` parameters resolved from inferred givens, explicit `using`
   expressions, or nested contextual forwarding. Ordinary and contextual
   non-inline parameters retain their single-evaluation local binding.
-  Call-site rechecking tracks compile-time Boolean and integer arguments for
-  both ordinary and inline parameters. An ordinary `if` formed from those
-  values is opportunistically reduced, while `inline if` requires a constant
-  condition and diagnoses a dynamic one. Boolean conditions support `!`, `&&`,
+  Call-site rechecking tracks compile-time Boolean, integer, String, and Char
+  arguments for both ordinary and inline parameters. An ordinary `if` formed
+  from those values is opportunistically reduced, while `inline if` requires a
+  constant condition and diagnoses a dynamic one. Boolean conditions support
+  `!`, `&&`,
   `||`, `==`, and `!=`. `Byte`, `Short`, `Int`, and `Long` constants propagate
   through unary `+`/`-`, checked `+`, `-`, `*`, `/`, and `%` arithmetic, and
   `==`, `!=`, `<`, `>`, `<=`, and `>=` comparisons. Overflow and zero divisors
-  do not fold. Successful reduction records and emits only the selected
+  do not fold. String and Char `==`/`!=` comparisons use decoded literal values.
+  Successful reduction records and emits only the selected
   branch. Dynamic ordinary conditions retain a runtime conditional and
   preserve by-value single evaluation. Ordinary constant parameters propagate
   through nested inline calls and can refine transparent-inline results to the
   selected concrete branch type.
   Braced Scala 3 `inline match` expressions reuse the ordinary match lowering
-  for compile-time Boolean and integer selectors.
-  Ordered Boolean/integer literal cases, literal alternatives, and a required
-  final wildcard or binding are supported; each lowered case has distinct
-  branch-selection metadata and only the selected body reaches NIR. A dynamic
-  selector is rejected during call-site specialization. One unguarded type
+  for compile-time Boolean, integer, String, and Char selectors.
+  Ordered Boolean/integer/String/Char literal cases, literal alternatives, and
+  a required final wildcard or binding are supported; each lowered case has
+  distinct branch-selection metadata and only the selected body reaches NIR.
+  A dynamic selector is rejected during call-site specialization. One unguarded type
   pattern per case can also be reduced from a call-site static type. Positive
   subtype tests, exact boxed scalar/String tests (without numeric widening), and
   provably disjoint concrete-class tests are selected conservatively; a broad,
   abstract, composite, or otherwise overlapping static type remains
   non-reducible. Pattern bindings retain their narrowed type, so transparent
   inline calls can expose a selected concrete result API without emitting a
-  runtime test. Guards, type-pattern alternatives, singleton-value patterns,
-  literal strings/floats/chars/`null`, and indentation-only match syntax remain
-  later milestones and receive focused diagnostics where applicable.
+  runtime test. String and Char selectors can come from singleton
+  `constValue` results, inline parameters, or stable inline values; escaped
+  literals compare by decoded value. Guards, type-pattern alternatives,
+  singleton-value patterns, literal floats/`null`, and indentation-only match
+  syntax remain later milestones and receive focused diagnostics where
+  applicable.
   Compiler-owned `scala.compiletime.erasedValue[T]` can now provide the static
   selector for the same bounded type-pattern reduction. Exact imports, import
   aliases, and the qualified spelling are recognized. The frontend re-resolves
@@ -1079,10 +1084,10 @@ Current scaffold status:
   concrete types and abstract uses outside an inline definition are diagnosed.
   An abstract `T` is deferred while checking a generic inline definition and
   must become a supported singleton at each call site. The resulting value can
-  be returned directly or drive Boolean/integer `inline match` reduction and
-  transparent-result refinement. Expanded caller NIR contains the literal or
-  selected branch only: the intrinsic, synthetic selector local, runtime
-  comparisons, and unselected branches are absent. Focused runtime,
+  be returned directly or drive Boolean/integer/String/Char `inline match`
+  reduction and transparent-result refinement. Expanded caller NIR contains
+  the literal or selected branch only: the intrinsic, synthetic selector local,
+  runtime comparisons, and unselected branches are absent. Focused runtime,
   diagnostics, import-resolution, transparent-type, and NIR coverage shares
   `SmokeTests6.cpp` with the related `erasedValue` slice.
   Compiler-owned `scala.compiletime.error(message)` now emits user-defined
@@ -1112,12 +1117,12 @@ Current scaffold status:
   shares `SmokeTests6.cpp` without adding another native test build.
   Constants propagate through nested inline calls and work with generic evidence
   selection, contextual and curried calls, effectful instance receivers, and
-  transparent-result refinement. Symbolic Boolean and integer inline parameters
-  defer nested specialization until the enclosing call site. Non-constant
-  arguments remain valid unless an `inline if` requires reduction. In this
-  bounded slice both branches must still typecheck at the original definition
-  site. Partially applied calls and the remaining Scala 3 inline surface stay
-  future milestones.
+  transparent-result refinement. Symbolic Boolean, integer, String, and Char
+  inline parameters defer nested specialization until the enclosing call site.
+  Non-constant arguments remain valid unless an `inline if` requires
+  reduction. In this bounded slice both branches must still typecheck at the
+  original definition site. Partially applied calls and the remaining Scala 3
+  inline surface stay future milestones.
   Initialized `inline val` declarations are supported at top level and in
   objects when their initializer is a scalar or string literal expression
   composed with supported unary/binary operators. An initializer can also refer

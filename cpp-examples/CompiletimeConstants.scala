@@ -37,6 +37,32 @@ object Constants {
       case _ => new OtherResult("precise-other")
     }
 
+  transparent inline def stringLabelOf[S]: String =
+    inline constValue[S] match {
+      case "alpha" => "string-alpha"
+      case "beta" | "line\nbreak" => "string-alternative"
+      case _ => "string-fallback"
+    }
+
+  transparent inline def charLabelOf[C]: String =
+    inline constValue[C] match {
+      case 'x' => "char-x"
+      case 'y' | '\n' => "char-alternative"
+      case _ => "char-fallback"
+    }
+
+  inline def stringParameterLabel(inline value: String): String =
+    inline value match {
+      case "parameter" => "string-parameter"
+      case _ => "string-parameter-fallback"
+    }
+
+  inline def charParameterLabel(inline value: Char): String =
+    inline value match {
+      case 'p' => "char-parameter"
+      case _ => "char-parameter-fallback"
+    }
+
   inline def requireSeven[N](inline message: String): String =
     inline constValue[N] match {
       case 7 => "accepted-seven"
@@ -66,6 +92,14 @@ object Main {
     println(Constants.labelOf[9])
     println(Constants.resultFor[7].sevenOnly())
     println(Constants.resultFor[9].otherOnly())
+    println(Constants.stringLabelOf["alpha"])
+    println(Constants.stringLabelOf["line\nbreak"])
+    println(Constants.stringLabelOf["other"])
+    println(Constants.charLabelOf['x'])
+    println(Constants.charLabelOf['\n'])
+    println(Constants.charLabelOf['q'])
+    println(Constants.stringParameterLabel("parameter"))
+    println(Constants.charParameterLabel('p'))
     println(Constants.requireSeven[7]("not seven"))
     println(Constants.requireTrue[true]("not true"))
     println(Constants.requireCondition(true, "condition failed"))

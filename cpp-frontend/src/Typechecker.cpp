@@ -209,6 +209,40 @@ std::string decodeStringLiteral(std::string_view text) {
   return decoded;
 }
 
+std::optional<std::uint32_t> decodeCharLiteral(std::string_view text) {
+  if (text.size() < 3 || text.front() != '\'' || text.back() != '\'') {
+    return std::nullopt;
+  }
+  text.remove_prefix(1);
+  text.remove_suffix(1);
+  if (text.size() == 1) {
+    return static_cast<unsigned char>(text.front());
+  }
+  if (text.size() != 2 || text.front() != '\\') {
+    return std::nullopt;
+  }
+  switch (text.back()) {
+  case 'b':
+    return '\b';
+  case 't':
+    return '\t';
+  case 'n':
+    return '\n';
+  case 'f':
+    return '\f';
+  case 'r':
+    return '\r';
+  case '"':
+    return '"';
+  case '\'':
+    return '\'';
+  case '\\':
+    return '\\';
+  default:
+    return std::nullopt;
+  }
+}
+
 std::string tupleTypeName(const std::vector<std::string>& elements) {
   if (elements.empty()) {
     return "scala.EmptyTuple";
@@ -2020,6 +2054,11 @@ TypedDeclaration Typechecker::typecheckDeclaration(const AstDeclaration& declara
       symbol.specializedStringValue =
           constantStringValue(declaration.initializer, signatureScope);
     }
+    if (declaration.isInline && declaration.kind == AstDeclarationKind::Val &&
+        typed.inferredType.kind == SimpleTypeKind::Char) {
+      symbol.specializedCharValue =
+          constantCharValue(declaration.initializer, signatureScope);
+    }
     if (auto enclosing = globalSymbols_.find(owner);
         enclosing != globalSymbols_.end() &&
         enclosing->second.kind == AstDeclarationKind::Object) {
@@ -2302,6 +2341,11 @@ TypedDeclaration Typechecker::typecheckDeclaration(const AstDeclaration& declara
         typedMember.inferredType.kind == SimpleTypeKind::String) {
       updated.specializedStringValue =
           constantStringValue(member.initializer, memberScope);
+    }
+    if (typedMember.isInline && typedMember.kind == AstDeclarationKind::Val &&
+        typedMember.inferredType.kind == SimpleTypeKind::Char) {
+      updated.specializedCharValue =
+          constantCharValue(member.initializer, memberScope);
     }
     updated.isAnonymousGiven = typedMember.isAnonymousGiven;
     updated.isModuleMember = declaration.kind == AstDeclarationKind::Object &&
@@ -5009,6 +5053,25 @@ Typechecker::constantBooleanValue(const AstExpression& expression,
       if (expression.text == "==" || expression.text == "!=" ||
           expression.text == "<" || expression.text == ">" ||
           expression.text == "<=" || expression.text == ">=") {
+        if (expression.text == "==" || expression.text == "!=") {
+          const std::optional<std::string> leftString =
+              constantStringValue(expression.children.front(), scope);
+          const std::optional<std::string> rightString =
+              constantStringValue(expression.children.back(), scope);
+          if (leftString.has_value() && rightString.has_value()) {
+            return expression.text == "==" ? *leftString == *rightString
+                                           : *leftString != *rightString;
+          }
+
+          const std::optional<std::uint32_t> leftChar =
+              constantCharValue(expression.children.front(), scope);
+          const std::optional<std::uint32_t> rightChar =
+              constantCharValue(expression.children.back(), scope);
+          if (leftChar.has_value() && rightChar.has_value()) {
+            return expression.text == "==" ? *leftChar == *rightChar
+                                           : *leftChar != *rightChar;
+          }
+        }
         const std::optional<std::int64_t> left =
             constantIntegerValue(expression.children.front(), scope);
         const std::optional<std::int64_t> right =
@@ -5094,6 +5157,45 @@ Typechecker::constantStringValue(const AstExpression& expression,
           constantStringValue(expression.children.back(), scope);
       if (left.has_value() && right.has_value()) {
         return *left + *right;
+      }
+    }
+    return std::nullopt;
+  default:
+    return std::nullopt;
+  }
+}
+
+std::optional<std::uint32_t>
+Typechecker::constantCharValue(const AstExpression& expression,
+                               const Scope& scope) const {
+  switch (expression.kind) {
+  case AstExpressionKind::CharLiteral:
+    return decodeCharLiteral(expression.text);
+  case AstExpressionKind::Identifier:
+    if (auto symbol = scope.find(expression.text); symbol != scope.end()) {
+      return symbol->second.specializedCharValue;
+    }
+    return std::nullopt;
+  case AstExpressionKind::Select:
+    if (expression.children.size() == 1 &&
+        expression.children.front().kind == AstExpressionKind::Identifier) {
+      if (auto receiver = scope.find(expression.children.front().text);
+          receiver != scope.end()) {
+        if (std::optional<SymbolInfo> member = resolvedMemberForReceiverType(
+                receiver->second.type, expression.text)) {
+          return member->specializedCharValue;
+        }
+      }
+    }
+    return std::nullopt;
+  case AstExpressionKind::TypeApply:
+    if (isConstValueExpression(expression, scope) &&
+        typeArgumentsFor(expression).size() == 1) {
+      const TypeInfo constant =
+          typeFromDeclaredName(expression.declaredType, &scope, &expression.span);
+      if (constant.kind == SimpleTypeKind::Char &&
+          !constant.singletonLiteral.empty()) {
+        return decodeCharLiteral(constant.singletonLiteral);
       }
     }
     return std::nullopt;
@@ -5422,6 +5524,8 @@ std::optional<TypeInfo> Typechecker::recordInlineApplication(
           inlineParameter && isIntegerConstantType(parameterKind);
       const bool stringInlineParameter =
           inlineParameter && parameterKind == SimpleTypeKind::String;
+      const bool charInlineParameter =
+          inlineParameter && parameterKind == SimpleTypeKind::Char;
       const bool hasConstantArgument =
           sourceArgument != nullptr &&
           (booleanInlineParameter
@@ -5430,9 +5534,11 @@ std::optional<TypeInfo> Typechecker::recordInlineApplication(
                ? constantIntegerValue(*sourceArgument, scope).has_value()
            : stringInlineParameter
                ? constantStringValue(*sourceArgument, scope).has_value()
+           : charInlineParameter
+               ? constantCharValue(*sourceArgument, scope).has_value()
                : false);
       if ((!booleanInlineParameter && !integerInlineParameter &&
-           !stringInlineParameter) ||
+           !stringInlineParameter && !charInlineParameter) ||
           sourceArgument == nullptr || hasConstantArgument) {
         continue;
       }
@@ -5447,7 +5553,9 @@ std::optional<TypeInfo> Typechecker::recordInlineApplication(
                        (integerInlineParameter &&
                         !parameter->second.specializedIntegerValue.has_value()) ||
                        (stringInlineParameter &&
-                        !parameter->second.specializedStringValue.has_value());
+                        !parameter->second.specializedStringValue.has_value()) ||
+                       (charInlineParameter &&
+                        !parameter->second.specializedCharValue.has_value());
               }
             }
             return std::any_of(candidate.children.begin(), candidate.children.end(),
@@ -5602,6 +5710,11 @@ std::optional<TypeInfo> Typechecker::recordInlineApplication(
           sourceArgument == nullptr
               ? std::nullopt
               : constantStringValue(*sourceArgument, scope);
+    } else if (type.kind == SimpleTypeKind::Char) {
+      parameter.specializedCharValue =
+          sourceArgument == nullptr
+              ? std::nullopt
+              : constantCharValue(*sourceArgument, scope);
     }
     parameter.isLexicalValue = true;
     inlineScope[name] = std::move(parameter);
@@ -7541,6 +7654,10 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
               constantBooleanValue(local.children.front(), blockScope);
           symbol.specializedIntegerValue =
               constantIntegerValue(local.children.front(), blockScope);
+          symbol.specializedStringValue =
+              constantStringValue(local.children.front(), blockScope);
+          symbol.specializedCharValue =
+              constantCharValue(local.children.front(), blockScope);
           symbol.specializedStaticType =
               specializedStaticType(local.children.front(), blockScope);
         }

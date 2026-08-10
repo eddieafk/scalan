@@ -84,6 +84,9 @@ class NamedValue[A](val value: String) extends Named[A] {
 }
 
 object TypeKinds {
+  inline val stableString: String = "stable"
+  inline val stableChar: Char = 's'
+
   transparent inline def valueOf[T] = constValue[T]
 
   transparent inline def qualifiedValueOf[T] =
@@ -148,6 +151,50 @@ object TypeKinds {
       case _ => new FallbackResult("fallback")
     }
 
+  transparent inline def stringChoice[S]: String =
+    inline constValue[S] match {
+      case "alpha" => "string-alpha"
+      case "beta" | "line\nbreak" => "string-alternative"
+      case _ => "string-fallback"
+    }
+
+  transparent inline def charChoice[C]: String =
+    inline constValue[C] match {
+      case 'x' => "char-x"
+      case 'y' | '\n' => "char-alternative"
+      case _ => "char-fallback"
+    }
+
+  inline def stringParameterChoice(inline value: String): String =
+    inline value match {
+      case "parameter" => "string-parameter"
+      case _ => "string-parameter-fallback"
+    }
+
+  inline def charParameterChoice(inline value: Char): String =
+    inline value match {
+      case 'p' => "char-parameter"
+      case _ => "char-parameter-fallback"
+    }
+
+  inline def stableStringChoice: String =
+    inline stableString match {
+      case "stable" => "stable-string"
+      case _ => "stable-string-fallback"
+    }
+
+  inline def stableCharChoice: String =
+    inline stableChar match {
+      case 's' => "stable-char"
+      case _ => "stable-char-fallback"
+    }
+
+  transparent inline def stringResult[S]: ErasedResult =
+    inline constValue[S] match {
+      case "precise" => new PreciseResult("string-precise")
+      case _ => new FallbackResult("string-fallback-result")
+    }
+
   inline def summoned[A]: String = summonInline[Named[A]].label()
 
   inline def qualifiedSummoned[A]: String =
@@ -198,6 +245,17 @@ object Main {
   def aliasOtherName: String = TypeKinds.aliasNameOf[Other]
   def preciseResult: String = TypeKinds.resultFor[String].preciseOnly()
   def fallbackResult: String = TypeKinds.resultFor[Other].fallbackOnly()
+  def stringAlpha: String = TypeKinds.stringChoice["alpha"]
+  def stringAlternative: String = TypeKinds.stringChoice["line\nbreak"]
+  def stringFallback: String = TypeKinds.stringChoice["other"]
+  def charX: String = TypeKinds.charChoice['x']
+  def charAlternative: String = TypeKinds.charChoice['\n']
+  def charFallback: String = TypeKinds.charChoice['q']
+  def stringParameter: String = TypeKinds.stringParameterChoice("parameter")
+  def charParameter: String = TypeKinds.charParameterChoice('p')
+  def stableString: String = TypeKinds.stableStringChoice
+  def stableChar: String = TypeKinds.stableCharChoice
+  def stringPrecise: String = TypeKinds.stringResult["precise"].preciseOnly()
   def directSummoned: String = summonInline[Named[Int]].label()
   def inlineSummoned: String = TypeKinds.summoned[Int]
   def qualifiedSummoned: String = TypeKinds.qualifiedSummoned[String]
@@ -230,6 +288,17 @@ object Main {
     println(aliasOtherName)
     println(preciseResult)
     println(fallbackResult)
+    println(stringAlpha)
+    println(stringAlternative)
+    println(stringFallback)
+    println(charX)
+    println(charAlternative)
+    println(charFallback)
+    println(stringParameter)
+    println(charParameter)
+    println(stableString)
+    println(stableChar)
+    println(stringPrecise)
     println(directSummoned)
     println(inlineSummoned)
     println(qualifiedSummoned)
@@ -308,6 +377,24 @@ object Main {
   val ambiguousQualifiedSummon =
     scala.compiletime.summonInline[Named[Long]]
   val malformedSummon = summonInline[Named[Int], Named[String]]
+
+  def runtimeString(): String = "runtime"
+  def runtimeChar(): Char = 'r'
+
+  inline def requiresStringMatch(inline value: String): String =
+    inline value match {
+      case "known" => "known"
+      case _ => "other"
+    }
+
+  inline def requiresCharMatch(inline value: Char): String =
+    inline value match {
+      case 'k' => "known"
+      case _ => "other"
+    }
+
+  val unresolvedStringMatch = requiresStringMatch(runtimeString())
+  val unresolvedCharMatch = requiresCharMatch(runtimeChar())
 
   val escaped = erasedValue[String]
   val qualifiedEscaped = scala.compiletime.erasedValue[Int]
@@ -420,6 +507,28 @@ object Main {
       functionText(result.nirText, "demo.inlineerased.Main.preciseResult");
   const std::string_view fallbackResult =
       functionText(result.nirText, "demo.inlineerased.Main.fallbackResult");
+  const std::string_view stringAlpha =
+      functionText(result.nirText, "demo.inlineerased.Main.stringAlpha");
+  const std::string_view stringAlternative =
+      functionText(result.nirText, "demo.inlineerased.Main.stringAlternative");
+  const std::string_view stringFallback =
+      functionText(result.nirText, "demo.inlineerased.Main.stringFallback");
+  const std::string_view charX =
+      functionText(result.nirText, "demo.inlineerased.Main.charX");
+  const std::string_view charAlternative =
+      functionText(result.nirText, "demo.inlineerased.Main.charAlternative");
+  const std::string_view charFallback =
+      functionText(result.nirText, "demo.inlineerased.Main.charFallback");
+  const std::string_view stringParameter =
+      functionText(result.nirText, "demo.inlineerased.Main.stringParameter");
+  const std::string_view charParameter =
+      functionText(result.nirText, "demo.inlineerased.Main.charParameter");
+  const std::string_view stableString =
+      functionText(result.nirText, "demo.inlineerased.Main.stableString");
+  const std::string_view stableChar =
+      functionText(result.nirText, "demo.inlineerased.Main.stableChar");
+  const std::string_view stringPrecise =
+      functionText(result.nirText, "demo.inlineerased.Main.stringPrecise");
   const std::string_view directSummoned =
       functionText(result.nirText, "demo.inlineerased.Main.directSummoned");
   const std::string_view inlineSummoned =
@@ -494,6 +603,32 @@ object Main {
       fullyReduced(skippedSummoned) &&
       contains(skippedSummoned, "\"summon-skipped\"") &&
       !contains(skippedSummoned, ".label");
+  const auto selectedLiteral = [&](std::string_view function,
+                                   std::string_view selected,
+                                   std::string_view unselected) {
+    return !function.empty() && contains(function, selected) &&
+           !contains(function, unselected) && !contains(function, " == ") &&
+           !contains(function, "TypeKinds.");
+  };
+  const bool literalMatchesReduced =
+      selectedLiteral(stringAlpha, "\"string-alpha\"", "string-fallback") &&
+      selectedLiteral(stringAlternative, "\"string-alternative\"",
+                      "string-fallback") &&
+      selectedLiteral(stringFallback, "\"string-fallback\"", "string-alpha") &&
+      selectedLiteral(charX, "\"char-x\"", "char-fallback") &&
+      selectedLiteral(charAlternative, "\"char-alternative\"", "char-fallback") &&
+      selectedLiteral(charFallback, "\"char-fallback\"", "char-x") &&
+      selectedLiteral(stringParameter, "\"string-parameter\"",
+                      "string-parameter-fallback") &&
+      selectedLiteral(charParameter, "\"char-parameter\"",
+                      "char-parameter-fallback") &&
+      selectedLiteral(stableString, "\"stable-string\"",
+                      "stable-string-fallback") &&
+      selectedLiteral(stableChar, "\"stable-char\"", "stable-char-fallback") &&
+      fullyReduced(stringPrecise) &&
+      contains(stringPrecise, "demo.inlineerased.PreciseResult") &&
+      contains(stringPrecise, ".preciseOnly") &&
+      !contains(stringPrecise, "FallbackResult");
   const bool valid =
       status == 0 &&
       outputText == "11\n42\n9000000000\nliteral\ntrue\nx\nconstant-seven\n"
@@ -502,7 +637,10 @@ object Main {
                     "accepted-condition\n"
                     "string\nint\nlong\nother\nalias-string\n"
                     "alias-other\n"
-                    "precise\nfallback\n"
+                    "precise\nfallback\nstring-alpha\nstring-alternative\n"
+                    "string-fallback\nchar-x\nchar-alternative\nchar-fallback\n"
+                    "string-parameter\nchar-parameter\nstable-string\n"
+                    "stable-char\nstring-precise\n"
                     "summoned-int\nsummoned-int\nsummoned-string\n"
                     "summoned-long\nsummoned-int\nnested:summoned-int\n"
                     "summoned-string\nsummon-skipped\nordinary-shadow\n" &&
@@ -539,6 +677,7 @@ object Main {
       contains(invalid.diagnosticsText,
                "summonInline requires exactly one type argument") &&
       summonInlineReduced &&
+      literalMatchesReduced &&
       countOccurrences(invalid.diagnosticsText,
                        "constValue requires a constant singleton type") == 3 &&
       contains(invalid.diagnosticsText,
@@ -552,9 +691,10 @@ object Main {
           "erasedValue inline match patterns cannot bind a runtime value") == 2 &&
       contains(invalid.diagnosticsText,
                "erasedValue requires exactly one type argument") &&
-      contains(invalid.diagnosticsText,
-               "inline match selector must be reducible from a compile-time value "
-               "or static type") &&
+      countOccurrences(
+          invalid.diagnosticsText,
+          "inline match selector must be reducible from a compile-time value or "
+          "static type") == 3 &&
       fullyReduced(stringName) && contains(stringName, "\"string\"") &&
       !contains(stringName, "\"other\"") && fullyReduced(intName) &&
       contains(intName, "\"int\"") && fullyReduced(longName) &&
@@ -597,7 +737,18 @@ object Main {
                       "', alias-string-name='" + std::string(aliasStringName) +
                       "', alias-other-name='" + std::string(aliasOtherName) +
                       "', precise-result='" + std::string(preciseResult) +
-                      "', fallback-result='" + std::string(fallbackResult) + "')");
+                      "', fallback-result='" + std::string(fallbackResult) +
+                      "', string-alpha='" + std::string(stringAlpha) +
+                      "', string-alternative='" + std::string(stringAlternative) +
+                      "', string-fallback='" + std::string(stringFallback) +
+                      "', char-x='" + std::string(charX) +
+                      "', char-alternative='" + std::string(charAlternative) +
+                      "', char-fallback='" + std::string(charFallback) +
+                      "', string-parameter='" + std::string(stringParameter) +
+                      "', char-parameter='" + std::string(charParameter) +
+                      "', stable-string='" + std::string(stableString) +
+                      "', stable-char='" + std::string(stableChar) +
+                      "', string-precise='" + std::string(stringPrecise) + "')");
 }
 
 } // namespace
