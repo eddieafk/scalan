@@ -37,10 +37,9 @@ object Selectors {
   inline val numericThresholdAlias: Int = numericThreshold + 1
 
   inline def selected[A]: String =
-    summonFrom {
+    summonFrom:
       case found: Named[A] => prefix + found.label()
       case _ => "fallback"
-    }
 
   inline def nested[A]: String = "nested:" + selected[A]
 
@@ -380,15 +379,13 @@ class TraitInstanceSelectorsValue(val value: String) extends TraitInstanceSelect
 
 class GenericInstanceSelectors[Owner](val ownerPrefix: String) {
   inline def selected[A](): String =
-    summonFrom {
+    summonFrom:
       case ownerNamed: Named[Owner] =>
-        summonFrom {
+        summonFrom:
           case methodNamed: Named[A] =>
             ownerPrefix + ownerNamed.label() + ":" + methodNamed.label()
           case _ => ownerPrefix + "method-fallback"
-        }
       case _ => ownerPrefix + "owner-fallback"
-    }
 
   inline def contextual[A](value: A)(
       using ownerNamed: Named[Owner], methodNamed: Named[A]): String =
@@ -402,15 +399,13 @@ trait GenericTraitInstanceSelectors[Owner] {
   def genericTraitPrefix(): String
 
   inline def selected[A](): String =
-    summonFrom {
+    summonFrom:
       case ownerNamed: Named[Owner] =>
-        summonFrom {
+        summonFrom:
           case methodNamed: Named[A] =>
             genericTraitPrefix() + ownerNamed.label() + ":" + methodNamed.label()
           case _ => genericTraitPrefix() + "method-fallback"
-        }
       case _ => genericTraitPrefix() + "owner-fallback"
-    }
 }
 
 class GenericTraitInstanceSelectorsValue(val value: String)

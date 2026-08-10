@@ -131,6 +131,11 @@ build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
 # until specialization, so only evidence required by a surviving inline branch
 # is resolved. Canonical, aliased, and qualified calls materialize the selected
 # given directly in caller NIR and report ordinary missing/ambiguous diagnostics.
+# Compiler-owned `summonFrom` accepts both braced cases and Scala 3
+# `summonFrom:` indentation-based case regions. Indented sibling cases must
+# align, and nested regions close when their case indentation returns to the
+# enclosing level; selected evidence and fallbacks retain the same per-call
+# specialization and dead-branch erasure as the braced form.
 # Stable top-level and object `inline val` constants, including
 # dependency-ordered aliases of earlier inline values, are substituted directly
 # and can drive branches.

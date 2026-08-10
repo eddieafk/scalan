@@ -1495,7 +1495,8 @@ AstExpression Parser::parsePrimaryExpression() {
     return expression;
   }
   if (match(TokenKind::Identifier)) {
-    if (previous().text == "summonFrom" && check(TokenKind::LeftBrace)) {
+    if (previous().text == "summonFrom" &&
+        (check(TokenKind::LeftBrace) || check(TokenKind::Colon))) {
       return parseSummonFromExpression(previous());
     }
     if (previous().text == "super") {
@@ -1904,14 +1905,60 @@ AstExpression Parser::parseSummonFromExpression(const Token& identifier) {
   expression.kind = AstExpressionKind::SummonFrom;
   expression.span = identifier.span;
 
-  if (!consume(TokenKind::LeftBrace, "expected '{' after summonFrom")) {
-    return expression;
+  const std::size_t summonFromTokenIndex = current_ - 1;
+  const bool bracedCases = match(TokenKind::LeftBrace);
+  if (!bracedCases) {
+    if (!consume(TokenKind::Colon, "expected '{' or ':' after summonFrom")) {
+      return expression;
+    }
+    if (!check(TokenKind::KeywordCase)) {
+      diagnostics_.error(
+          peek().span,
+          "expected an indentation-based case after summonFrom ':'");
+      return expression;
+    }
+  }
+
+  std::optional<std::size_t> caseIndentation;
+  if (!bracedCases) {
+    caseIndentation = tokenColumn(tokens_, current_);
+    if (!hasLeadingNewline(peek())) {
+      diagnostics_.error(
+          peek().span,
+          "indentation-based summonFrom cases must start on a new line");
+    }
+    if (*caseIndentation <=
+        statementIndentation(tokens_, summonFromTokenIndex)) {
+      diagnostics_.error(
+          peek().span,
+          "indentation-based summonFrom cases must be more indented than their "
+          "enclosing statement");
+    }
   }
 
   bool sawCatchAll = false;
   consumeSeparators();
-  while (!isAtEnd() && !check(TokenKind::RightBrace)) {
+  while (!isAtEnd() && (!bracedCases || !check(TokenKind::RightBrace))) {
+    if (!bracedCases && check(TokenKind::KeywordCase)) {
+      const std::size_t currentIndentation = tokenColumn(tokens_, current_);
+      if (currentIndentation < *caseIndentation) {
+        break;
+      }
+      if (!hasLeadingNewline(peek())) {
+        diagnostics_.error(
+            peek().span,
+            "indentation-based summonFrom cases must start on a new line");
+      }
+      if (currentIndentation != *caseIndentation) {
+        diagnostics_.error(
+            peek().span,
+            "indentation-based summonFrom cases must align with the first case");
+      }
+    }
     if (!match(TokenKind::KeywordCase)) {
+      if (!bracedCases) {
+        break;
+      }
       diagnostics_.error(peek().span, "expected case in summonFrom expression");
       break;
     }
@@ -1972,7 +2019,9 @@ AstExpression Parser::parseSummonFromExpression(const Token& identifier) {
     expression.children.push_back(std::move(branch));
     consumeSeparators();
   }
-  consume(TokenKind::RightBrace, "expected '}' after summonFrom cases");
+  if (bracedCases) {
+    consume(TokenKind::RightBrace, "expected '}' after summonFrom cases");
+  }
   if (expression.children.empty()) {
     diagnostics_.error(identifier.span,
                        "summonFrom expression requires at least one case");

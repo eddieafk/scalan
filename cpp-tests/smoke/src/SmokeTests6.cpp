@@ -307,6 +307,25 @@ object TypeKinds {
           case _ => "nested-indented-false"
       case _ => "nested-indented-outer"
 
+  inline def indentedSummon[A]: String =
+    summonFrom:
+      case found: Named[A] => "indented-summon:" + found.label()
+      case _ => "indented-summon-fallback"
+
+  inline def indentedGivenSummon[A]: String =
+    summonFrom:
+      case given Named[A] => "indented-given:" + summonInline[Named[A]].label()
+      case _ => "indented-given-fallback"
+
+  inline def nestedIndentedSummon[A, B]: String =
+    summonFrom:
+      case outer: Named[A] =>
+        summonFrom:
+          case inner: Named[B] =>
+            "nested-indented-summon:" + outer.label() + ":" + inner.label()
+          case _ => "nested-indented-inner-fallback:" + outer.label()
+      case _ => "nested-indented-outer-fallback"
+
   inline def requireSeven[N](inline message: String): String =
     inline constValue[N] match {
       case 7 => "accepted-seven"
@@ -597,6 +616,15 @@ object Main {
   def nestedSummoned: String = TypeKinds.nestedSummoned[Int]
   def selectedSummoned: String = TypeKinds.selectedSummoned[String](true)
   def skippedSummoned: String = TypeKinds.selectedSummoned[Other](false)
+  def indentedSummoned: String = TypeKinds.indentedSummon[Int]
+  def indentedSummonFallback: String = TypeKinds.indentedSummon[Other]
+  def indentedGivenSummoned: String = TypeKinds.indentedGivenSummon[String]
+  def nestedIndentedSummoned: String =
+    TypeKinds.nestedIndentedSummon[Int, Long]
+  def nestedIndentedInnerFallback: String =
+    TypeKinds.nestedIndentedSummon[Int, Other]
+  def nestedIndentedOuterFallback: String =
+    TypeKinds.nestedIndentedSummon[Other, Int]
 
   def main(args: Array[String]): Unit = {
     println(directConstant)
@@ -714,6 +742,12 @@ object Main {
     println(nestedSummoned)
     println(selectedSummoned)
     println(skippedSummoned)
+    println(indentedSummoned)
+    println(indentedSummonFallback)
+    println(indentedGivenSummoned)
+    println(nestedIndentedSummoned)
+    println(nestedIndentedInnerFallback)
+    println(nestedIndentedOuterFallback)
     println(Shadowing.value)
   }
 }
@@ -929,6 +963,21 @@ object Main {
 
   inline def sameLine(inline value: Int): String =
     inline value match case 1 => "one"; case _ => "other"
+
+  trait Named[A]
+
+  inline def misalignedSummon[A]: String =
+    summonFrom:
+      case found: Named[A] => "found"
+        case _ => "other"
+
+  inline def unindentedSummon[A]: String =
+    summonFrom:
+  case found: Named[A] => "found"
+  case _ => "other"
+
+  inline def sameLineSummon[A]: String =
+    summonFrom: case found: Named[A] => "found"; case _ => "other"
 }
 )";
 
@@ -1203,6 +1252,18 @@ object Main {
       functionText(result.nirText, "demo.inlineerased.Main.selectedSummoned");
   const std::string_view skippedSummoned =
       functionText(result.nirText, "demo.inlineerased.Main.skippedSummoned");
+  const std::string_view indentedSummoned =
+      functionText(result.nirText, "demo.inlineerased.Main.indentedSummoned");
+  const std::string_view indentedSummonFallback = functionText(
+      result.nirText, "demo.inlineerased.Main.indentedSummonFallback");
+  const std::string_view indentedGivenSummoned = functionText(
+      result.nirText, "demo.inlineerased.Main.indentedGivenSummoned");
+  const std::string_view nestedIndentedSummoned = functionText(
+      result.nirText, "demo.inlineerased.Main.nestedIndentedSummoned");
+  const std::string_view nestedIndentedInnerFallback = functionText(
+      result.nirText, "demo.inlineerased.Main.nestedIndentedInnerFallback");
+  const std::string_view nestedIndentedOuterFallback = functionText(
+      result.nirText, "demo.inlineerased.Main.nestedIndentedOuterFallback");
 
   const auto fullyReduced = [](std::string_view function) {
     return !function.empty() && !contains(function, "$match") &&
@@ -1262,7 +1323,27 @@ object Main {
       !contains(selectedSummoned, "summon-skipped") &&
       fullyReduced(skippedSummoned) &&
       contains(skippedSummoned, "\"summon-skipped\"") &&
-      !contains(skippedSummoned, ".label");
+      !contains(skippedSummoned, ".label") &&
+      fullyReduced(indentedSummoned) &&
+      contains(indentedSummoned, "\"indented-summon:\"") &&
+      contains(indentedSummoned, ".label") &&
+      fullyReduced(indentedSummonFallback) &&
+      contains(indentedSummonFallback, "\"indented-summon-fallback\"") &&
+      !contains(indentedSummonFallback, ".label") &&
+      fullyReduced(indentedGivenSummoned) &&
+      contains(indentedGivenSummoned, "\"indented-given:\"") &&
+      contains(indentedGivenSummoned, ".label") &&
+      fullyReduced(nestedIndentedSummoned) &&
+      contains(nestedIndentedSummoned, "\"nested-indented-summon:\"") &&
+      countOccurrences(nestedIndentedSummoned, ".label") == 2 &&
+      fullyReduced(nestedIndentedInnerFallback) &&
+      contains(nestedIndentedInnerFallback,
+               "\"nested-indented-inner-fallback:\"") &&
+      countOccurrences(nestedIndentedInnerFallback, ".label") == 1 &&
+      fullyReduced(nestedIndentedOuterFallback) &&
+      contains(nestedIndentedOuterFallback,
+               "\"nested-indented-outer-fallback\"") &&
+      !contains(nestedIndentedOuterFallback, ".label");
   const auto selectedLiteral = [&](std::string_view function,
                                    std::string_view selected,
                                    std::string_view unselected) {
@@ -1527,7 +1608,13 @@ object Main {
                     "stable-char\nstring-precise\n"
                     "summoned-int\nsummoned-int\nsummoned-string\n"
                     "summoned-long\nsummoned-int\nnested:summoned-int\n"
-                    "summoned-string\nsummon-skipped\nordinary-shadow\n" &&
+                    "summoned-string\nsummon-skipped\n"
+                    "indented-summon:summoned-int\n"
+                    "indented-summon-fallback\n"
+                    "indented-given:summoned-string\n"
+                    "nested-indented-summon:summoned-int:summoned-long\n"
+                    "nested-indented-inner-fallback:summoned-int\n"
+                    "nested-indented-outer-fallback\nordinary-shadow\n" &&
       !invalid.ok &&
       contains(invalid.diagnosticsText, "failure: boom") &&
       contains(invalid.diagnosticsText, "aliased: boom") &&
@@ -1584,6 +1671,13 @@ object Main {
                "enclosing statement") &&
       contains(indentationInvalid.diagnosticsText,
                "indentation-based match cases must start on a new line") &&
+      contains(indentationInvalid.diagnosticsText,
+               "indentation-based summonFrom cases must align with the first case") &&
+      contains(indentationInvalid.diagnosticsText,
+               "indentation-based summonFrom cases must be more indented than their "
+               "enclosing statement") &&
+      contains(indentationInvalid.diagnosticsText,
+               "indentation-based summonFrom cases must start on a new line") &&
       countOccurrences(
           invalid.diagnosticsText,
           "inline match selector must be reducible from a compile-time value or "
@@ -1716,7 +1810,19 @@ object Main {
                       "', char-parameter='" + std::string(charParameter) +
                       "', stable-string='" + std::string(stableString) +
                       "', stable-char='" + std::string(stableChar) +
-                      "', string-precise='" + std::string(stringPrecise) + "')");
+                      "', string-precise='" + std::string(stringPrecise) +
+                      "', indented-summoned='" +
+                      std::string(indentedSummoned) +
+                      "', indented-summon-fallback='" +
+                      std::string(indentedSummonFallback) +
+                      "', indented-given-summoned='" +
+                      std::string(indentedGivenSummoned) +
+                      "', nested-indented-summoned='" +
+                      std::string(nestedIndentedSummoned) +
+                      "', nested-indented-inner-fallback='" +
+                      std::string(nestedIndentedInnerFallback) +
+                      "', nested-indented-outer-fallback='" +
+                      std::string(nestedIndentedOuterFallback) + "')");
 }
 
 } // namespace

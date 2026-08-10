@@ -987,9 +987,12 @@ Current scaffold status:
   two-level factory chain, runtime selection, and NIR lowering; missing,
   ambiguous, diverging, and malformed multi-type requests retain the ordinary
   contextual diagnostics.
-- Compiler-owned Scala 3 `summonFrom` accepts braced, ordered type-ascription
-  cases, typed wildcards, `case given T` and `case given _: T` contextual
-  bindings, and an optional final wildcard fallback.
+- Compiler-owned Scala 3 `summonFrom` accepts ordered type-ascription cases in
+  either braces or a `summonFrom:` indentation region, typed wildcards,
+  `case given T` and `case given _: T` contextual bindings, and an optional
+  final wildcard fallback. Indented sibling cases must align, begin on a new
+  line, and be more indented than their enclosing statement; nested regions
+  close when their case indentation returns to the enclosing level.
   Each typed case probes ordinary contextual search without reporting missing
   evidence, while ambiguity and diverging or unsupported materialization retain
   focused diagnostics instead of falling through. The selected branch and its
