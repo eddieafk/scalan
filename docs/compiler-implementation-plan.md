@@ -1058,10 +1058,12 @@ Current scaffold status:
   final wildcard or binding are supported; each lowered case has distinct
   branch-selection metadata and only the selected body reaches NIR. A reducible
   Boolean guard can further constrain literal, wildcard, binding, or type cases.
-  Untyped selector bindings propagate the selector's compile-time scalar or
-  String value through their compiler-generated binding block, which
-  lets the guard reference the bound name without treating ordinary user blocks
-  as constant expressions. Ordered short-circuiting means a guard on a
+  Selector bindings propagate the selector's compile-time scalar or String
+  value through their compiler-generated binding block, which lets a guard
+  reference either an untyped or typed bound name without treating ordinary
+  user blocks as constant expressions. Typed bindings retain widened call-site
+  constants after their static type test and compiler-generated cast, including
+  values passed through `Any`. Ordered short-circuiting means a guard on a
   nonmatching case need not itself be constant. A dynamic selected guard or
   selector is rejected during call-site specialization. Individual type patterns
   and wildcard type-pattern
@@ -1074,10 +1076,9 @@ Current scaffold status:
   Double, String, and Char selectors can come from
   singleton `constValue` results, inline parameters, or stable inline values;
   floating-point spellings compare by their narrowed scalar value and escaped
-  text literals compare by decoded value. Guards that reference typed selector
-  bindings, bound type-pattern alternatives, singleton-value patterns, `null`,
-  and indentation-only match syntax remain later milestones and receive focused
-  diagnostics where applicable.
+  text literals compare by decoded value. Bound type-pattern alternatives,
+  singleton-value patterns, `null`, and indentation-only match syntax remain
+  later milestones and receive focused diagnostics where applicable.
   Compiler-owned `scala.compiletime.erasedValue[T]` can now provide the static
   selector for the same bounded type-pattern reduction. Exact imports, import
   aliases, and the qualified spelling are recognized. The frontend re-resolves
@@ -1088,8 +1089,8 @@ Current scaffold status:
   runtime type tests, and the intrinsic itself are absent. Focused coverage is
   isolated in `SmokeTests6.cpp` to preserve incremental harness build times and
   exercises reference/scalar/fallback selection, aliased and qualified forms,
-  transparent-result refinement, guarded wildcard alternatives, selector-binding
-  guards, runtime output, diagnostics, and NIR erasure.
+  transparent-result refinement, guarded wildcard alternatives, typed and
+  untyped selector-binding guards, runtime output, diagnostics, and NIR erasure.
   Compiler-owned `scala.compiletime.constValue[T]` now materializes Boolean,
   Int, Long, Float, Double, String, and Char singleton types as typed literals.
   Exact imports, aliases, and the qualified spelling resolve to the intrinsic;

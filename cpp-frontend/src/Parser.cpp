@@ -2112,12 +2112,6 @@ AstExpression Parser::parseMatchExpression(AstExpression selector,
       const bool supportedCatchAll =
           current.typePattern.empty() &&
           (current.isWildcard || !current.bindingName.empty());
-      if (current.hasGuard && !current.bindingName.empty() &&
-          !current.typePattern.empty()) {
-        diagnostics_.error(current.pattern.span,
-                           "inline match guards on typed binding patterns are not "
-                           "supported yet");
-      }
       if (!supportedTypePattern && !supportedLiteralPattern &&
           !supportedCatchAll) {
         diagnostics_.error(

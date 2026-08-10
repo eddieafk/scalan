@@ -950,12 +950,6 @@ class UnsupportedInlineValueOwner {
       R"(package demo.invalidinlinematchparser
 
 object Main {
-  inline def typedBindingGuard(inline value: Object): String =
-    inline value match {
-      case selected: String if selected == "known" => selected
-      case _ => "other"
-    }
-
   inline def boundAlternative(inline value: Object): String =
     inline value match {
       case selected: String | _: Int => "selected"
@@ -1390,9 +1384,6 @@ object Main {
       contains(parserInvalid.diagnosticsText,
                "'inline' must modify a def or val in this milestone") &&
       !inlineMatchParserInvalid.ok &&
-      contains(inlineMatchParserInvalid.diagnosticsText,
-               "inline match guards on typed binding patterns are not supported "
-               "yet") &&
       contains(inlineMatchParserInvalid.diagnosticsText,
                "match type pattern alternatives require wildcard patterns") &&
       contains(inlineMatchParserInvalid.diagnosticsText,

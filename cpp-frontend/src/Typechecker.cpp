@@ -5883,6 +5883,15 @@ std::optional<TypeInfo> Typechecker::recordInlineApplication(
     if (sourceArgument != nullptr) {
       parameter.specializedStaticType =
           specializedStaticType(*sourceArgument, scope);
+      parameter.specializedBooleanValue =
+          constantBooleanValue(*sourceArgument, scope);
+      parameter.specializedIntegerValue =
+          constantIntegerValue(*sourceArgument, scope);
+      parameter.specializedFloatingValue =
+          constantFloatingValue(*sourceArgument, scope);
+      parameter.specializedStringValue =
+          constantStringValue(*sourceArgument, scope);
+      parameter.specializedCharValue = constantCharValue(*sourceArgument, scope);
     } else if (materializedContextParameter) {
       auto contextual = std::find_if(
           contextualArguments.begin(), contextualArguments.end(),
@@ -5892,32 +5901,6 @@ std::optional<TypeInfo> Typechecker::recordInlineApplication(
       if (contextual != contextualArguments.end()) {
         parameter.specializedStaticType = contextual->type;
       }
-    }
-    if (type.kind == SimpleTypeKind::Boolean) {
-      parameter.specializedBooleanValue =
-          sourceArgument == nullptr
-              ? std::nullopt
-              : constantBooleanValue(*sourceArgument, scope);
-    } else if (isIntegerConstantType(type.kind)) {
-      parameter.specializedIntegerValue =
-          sourceArgument == nullptr
-              ? std::nullopt
-              : constantIntegerValue(*sourceArgument, scope);
-    } else if (isFloatingConstantType(type.kind)) {
-      parameter.specializedFloatingValue =
-          sourceArgument == nullptr
-              ? std::nullopt
-              : constantFloatingValue(*sourceArgument, scope);
-    } else if (type.kind == SimpleTypeKind::String) {
-      parameter.specializedStringValue =
-          sourceArgument == nullptr
-              ? std::nullopt
-              : constantStringValue(*sourceArgument, scope);
-    } else if (type.kind == SimpleTypeKind::Char) {
-      parameter.specializedCharValue =
-          sourceArgument == nullptr
-              ? std::nullopt
-              : constantCharValue(*sourceArgument, scope);
     }
     parameter.isLexicalValue = true;
     inlineScope[name] = std::move(parameter);

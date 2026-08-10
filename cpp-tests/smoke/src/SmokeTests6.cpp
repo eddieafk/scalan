@@ -193,6 +193,23 @@ object TypeKinds {
       case _ => new FallbackResult("binding-result-fallback")
     }
 
+  inline def typedBindingGuardedChoice(
+      value: Any,
+      inline enabled: Boolean): String =
+    inline value match {
+      case selected: String if selected == "typed" && enabled => selected
+      case selected: Double if selected >= 2.0 && enabled =>
+        "typed-double:" + selected.toString
+      case _ => "typed-binding-fallback"
+    }
+
+  transparent inline def typedBindingResult(value: Any): ErasedResult =
+    inline value match {
+      case selected: Int if selected == 7 =>
+        new PreciseResult("typed-binding-precise")
+      case _ => new FallbackResult("typed-binding-result-fallback")
+    }
+
   inline def requireSeven[N](inline message: String): String =
     inline constValue[N] match {
       case 7 => "accepted-seven"
@@ -364,6 +381,18 @@ object Main {
     TypeKinds.bindingGuardedStringChoice("other")
   def bindingPrecise: String =
     TypeKinds.bindingGuardedResult(7).preciseOnly()
+  def typedBindingString: String =
+    TypeKinds.typedBindingGuardedChoice("typed", true)
+  def typedBindingRejected: String =
+    TypeKinds.typedBindingGuardedChoice("typed", false)
+  def typedBindingSkipped: String =
+    TypeKinds.typedBindingGuardedChoice(1, runtimeGuard())
+  def typedBindingDouble: String =
+    TypeKinds.typedBindingGuardedChoice(2.5, true)
+  def typedBindingDoubleRejected: String =
+    TypeKinds.typedBindingGuardedChoice(1.5, true)
+  def typedBindingPrecise: String =
+    TypeKinds.typedBindingResult(7).preciseOnly()
   def acceptedSeven: String = TypeKinds.requireSeven[7]("ignored-seven")
   def acceptedTrue: String = TypeKinds.qualifiedRequire[true]("ignored-true")
   def acceptedCondition: String =
@@ -441,6 +470,12 @@ object Main {
     println(bindingStringSelected)
     println(bindingStringFallback)
     println(bindingPrecise)
+    println(typedBindingString)
+    println(typedBindingRejected)
+    println(typedBindingSkipped)
+    println(typedBindingDouble)
+    println(typedBindingDoubleRejected)
+    println(typedBindingPrecise)
     println(acceptedSeven)
     println(acceptedTrue)
     println(acceptedCondition)
@@ -602,6 +637,14 @@ object Main {
       case _ => "other"
     }
 
+  inline def requiresTypedBindingGuard(
+      value: Any,
+      inline enabled: Boolean): String =
+    inline value match {
+      case selected: String if selected == "known" && enabled => selected
+      case _ => "other"
+    }
+
   val unresolvedStringMatch = requiresStringMatch(runtimeString())
   val unresolvedCharMatch = requiresCharMatch(runtimeChar())
   val unresolvedDoubleMatch = requiresDoubleMatch(runtimeDouble())
@@ -609,6 +652,8 @@ object Main {
   val unresolvedGuardedMatch = requiresGuardedMatch(1, runtimeBoolean())
   val unresolvedGuardedType = requiresGuardedType[String](runtimeBoolean())
   val unresolvedBindingGuard = requiresBindingGuard(1, runtimeBoolean())
+  val unresolvedTypedBindingGuard =
+    requiresTypedBindingGuard("known", runtimeBoolean())
 
   val escaped = erasedValue[String]
   val qualifiedEscaped = scala.compiletime.erasedValue[Int]
@@ -747,6 +792,18 @@ object Main {
       result.nirText, "demo.inlineerased.Main.bindingStringFallback");
   const std::string_view bindingPrecise =
       functionText(result.nirText, "demo.inlineerased.Main.bindingPrecise");
+  const std::string_view typedBindingString =
+      functionText(result.nirText, "demo.inlineerased.Main.typedBindingString");
+  const std::string_view typedBindingRejected = functionText(
+      result.nirText, "demo.inlineerased.Main.typedBindingRejected");
+  const std::string_view typedBindingSkipped = functionText(
+      result.nirText, "demo.inlineerased.Main.typedBindingSkipped");
+  const std::string_view typedBindingDouble =
+      functionText(result.nirText, "demo.inlineerased.Main.typedBindingDouble");
+  const std::string_view typedBindingDoubleRejected = functionText(
+      result.nirText, "demo.inlineerased.Main.typedBindingDoubleRejected");
+  const std::string_view typedBindingPrecise =
+      functionText(result.nirText, "demo.inlineerased.Main.typedBindingPrecise");
   const std::string_view acceptedSeven =
       functionText(result.nirText, "demo.inlineerased.Main.acceptedSeven");
   const std::string_view acceptedTrue =
@@ -952,6 +1009,29 @@ object Main {
       selectedLiteral(bindingPrecise, "demo.inlineerased.PreciseResult",
                       "FallbackResult") &&
       contains(bindingPrecise, ".preciseOnly") &&
+      selectedLiteral(typedBindingString, "\"typed\"",
+                      "typed-binding-fallback") &&
+      !contains(typedBindingString, "is-instance-of") &&
+      selectedLiteral(typedBindingRejected, "\"typed-binding-fallback\"",
+                      "%selected") &&
+      !contains(typedBindingRejected, "is-instance-of") &&
+      selectedLiteral(typedBindingSkipped, "\"typed-binding-fallback\"",
+                      "typed-double:") &&
+      !contains(typedBindingSkipped, "is-instance-of") &&
+      !contains(typedBindingSkipped, "runtimeGuard") &&
+      selectedLiteral(typedBindingDouble, "\"typed-double:\"",
+                      "typed-binding-fallback") &&
+      !contains(typedBindingDouble, "is-instance-of") &&
+      !contains(typedBindingDouble, " >= ") &&
+      contains(typedBindingDouble, "%selected") &&
+      contains(typedBindingDouble, "doubleToString") &&
+      selectedLiteral(typedBindingDoubleRejected,
+                      "\"typed-binding-fallback\"", "typed-double:") &&
+      !contains(typedBindingDoubleRejected, "is-instance-of") &&
+      selectedLiteral(typedBindingPrecise,
+                      "demo.inlineerased.PreciseResult", "FallbackResult") &&
+      !contains(typedBindingPrecise, "is-instance-of") &&
+      contains(typedBindingPrecise, ".preciseOnly") &&
       fullyReduced(alternativeString) &&
       contains(alternativeString, "\"alternative-string-int\"") &&
       !contains(alternativeString, "alternative-other") &&
@@ -988,7 +1068,10 @@ object Main {
                     "floating-precise\nguarded-seven\nguarded-fallback\n"
                     "guarded-fallback\nbinding-7\nbinding-fallback\n"
                     "binding-eight\nbound\nbinding-string-fallback\n"
-                    "binding-precise\naccepted-seven\naccepted-true\n"
+                    "binding-precise\ntyped\ntyped-binding-fallback\n"
+                    "typed-binding-fallback\ntyped-double:2.500000\n"
+                    "typed-binding-fallback\ntyped-binding-precise\n"
+                    "accepted-seven\naccepted-true\n"
                     "accepted-condition\n"
                     "string\nint\nlong\nother\nalias-string\n"
                     "alias-other\n"
@@ -1055,7 +1138,7 @@ object Main {
       countOccurrences(
           invalid.diagnosticsText,
           "inline match selector must be reducible from a compile-time value or "
-          "static type") == 8 &&
+          "static type") == 9 &&
       fullyReduced(stringName) && contains(stringName, "\"string\"") &&
       !contains(stringName, "\"other\"") && fullyReduced(intName) &&
       contains(intName, "\"int\"") && fullyReduced(longName) &&
@@ -1108,6 +1191,18 @@ object Main {
                       "', guarded-seven='" + std::string(guardedSeven) +
                       "', guarded-fallback='" + std::string(guardedFallback) +
                       "', guarded-skipped='" + std::string(guardedSkipped) +
+                      "', typed-binding-string='" +
+                      std::string(typedBindingString) +
+                      "', typed-binding-rejected='" +
+                      std::string(typedBindingRejected) +
+                      "', typed-binding-skipped='" +
+                      std::string(typedBindingSkipped) +
+                      "', typed-binding-double='" +
+                      std::string(typedBindingDouble) +
+                      "', typed-binding-double-rejected='" +
+                      std::string(typedBindingDoubleRejected) +
+                      "', typed-binding-precise='" +
+                      std::string(typedBindingPrecise) +
                       "', accepted-seven='" + std::string(acceptedSeven) +
                       "', accepted-true='" + std::string(acceptedTrue) +
                       "', accepted-condition='" +

@@ -100,8 +100,9 @@ build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
 # wildcard or binding at the call site, including escaped literals and stable
 # inline selectors. Compile-time guards use ordered short-circuit reduction, so
 # a guard belonging to a nonmatching case need not itself be constant. Guards
-# can reference an untyped selector binding when that binding carries a reducible
-# call-site value.
+# can reference typed or untyped selector bindings when those bindings carry a
+# reducible call-site value, including constants passed through a widened `Any`
+# parameter and refined by the selected type pattern.
 # Type patterns and wildcard type-pattern alternatives reduce from call-site
 # static types, including boxed scalar tests and transparent-inline result
 # refinement.
