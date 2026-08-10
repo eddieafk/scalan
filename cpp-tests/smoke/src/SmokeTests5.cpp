@@ -955,12 +955,6 @@ object Main {
       case selected: String | _: Int => "selected"
       case _ => "other"
     }
-
-  inline def nullPattern(inline value: Object): String =
-    inline value match {
-      case null => "selected"
-      case _ => "other"
-    }
 }
 
 )";
@@ -1387,11 +1381,6 @@ object Main {
       contains(inlineMatchParserInvalid.diagnosticsText,
                "bound type pattern alternatives must bind 'selected' in every "
                "alternative") &&
-      contains(inlineMatchParserInvalid.diagnosticsText,
-               "inline match currently supports Boolean, integer, floating-point, "
-               "String, and Char literals, singleton object patterns, type-pattern "
-               "alternatives with consistent bindings, and a final wildcard or "
-               "binding") &&
       contains(intSelected, "call %demo.inlinecalls.Main.intNamed()") &&
       contains(intSelected, "call %demo.inlinecalls.Selectors.prefix()") &&
       !contains(intSelected, "%demo.inlinecalls.Selectors.selected") &&

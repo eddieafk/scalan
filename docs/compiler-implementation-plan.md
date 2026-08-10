@@ -1053,8 +1053,8 @@ Current scaffold status:
   through nested inline calls and can refine transparent-inline results to the
   selected concrete branch type.
   Braced Scala 3 `inline match` expressions reuse the ordinary match lowering
-  for compile-time Boolean, integer, Float, Double, String, Char, and exact
-  module selectors. Ordered scalar/String/Char literal cases, literal or
+  for compile-time Boolean, integer, Float, Double, String, Char, null, and exact
+  module selectors. Ordered scalar/String/Char/null literal cases, literal or
   singleton object alternatives, and a required final wildcard or binding are
   supported; each lowered case has distinct branch-selection metadata and only
   the selected body reaches NIR. A reducible
@@ -1062,12 +1062,15 @@ Current scaffold status:
   binding, or type cases. Singleton patterns and their alternatives compare
   exact call-site module identity, including qualified nested objects, while
   broad runtime trait or `Any` selectors remain conservatively non-reducible.
-  Selector bindings propagate the selector's compile-time scalar or String
-  value through their compiler-generated binding block, which lets a guard
-  reference either an untyped or typed bound name without treating ordinary
-  user blocks as constant expressions. Typed bindings retain widened call-site
-  constants after their static type test and compiler-generated cast, including
-  values passed through `Any`. Ordered short-circuiting means a guard on a
+  Null patterns reduce from direct or stable nulls and reject only values known
+  to be non-null, such as literals, constructed values, module singletons, and
+  scalars; an arbitrary runtime reference remains unresolved. Selector bindings
+  propagate the selector's compile-time scalar, String, or nullness value through
+  their compiler-generated binding block, which lets a guard reference either
+  an untyped or typed bound name without treating ordinary user blocks as
+  constant expressions. Typed bindings retain widened call-site constants after
+  their static type test and compiler-generated cast, including values passed
+  through `Any`. Ordered short-circuiting means a guard on a
   nonmatching case need not itself be constant. A dynamic selected guard or
   selector is rejected during call-site specialization. Individual type patterns
   and type-pattern alternatives can be reduced from a call-site static type.
@@ -1082,9 +1085,8 @@ Current scaffold status:
   Double, String, and Char selectors can come from
   singleton `constValue` results, inline parameters, or stable inline values;
   floating-point spellings compare by their narrowed scalar value and escaped
-  text literals compare by decoded value. `null` patterns and indentation-only
-  match syntax remain later milestones and receive focused diagnostics where
-  applicable.
+  text literals compare by decoded value. Indentation-only match syntax remains
+  a later milestone and receives focused diagnostics where applicable.
   Compiler-owned `scala.compiletime.erasedValue[T]` can now provide the static
   selector for the same bounded type-pattern reduction. Exact imports, import
   aliases, and the qualified spelling are recognized. The frontend re-resolves
@@ -1096,8 +1098,8 @@ Current scaffold status:
   isolated in `SmokeTests6.cpp` to preserve incremental harness build times and
   exercises reference/scalar/fallback selection, aliased and qualified forms,
   transparent-result refinement, guarded wildcard, singleton object, and
-  consistently bound alternatives, typed and untyped selector-binding guards,
-  runtime output, diagnostics, and NIR erasure.
+  null patterns, consistently bound alternatives, typed and untyped
+  selector-binding guards, runtime output, diagnostics, and NIR erasure.
   Compiler-owned `scala.compiletime.constValue[T]` now materializes Boolean,
   Int, Long, Float, Double, String, and Char singleton types as typed literals.
   Exact imports, aliases, and the qualified spelling resolve to the intrinsic;

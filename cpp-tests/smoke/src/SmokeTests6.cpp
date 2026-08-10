@@ -96,6 +96,7 @@ object TypeKinds {
   inline val stableFloat: Float = 3.5F
   inline val stableString: String = "stable"
   inline val stableChar: Char = 's'
+  inline val stableNull: Any = null
 
   transparent inline def valueOf[T] = constValue[T]
 
@@ -247,6 +248,38 @@ object TypeKinds {
     inline value match {
       case Ready | Waiting => new PreciseResult("singleton-precise")
       case _ => new FallbackResult("singleton-result-fallback")
+    }
+
+  inline def nullChoice(
+      value: Any,
+      inline enabled: Boolean): String =
+    inline value match {
+      case null if enabled => "null-selected"
+      case _ => "null-fallback"
+    }
+
+  inline def nullAlternativeChoice(value: Any): String =
+    inline value match {
+      case "text" | null => "null-known"
+      case _ => "null-alternative-fallback"
+    }
+
+  inline def nullBindingChoice(value: Any): String =
+    inline value match {
+      case selected if selected == null => "null-binding"
+      case _ => "null-binding-fallback"
+    }
+
+  inline def stableNullChoice: String =
+    inline stableNull match {
+      case null => "stable-null"
+      case _ => "stable-null-fallback"
+    }
+
+  transparent inline def nullResult(value: Any): ErasedResult =
+    inline value match {
+      case null => new PreciseResult("null-precise")
+      case _ => new FallbackResult("null-result-fallback")
     }
 
   inline def requireSeven[N](inline message: String): String =
@@ -456,6 +489,23 @@ object Main {
     TypeKinds.singletonResult(Ready).preciseOnly()
   def singletonResultFallback: String =
     TypeKinds.singletonResult(new OtherSignal).fallbackOnly()
+  def nullSelected: String = TypeKinds.nullChoice(null, true)
+  def nullRejected: String = TypeKinds.nullChoice(null, false)
+  def nullAlternative: String =
+    TypeKinds.nullAlternativeChoice("text")
+  def nullAlternativeNull: String =
+    TypeKinds.nullAlternativeChoice(null)
+  def nullReferenceFallback: String =
+    TypeKinds.nullChoice(new OtherSignal, runtimeGuard())
+  def nullObjectFallback: String = TypeKinds.nullChoice(Ready, true)
+  def nullScalarFallback: String = TypeKinds.nullChoice(7, true)
+  def nullBindingSelected: String = TypeKinds.nullBindingChoice(null)
+  def nullBindingFallback: String =
+    TypeKinds.nullBindingChoice(new OtherSignal)
+  def stableNullSelected: String = TypeKinds.stableNullChoice
+  def nullPrecise: String = TypeKinds.nullResult(null).preciseOnly()
+  def nullResultFallback: String =
+    TypeKinds.nullResult(new OtherSignal).fallbackOnly()
   def acceptedSeven: String = TypeKinds.requireSeven[7]("ignored-seven")
   def acceptedTrue: String = TypeKinds.qualifiedRequire[true]("ignored-true")
   def acceptedCondition: String =
@@ -553,6 +603,18 @@ object Main {
     println(singletonSkipped)
     println(singletonPrecise)
     println(singletonResultFallback)
+    println(nullSelected)
+    println(nullRejected)
+    println(nullAlternative)
+    println(nullAlternativeNull)
+    println(nullReferenceFallback)
+    println(nullObjectFallback)
+    println(nullScalarFallback)
+    println(nullBindingSelected)
+    println(nullBindingFallback)
+    println(stableNullSelected)
+    println(nullPrecise)
+    println(nullResultFallback)
     println(acceptedSeven)
     println(acceptedTrue)
     println(acceptedCondition)
@@ -668,6 +730,7 @@ object Main {
   def runtimeFloat(): Float = 1.0F
   def runtimeBoolean(): Boolean = true
   def runtimeSignal(): InlineSignal = Ready
+  def runtimeAny(): Any = null
 
   inline def requiresStringMatch(inline value: String): String =
     inline value match {
@@ -737,6 +800,12 @@ object Main {
       case _ => "other"
     }
 
+  inline def requiresNull(value: Any): String =
+    inline value match {
+      case null => "null"
+      case _ => "other"
+    }
+
   val unresolvedStringMatch = requiresStringMatch(runtimeString())
   val unresolvedCharMatch = requiresCharMatch(runtimeChar())
   val unresolvedDoubleMatch = requiresDoubleMatch(runtimeDouble())
@@ -749,6 +818,7 @@ object Main {
   val unresolvedBoundAlternative =
     requiresBoundAlternative("known", runtimeBoolean())
   val unresolvedSingleton = requiresSingleton(runtimeSignal())
+  val unresolvedNull = requiresNull(runtimeAny())
 
   val escaped = erasedValue[String]
   val qualifiedEscaped = scala.compiletime.erasedValue[Int]
@@ -927,6 +997,30 @@ object Main {
       functionText(result.nirText, "demo.inlineerased.Main.singletonPrecise");
   const std::string_view singletonResultFallback = functionText(
       result.nirText, "demo.inlineerased.Main.singletonResultFallback");
+  const std::string_view nullSelected =
+      functionText(result.nirText, "demo.inlineerased.Main.nullSelected");
+  const std::string_view nullRejected =
+      functionText(result.nirText, "demo.inlineerased.Main.nullRejected");
+  const std::string_view nullAlternative =
+      functionText(result.nirText, "demo.inlineerased.Main.nullAlternative");
+  const std::string_view nullAlternativeNull = functionText(
+      result.nirText, "demo.inlineerased.Main.nullAlternativeNull");
+  const std::string_view nullReferenceFallback = functionText(
+      result.nirText, "demo.inlineerased.Main.nullReferenceFallback");
+  const std::string_view nullObjectFallback =
+      functionText(result.nirText, "demo.inlineerased.Main.nullObjectFallback");
+  const std::string_view nullScalarFallback =
+      functionText(result.nirText, "demo.inlineerased.Main.nullScalarFallback");
+  const std::string_view nullBindingSelected = functionText(
+      result.nirText, "demo.inlineerased.Main.nullBindingSelected");
+  const std::string_view nullBindingFallback = functionText(
+      result.nirText, "demo.inlineerased.Main.nullBindingFallback");
+  const std::string_view stableNullSelected =
+      functionText(result.nirText, "demo.inlineerased.Main.stableNullSelected");
+  const std::string_view nullPrecise =
+      functionText(result.nirText, "demo.inlineerased.Main.nullPrecise");
+  const std::string_view nullResultFallback =
+      functionText(result.nirText, "demo.inlineerased.Main.nullResultFallback");
   const std::string_view acceptedSeven =
       functionText(result.nirText, "demo.inlineerased.Main.acceptedSeven");
   const std::string_view acceptedTrue =
@@ -1197,6 +1291,31 @@ object Main {
       selectedLiteral(singletonResultFallback,
                       "demo.inlineerased.FallbackResult", "PreciseResult") &&
       contains(singletonResultFallback, ".fallbackOnly") &&
+      selectedLiteral(nullSelected, "\"null-selected\"", "null-fallback") &&
+      selectedLiteral(nullRejected, "\"null-fallback\"", "null-selected") &&
+      selectedLiteral(nullAlternative, "\"null-known\"",
+                      "null-alternative-fallback") &&
+      selectedLiteral(nullAlternativeNull, "\"null-known\"",
+                      "null-alternative-fallback") &&
+      selectedLiteral(nullReferenceFallback, "\"null-fallback\"",
+                      "null-selected") &&
+      !contains(nullReferenceFallback, "runtimeGuard") &&
+      selectedLiteral(nullObjectFallback, "\"null-fallback\"",
+                      "null-selected") &&
+      selectedLiteral(nullScalarFallback, "\"null-fallback\"",
+                      "null-selected") &&
+      selectedLiteral(nullBindingSelected, "\"null-binding\"",
+                      "null-binding-fallback") &&
+      selectedLiteral(nullBindingFallback, "\"null-binding-fallback\"",
+                      "\"null-binding\"") &&
+      selectedLiteral(stableNullSelected, "\"stable-null\"",
+                      "stable-null-fallback") &&
+      selectedLiteral(nullPrecise, "demo.inlineerased.PreciseResult",
+                      "FallbackResult") &&
+      contains(nullPrecise, ".preciseOnly") &&
+      selectedLiteral(nullResultFallback,
+                      "demo.inlineerased.FallbackResult", "PreciseResult") &&
+      contains(nullResultFallback, ".fallbackOnly") &&
       fullyReduced(alternativeString) &&
       contains(alternativeString, "\"alternative-string-int\"") &&
       !contains(alternativeString, "alternative-other") &&
@@ -1245,6 +1364,10 @@ object Main {
                     "singleton-fallback\nsingleton-fallback\n"
                     "singleton-fallback\n"
                     "singleton-precise\nsingleton-result-fallback\n"
+                    "null-selected\nnull-fallback\nnull-known\nnull-known\n"
+                    "null-fallback\nnull-fallback\nnull-fallback\n"
+                    "null-binding\nnull-binding-fallback\nstable-null\n"
+                    "null-precise\nnull-result-fallback\n"
                     "accepted-seven\naccepted-true\n"
                     "accepted-condition\n"
                     "string\nint\nlong\nother\nalias-string\n"
@@ -1312,7 +1435,7 @@ object Main {
       countOccurrences(
           invalid.diagnosticsText,
           "inline match selector must be reducible from a compile-time value or "
-          "static type") == 11 &&
+          "static type") == 12 &&
       fullyReduced(stringName) && contains(stringName, "\"string\"") &&
       !contains(stringName, "\"other\"") && fullyReduced(intName) &&
       contains(intName, "\"int\"") && fullyReduced(longName) &&

@@ -2106,7 +2106,8 @@ AstExpression Parser::parseMatchExpression(AstExpression selector,
                pattern.kind == AstExpressionKind::IntegerLiteral ||
                pattern.kind == AstExpressionKind::FloatingLiteral ||
                pattern.kind == AstExpressionKind::StringLiteral ||
-               pattern.kind == AstExpressionKind::CharLiteral;
+               pattern.kind == AstExpressionKind::CharLiteral ||
+               pattern.kind == AstExpressionKind::NullLiteral;
       };
       const bool supportedTypePattern =
           !current.typePattern.empty() &&
@@ -2133,9 +2134,9 @@ AstExpression Parser::parseMatchExpression(AstExpression selector,
         diagnostics_.error(
             current.pattern.span,
             "inline match currently supports Boolean, integer, floating-point, "
-            "String, and Char literals, singleton object patterns, type-pattern "
-            "alternatives with consistent bindings, and a final wildcard or "
-            "binding");
+            "String, Char, and null literals, singleton object patterns, "
+            "type-pattern alternatives with consistent bindings, and a final "
+            "wildcard or binding");
       }
     }
 

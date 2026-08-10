@@ -199,6 +199,7 @@ struct SymbolInfo {
   std::optional<double> specializedFloatingValue;
   std::optional<std::string> specializedStringValue;
   std::optional<std::uint32_t> specializedCharValue;
+  std::optional<bool> specializedNullValue;
   std::optional<TypeInfo> specializedStaticType;
   AstExpression inlineBody;
 };
@@ -286,6 +287,8 @@ private:
   constantStringValue(const AstExpression& expression, const Scope& scope) const;
   [[nodiscard]] std::optional<std::uint32_t>
   constantCharValue(const AstExpression& expression, const Scope& scope) const;
+  [[nodiscard]] std::optional<bool>
+  constantNullValue(const AstExpression& expression, const Scope& scope) const;
   [[nodiscard]] std::optional<TypeInfo>
   specializedStaticType(const AstExpression& expression, const Scope& scope) const;
   [[nodiscard]] std::optional<bool>

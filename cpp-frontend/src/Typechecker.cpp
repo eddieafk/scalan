@@ -4863,6 +4863,7 @@ bool Typechecker::isSupportedInlineValueInitializer(
   case AstExpressionKind::StringLiteral:
   case AstExpressionKind::CharLiteral:
   case AstExpressionKind::BooleanLiteral:
+  case AstExpressionKind::NullLiteral:
     return true;
   case AstExpressionKind::Identifier: {
     const auto symbol = scope.find(expression.text);
@@ -5082,6 +5083,7 @@ Typechecker::constantBooleanValue(const AstExpression& expression,
         selector->second.specializedFloatingValue;
     binding.specializedStringValue = selector->second.specializedStringValue;
     binding.specializedCharValue = selector->second.specializedCharValue;
+    binding.specializedNullValue = selector->second.specializedNullValue;
     binding.specializedStaticType = selector->second.specializedStaticType;
 
     Scope bindingScope = scope;
@@ -5165,6 +5167,16 @@ Typechecker::constantBooleanValue(const AstExpression& expression,
             constantBooleanValue(expression.children.back(), scope);
         if (left.has_value() && right.has_value()) {
           return expression.text == "==" ? *left == *right : *left != *right;
+        }
+
+        const std::optional<bool> leftNull =
+            constantNullValue(expression.children.front(), scope);
+        const std::optional<bool> rightNull =
+            constantNullValue(expression.children.back(), scope);
+        if (leftNull.has_value() && rightNull.has_value() &&
+            (*leftNull || *rightNull)) {
+          return expression.text == "==" ? *leftNull == *rightNull
+                                         : *leftNull != *rightNull;
         }
 
         const auto singletonComparison =
@@ -5379,6 +5391,93 @@ Typechecker::constantCharValue(const AstExpression& expression,
     }
     return std::nullopt;
   default:
+    return std::nullopt;
+  }
+}
+
+std::optional<bool>
+Typechecker::constantNullValue(const AstExpression& expression,
+                               const Scope& scope) const {
+  const auto symbolValue = [&](const SymbolInfo& symbol)
+      -> std::optional<bool> {
+    if (symbol.specializedNullValue.has_value()) {
+      return symbol.specializedNullValue;
+    }
+    if (symbol.kind == AstDeclarationKind::Object) {
+      return false;
+    }
+    if (symbol.type.kind == SimpleTypeKind::Null) {
+      return true;
+    }
+    if (hasCompileTimeSize(symbol.type.kind)) {
+      return false;
+    }
+    if (symbol.kind == AstDeclarationKind::Val && symbol.isInline &&
+        validatedInlineValueSymbols_.contains(symbol.symbolName) &&
+        symbol.inlineBody.kind != AstExpressionKind::Empty) {
+      return constantNullValue(symbol.inlineBody, scope);
+    }
+    return std::nullopt;
+  };
+
+  switch (expression.kind) {
+  case AstExpressionKind::NullLiteral:
+    return true;
+  case AstExpressionKind::IntegerLiteral:
+  case AstExpressionKind::FloatingLiteral:
+  case AstExpressionKind::StringLiteral:
+  case AstExpressionKind::CharLiteral:
+  case AstExpressionKind::SymbolLiteral:
+  case AstExpressionKind::BooleanLiteral:
+  case AstExpressionKind::This:
+  case AstExpressionKind::Super:
+  case AstExpressionKind::ModuleReference:
+  case AstExpressionKind::New:
+    return false;
+  case AstExpressionKind::Identifier:
+    if (auto symbol = scope.find(expression.text); symbol != scope.end()) {
+      return symbolValue(symbol->second);
+    }
+    return std::nullopt;
+  case AstExpressionKind::Select:
+    if (expression.children.size() == 1 &&
+        expression.children.front().kind == AstExpressionKind::Identifier) {
+      if (auto receiver = scope.find(expression.children.front().text);
+          receiver != scope.end()) {
+        if (std::optional<SymbolInfo> member = resolvedMemberForReceiverType(
+                receiver->second.type, expression.text)) {
+          return symbolValue(*member);
+        }
+      }
+    }
+    return std::nullopt;
+  case AstExpressionKind::TypeApply:
+    if (expression.children.size() == 1 &&
+        expression.children.front().kind == AstExpressionKind::Select &&
+        expression.children.front().text == support::StdNames::AsInstanceOf &&
+        expression.children.front().children.size() == 1) {
+      const TypeInfo target =
+          typeFromDeclaredName(expression.declaredType, &scope, &expression.span);
+      if (hasCompileTimeSize(target.kind)) {
+        return false;
+      }
+      if (!isReferenceType(target) && target.kind != SimpleTypeKind::Null) {
+        return std::nullopt;
+      }
+      return constantNullValue(
+          expression.children.front().children.front(), scope);
+    }
+    return std::nullopt;
+  default:
+    if (const std::optional<TypeInfo> type =
+            specializedStaticType(expression, scope)) {
+      if (type->kind == SimpleTypeKind::Null) {
+        return true;
+      }
+      if (hasCompileTimeSize(type->kind)) {
+        return false;
+      }
+    }
     return std::nullopt;
   }
 }
@@ -5929,6 +6028,7 @@ std::optional<TypeInfo> Typechecker::recordInlineApplication(
       parameter.specializedStringValue =
           constantStringValue(*sourceArgument, scope);
       parameter.specializedCharValue = constantCharValue(*sourceArgument, scope);
+      parameter.specializedNullValue = constantNullValue(*sourceArgument, scope);
     } else if (materializedContextParameter) {
       auto contextual = std::find_if(
           contextualArguments.begin(), contextualArguments.end(),
@@ -7886,6 +7986,8 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
               constantStringValue(local.children.front(), blockScope);
           symbol.specializedCharValue =
               constantCharValue(local.children.front(), blockScope);
+          symbol.specializedNullValue =
+              constantNullValue(local.children.front(), blockScope);
           symbol.specializedStaticType =
               specializedStaticType(local.children.front(), blockScope);
         }

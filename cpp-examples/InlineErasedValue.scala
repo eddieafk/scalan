@@ -91,6 +91,24 @@ object TypeDefaults {
       case _ => "singleton-fallback"
     }
 
+  inline def nullChoice(value: Any): String =
+    inline value match {
+      case null => "null-selected"
+      case _ => "null-fallback"
+    }
+
+  inline def nullAlternativeChoice(value: Any): String =
+    inline value match {
+      case "text" | null => "null-or-text"
+      case _ => "null-alternative-fallback"
+    }
+
+  transparent inline def nullResult(value: Any): ErasedResult =
+    inline value match {
+      case null => new PreciseResult("null-precise")
+      case _ => new FallbackResult("null-fallback")
+    }
+
   transparent inline def alternativeResultFor[T]: ErasedResult =
     inline erasedValue[T] match {
       case _: String | _: Int => new PreciseResult("alternative-precise")
@@ -128,6 +146,12 @@ object Main {
     println(TypeDefaults.singletonChoice(InlineState.Stopped))
     println(TypeDefaults.singletonChoice(new OtherSignal))
     println(TypeDefaults.singletonChoice(7))
+    println(TypeDefaults.nullChoice(null))
+    println(TypeDefaults.nullChoice(new OtherSignal))
+    println(TypeDefaults.nullAlternativeChoice(null))
+    println(TypeDefaults.nullAlternativeChoice("text"))
+    println(TypeDefaults.nullResult(null).preciseOnly())
+    println(TypeDefaults.nullResult(new OtherSignal).fallbackOnly())
     println(TypeDefaults.alternativeResultFor[Int].preciseOnly())
   }
 }
