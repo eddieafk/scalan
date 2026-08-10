@@ -6412,11 +6412,14 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
     const TypeInfo targetType =
         typeFromDeclaredName(expression.declaredType, &scope, &expression.span);
     const bool targetsBoxedPrimitive = isBoxablePrimitiveType(targetType.kind);
+    const bool targetsUnionCast =
+        !isTypeTest && targetType.compositeKind == CompositeTypeKind::Union;
     const SymbolInfo* target =
         targetsBoxedPrimitive
             ? nullptr
             : typeSymbolForDeclaredName(expression.declaredType, &scope);
-    if (!targetsBoxedPrimitive && !targetType.typeParameter &&
+    if (!targetsBoxedPrimitive && !targetsUnionCast &&
+        !targetType.typeParameter &&
         (target == nullptr || (target->kind != AstDeclarationKind::Class &&
                                target->kind != AstDeclarationKind::Trait &&
                                target->kind != AstDeclarationKind::Object))) {

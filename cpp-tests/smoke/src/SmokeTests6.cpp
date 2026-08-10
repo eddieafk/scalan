@@ -210,6 +210,22 @@ object TypeKinds {
       case _ => new FallbackResult("typed-binding-result-fallback")
     }
 
+  inline def boundAlternativeChoice(
+      value: Any,
+      inline enabled: Boolean): String =
+    inline value match {
+      case selected: String | selected: Int if enabled =>
+        "bound-alternative:" + selected.toString
+      case _ => "bound-alternative-fallback"
+    }
+
+  transparent inline def boundAlternativeResult(value: Any): ErasedResult =
+    inline value match {
+      case selected: String | selected: Int =>
+        new PreciseResult("bound-alternative-precise:" + selected.toString)
+      case _ => new FallbackResult("bound-alternative-result-fallback")
+    }
+
   inline def requireSeven[N](inline message: String): String =
     inline constValue[N] match {
       case 7 => "accepted-seven"
@@ -393,6 +409,16 @@ object Main {
     TypeKinds.typedBindingGuardedChoice(1.5, true)
   def typedBindingPrecise: String =
     TypeKinds.typedBindingResult(7).preciseOnly()
+  def boundAlternativeString: String =
+    TypeKinds.boundAlternativeChoice("text", true)
+  def boundAlternativeInt: String =
+    TypeKinds.boundAlternativeChoice(7, true)
+  def boundAlternativeRejected: String =
+    TypeKinds.boundAlternativeChoice("text", false)
+  def boundAlternativeSkipped: String =
+    TypeKinds.boundAlternativeChoice(2.5, runtimeGuard())
+  def boundAlternativePrecise: String =
+    TypeKinds.boundAlternativeResult(7).preciseOnly()
   def acceptedSeven: String = TypeKinds.requireSeven[7]("ignored-seven")
   def acceptedTrue: String = TypeKinds.qualifiedRequire[true]("ignored-true")
   def acceptedCondition: String =
@@ -476,6 +502,11 @@ object Main {
     println(typedBindingDouble)
     println(typedBindingDoubleRejected)
     println(typedBindingPrecise)
+    println(boundAlternativeString)
+    println(boundAlternativeInt)
+    println(boundAlternativeRejected)
+    println(boundAlternativeSkipped)
+    println(boundAlternativePrecise)
     println(acceptedSeven)
     println(acceptedTrue)
     println(acceptedCondition)
@@ -645,6 +676,14 @@ object Main {
       case _ => "other"
     }
 
+  inline def requiresBoundAlternative(
+      value: Any,
+      inline enabled: Boolean): String =
+    inline value match {
+      case selected: String | selected: Int if enabled => selected.toString
+      case _ => "other"
+    }
+
   val unresolvedStringMatch = requiresStringMatch(runtimeString())
   val unresolvedCharMatch = requiresCharMatch(runtimeChar())
   val unresolvedDoubleMatch = requiresDoubleMatch(runtimeDouble())
@@ -654,6 +693,8 @@ object Main {
   val unresolvedBindingGuard = requiresBindingGuard(1, runtimeBoolean())
   val unresolvedTypedBindingGuard =
     requiresTypedBindingGuard("known", runtimeBoolean())
+  val unresolvedBoundAlternative =
+    requiresBoundAlternative("known", runtimeBoolean())
 
   val escaped = erasedValue[String]
   val qualifiedEscaped = scala.compiletime.erasedValue[Int]
@@ -804,6 +845,16 @@ object Main {
       result.nirText, "demo.inlineerased.Main.typedBindingDoubleRejected");
   const std::string_view typedBindingPrecise =
       functionText(result.nirText, "demo.inlineerased.Main.typedBindingPrecise");
+  const std::string_view boundAlternativeString = functionText(
+      result.nirText, "demo.inlineerased.Main.boundAlternativeString");
+  const std::string_view boundAlternativeInt =
+      functionText(result.nirText, "demo.inlineerased.Main.boundAlternativeInt");
+  const std::string_view boundAlternativeRejected = functionText(
+      result.nirText, "demo.inlineerased.Main.boundAlternativeRejected");
+  const std::string_view boundAlternativeSkipped = functionText(
+      result.nirText, "demo.inlineerased.Main.boundAlternativeSkipped");
+  const std::string_view boundAlternativePrecise = functionText(
+      result.nirText, "demo.inlineerased.Main.boundAlternativePrecise");
   const std::string_view acceptedSeven =
       functionText(result.nirText, "demo.inlineerased.Main.acceptedSeven");
   const std::string_view acceptedTrue =
@@ -1032,6 +1083,27 @@ object Main {
                       "demo.inlineerased.PreciseResult", "FallbackResult") &&
       !contains(typedBindingPrecise, "is-instance-of") &&
       contains(typedBindingPrecise, ".preciseOnly") &&
+      selectedLiteral(boundAlternativeString, "\"bound-alternative:\"",
+                      "bound-alternative-fallback") &&
+      contains(boundAlternativeString, "%selected") &&
+      !contains(boundAlternativeString, "is-instance-of") &&
+      !contains(boundAlternativeString, "String | Int") &&
+      selectedLiteral(boundAlternativeInt, "\"bound-alternative:\"",
+                      "bound-alternative-fallback") &&
+      contains(boundAlternativeInt, "%selected") &&
+      !contains(boundAlternativeInt, "is-instance-of") &&
+      !contains(boundAlternativeInt, "String | Int") &&
+      selectedLiteral(boundAlternativeRejected,
+                      "\"bound-alternative-fallback\"", "%selected") &&
+      selectedLiteral(boundAlternativeSkipped,
+                      "\"bound-alternative-fallback\"", "%selected") &&
+      !contains(boundAlternativeSkipped, "runtimeGuard") &&
+      selectedLiteral(boundAlternativePrecise,
+                      "demo.inlineerased.PreciseResult", "FallbackResult") &&
+      contains(boundAlternativePrecise, "%selected") &&
+      contains(boundAlternativePrecise, ".preciseOnly") &&
+      !contains(boundAlternativePrecise, "is-instance-of") &&
+      !contains(boundAlternativePrecise, "String | Int") &&
       fullyReduced(alternativeString) &&
       contains(alternativeString, "\"alternative-string-int\"") &&
       !contains(alternativeString, "alternative-other") &&
@@ -1071,6 +1143,10 @@ object Main {
                     "binding-precise\ntyped\ntyped-binding-fallback\n"
                     "typed-binding-fallback\ntyped-double:2.500000\n"
                     "typed-binding-fallback\ntyped-binding-precise\n"
+                    "bound-alternative:text\nbound-alternative:7\n"
+                    "bound-alternative-fallback\n"
+                    "bound-alternative-fallback\n"
+                    "bound-alternative-precise:7\n"
                     "accepted-seven\naccepted-true\n"
                     "accepted-condition\n"
                     "string\nint\nlong\nother\nalias-string\n"
@@ -1138,7 +1214,7 @@ object Main {
       countOccurrences(
           invalid.diagnosticsText,
           "inline match selector must be reducible from a compile-time value or "
-          "static type") == 9 &&
+          "static type") == 10 &&
       fullyReduced(stringName) && contains(stringName, "\"string\"") &&
       !contains(stringName, "\"other\"") && fullyReduced(intName) &&
       contains(intName, "\"int\"") && fullyReduced(longName) &&
@@ -1203,6 +1279,16 @@ object Main {
                       std::string(typedBindingDoubleRejected) +
                       "', typed-binding-precise='" +
                       std::string(typedBindingPrecise) +
+                      "', bound-alternative-string='" +
+                      std::string(boundAlternativeString) +
+                      "', bound-alternative-int='" +
+                      std::string(boundAlternativeInt) +
+                      "', bound-alternative-rejected='" +
+                      std::string(boundAlternativeRejected) +
+                      "', bound-alternative-skipped='" +
+                      std::string(boundAlternativeSkipped) +
+                      "', bound-alternative-precise='" +
+                      std::string(boundAlternativePrecise) +
                       "', accepted-seven='" + std::string(acceptedSeven) +
                       "', accepted-true='" + std::string(acceptedTrue) +
                       "', accepted-condition='" +

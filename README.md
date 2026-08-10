@@ -103,9 +103,11 @@ build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
 # can reference typed or untyped selector bindings when those bindings carry a
 # reducible call-site value, including constants passed through a widened `Any`
 # parameter and refined by the selected type pattern.
-# Type patterns and wildcard type-pattern alternatives reduce from call-site
-# static types, including boxed scalar tests and transparent-inline result
-# refinement.
+# Type patterns and type-pattern alternatives reduce from call-site static
+# types, including boxed scalar tests and transparent-inline result refinement.
+# Alternative arms may remain wildcards or consistently bind the same name; a
+# shared binding receives the explicit union of the arm types and is available
+# in guards and the selected body.
 # Compiler-owned `scala.compiletime.erasedValue[T]`, through its canonical
 # import (including aliases) or qualified name, drives generic type-only inline
 # matches without materializing a selector in expanded caller NIR.

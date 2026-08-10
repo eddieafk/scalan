@@ -2022,17 +2022,24 @@ AstExpression Parser::parseMatchExpression(AstExpression selector,
     while (check(TokenKind::Operator) && peek().text == "|") {
       const Token& separator = advance();
       if (!current.typePattern.empty()) {
-        if (!current.isWildcard) {
+        if (!match(TokenKind::Identifier)) {
           diagnostics_.error(
-              separator.span,
-              "match type pattern alternatives require wildcard patterns");
-        }
-        if (!match(TokenKind::Identifier) || previous().text != "_") {
-          diagnostics_.error(peek().span,
-                             "expected wildcard type pattern after '|' in match case");
+              peek().span,
+              current.isWildcard
+                  ? "expected wildcard type pattern after '|' in match case"
+                  : "expected binding type pattern after '|' in match case");
+        } else if (current.isWildcard && previous().text != "_") {
+          diagnostics_.error(previous().span,
+                             "wildcard type pattern alternatives must use '_'");
+        } else if (!current.isWildcard &&
+                   previous().text != current.bindingName) {
+          diagnostics_.error(
+              previous().span,
+              "bound type pattern alternatives must bind '" +
+                  current.bindingName + "' in every alternative");
         }
         if (!consume(TokenKind::Colon,
-                     "expected ':' after wildcard in type pattern alternative")) {
+                     "expected ':' in type pattern alternative")) {
           continue;
         }
         const std::string alternativeType = parseTypeName(false, false, true);
@@ -2117,8 +2124,8 @@ AstExpression Parser::parseMatchExpression(AstExpression selector,
         diagnostics_.error(
             current.pattern.span,
             "inline match currently supports Boolean, integer, floating-point, "
-            "String, and Char literals, wildcard type-pattern alternatives, and "
-            "a final wildcard or binding");
+            "String, and Char literals, type-pattern alternatives with consistent "
+            "bindings, and a final wildcard or binding");
       }
     }
 
@@ -2209,6 +2216,7 @@ AstExpression Parser::parseMatchExpression(AstExpression selector,
     }
 
     AstExpression condition;
+    std::string bindingType = current->typePattern;
     if (!current->typePattern.empty()) {
       const auto makeTypeTest = [&](const std::string& typeName) {
         AstExpression typeTestMember;
@@ -2229,6 +2237,7 @@ AstExpression Parser::parseMatchExpression(AstExpression selector,
 
       condition = makeTypeTest(current->typePattern);
       for (const std::string& alternativeType : current->alternativeTypePatterns) {
+        bindingType += " | " + alternativeType;
         AstExpression combined;
         combined.kind = AstExpressionKind::Binary;
         combined.text = "||";
@@ -2241,7 +2250,7 @@ AstExpression Parser::parseMatchExpression(AstExpression selector,
         AstExpression guard = std::move(current->guard);
         if (!current->bindingName.empty()) {
           guard = bindSelector(current->bindingName, std::move(guard),
-                               current->pattern.span, current->typePattern);
+                               current->pattern.span, bindingType);
         }
         AstExpression guarded;
         guarded.kind = AstExpressionKind::Binary;
@@ -2293,7 +2302,7 @@ AstExpression Parser::parseMatchExpression(AstExpression selector,
     AstExpression body = std::move(current->body);
     if (!current->bindingName.empty()) {
       body = bindSelector(current->bindingName, std::move(body), current->pattern.span,
-                          current->typePattern);
+                          bindingType);
     }
 
     AstExpression branch;

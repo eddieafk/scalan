@@ -2863,7 +2863,7 @@ nir::Value valueFor(const frontend::AstExpression& expression,
       }
       return expressionValueFor(callee, context, preserveCallable);
     }
-    const std::string targetType = localDeclaredTypeName(expression, context);
+    std::string targetType = localDeclaredTypeName(expression, context);
     nir::Value receiver = expressionValueFor(callee.children.front(), context);
     if (callee.text == support::StdNames::IsInstanceOf) {
       return nir::isInstanceOfValue(targetType, std::move(receiver), expression.span);
@@ -2871,6 +2871,11 @@ nir::Value valueFor(const frontend::AstExpression& expression,
     if (callee.text == support::StdNames::AsInstanceOf) {
       const frontend::TypeInfo* receiverType =
           annotatedTypeFor(callee.children.front(), context);
+      if (const frontend::TypeInfo* target = annotatedTypeFor(expression, context);
+          target != nullptr &&
+          target->compositeKind == frontend::CompositeTypeKind::Union) {
+        targetType = runtimeTypeName(*target);
+      }
       if (targetType == "String" && receiverType != nullptr &&
           runtimeTypeName(*receiverType) == "Object") {
         return nir::unboxValue("String", std::move(receiver), expression.span);
@@ -2887,6 +2892,10 @@ nir::Value valueFor(const frontend::AstExpression& expression,
                      : nir::asInstanceOfValue(runtimeTarget, std::move(receiver),
                                               expression.span);
         }
+      }
+      if (targetType == "Object" && receiverType != nullptr &&
+          runtimeTypeName(*receiverType) == "Object") {
+        return receiver;
       }
       return nir::asInstanceOfValue(targetType, std::move(receiver), expression.span);
     }

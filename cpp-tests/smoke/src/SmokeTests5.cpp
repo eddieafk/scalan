@@ -1385,11 +1385,12 @@ object Main {
                "'inline' must modify a def or val in this milestone") &&
       !inlineMatchParserInvalid.ok &&
       contains(inlineMatchParserInvalid.diagnosticsText,
-               "match type pattern alternatives require wildcard patterns") &&
+               "bound type pattern alternatives must bind 'selected' in every "
+               "alternative") &&
       contains(inlineMatchParserInvalid.diagnosticsText,
                "inline match currently supports Boolean, integer, floating-point, "
-               "String, and Char literals, wildcard type-pattern alternatives, and "
-               "a final wildcard or binding") &&
+               "String, and Char literals, type-pattern alternatives with consistent "
+               "bindings, and a final wildcard or binding") &&
       contains(intSelected, "call %demo.inlinecalls.Main.intNamed()") &&
       contains(intSelected, "call %demo.inlinecalls.Selectors.prefix()") &&
       !contains(intSelected, "%demo.inlinecalls.Selectors.selected") &&

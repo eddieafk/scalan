@@ -69,6 +69,13 @@ object TypeDefaults {
       case _ => "typed-binding-fallback"
     }
 
+  inline def boundAlternativeChoice(value: Any): String =
+    inline value match {
+      case selected: String | selected: Int =>
+        "bound-alternative:" + selected.toString
+      case _ => "bound-alternative-fallback"
+    }
+
   transparent inline def alternativeResultFor[T]: ErasedResult =
     inline erasedValue[T] match {
       case _: String | _: Int => new PreciseResult("alternative-precise")
@@ -98,6 +105,9 @@ object Main {
     println(TypeDefaults.typedBindingGuardedChoice("typed"))
     println(TypeDefaults.typedBindingGuardedChoice(2.5))
     println(TypeDefaults.typedBindingGuardedChoice(1))
+    println(TypeDefaults.boundAlternativeChoice("text"))
+    println(TypeDefaults.boundAlternativeChoice(7))
+    println(TypeDefaults.boundAlternativeChoice(2.5))
     println(TypeDefaults.alternativeResultFor[Int].preciseOnly())
   }
 }
