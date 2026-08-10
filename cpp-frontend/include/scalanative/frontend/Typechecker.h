@@ -196,6 +196,7 @@ struct SymbolInfo {
   std::size_t contextualNestingDepth = 0;
   std::optional<bool> specializedBooleanValue;
   std::optional<std::int64_t> specializedIntegerValue;
+  std::optional<double> specializedFloatingValue;
   std::optional<std::string> specializedStringValue;
   std::optional<std::uint32_t> specializedCharValue;
   std::optional<TypeInfo> specializedStaticType;
@@ -291,6 +292,8 @@ private:
   staticTypeTestValue(const TypeInfo& actual, const TypeInfo& target) const;
   [[nodiscard]] std::optional<std::int64_t>
   constantIntegerValue(const AstExpression& expression, const Scope& scope) const;
+  [[nodiscard]] std::optional<double>
+  constantFloatingValue(const AstExpression& expression, const Scope& scope) const;
   [[nodiscard]] SimpleTypeKind
   constantIntegerType(const AstExpression& expression, const Scope& scope) const;
   [[nodiscard]] TypeInfo inferNewType(const AstExpression& expression, Scope& scope);

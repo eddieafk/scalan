@@ -956,9 +956,9 @@ object Main {
       case _ => "other"
     }
 
-  inline def floatingPattern(inline value: Double): String =
+  inline def nullPattern(inline value: Object): String =
     inline value match {
-      case 1.0 => "selected"
+      case null => "selected"
       case _ => "other"
     }
 }
@@ -1387,9 +1387,9 @@ object Main {
       contains(inlineMatchParserInvalid.diagnosticsText,
                "inline match guards are not supported yet") &&
       contains(inlineMatchParserInvalid.diagnosticsText,
-               "inline match currently supports Boolean, integer, String, and Char "
-               "literals, one unguarded type pattern per case, and a final wildcard "
-               "or binding") &&
+               "inline match currently supports Boolean, integer, floating-point, "
+               "String, and Char literals, one unguarded type pattern per case, and "
+               "a final wildcard or binding") &&
       contains(intSelected, "call %demo.inlinecalls.Main.intNamed()") &&
       contains(intSelected, "call %demo.inlinecalls.Selectors.prefix()") &&
       !contains(intSelected, "%demo.inlinecalls.Selectors.selected") &&

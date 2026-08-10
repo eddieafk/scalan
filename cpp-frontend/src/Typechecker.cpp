@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <charconv>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
@@ -24,6 +25,60 @@ constexpr std::size_t MaxInlineExpansionDepth = 32;
 bool isIntegerConstantType(SimpleTypeKind kind) {
   return kind == SimpleTypeKind::Byte || kind == SimpleTypeKind::Short ||
          kind == SimpleTypeKind::Int || kind == SimpleTypeKind::Long;
+}
+
+bool isFloatingConstantType(SimpleTypeKind kind) {
+  return kind == SimpleTypeKind::Float || kind == SimpleTypeKind::Double;
+}
+
+SimpleTypeKind floatingConstantType(std::string_view text) {
+  return !text.empty() && (text.back() == 'f' || text.back() == 'F')
+             ? SimpleTypeKind::Float
+             : SimpleTypeKind::Double;
+}
+
+bool hasFloatingConstantSyntax(std::string_view text) {
+  return text.find('.') != std::string_view::npos ||
+         text.find('e') != std::string_view::npos ||
+         text.find('E') != std::string_view::npos ||
+         (!text.empty() &&
+          (text.back() == 'f' || text.back() == 'F' || text.back() == 'd' ||
+           text.back() == 'D'));
+}
+
+std::optional<double> parseFloatingConstant(std::string_view text,
+                                            SimpleTypeKind kind) {
+  if (!isFloatingConstantType(kind)) {
+    return std::nullopt;
+  }
+  std::string normalized;
+  normalized.reserve(text.size());
+  for (char ch : text) {
+    if (ch != '_') {
+      normalized.push_back(ch);
+    }
+  }
+  if (!normalized.empty() &&
+      (normalized.back() == 'f' || normalized.back() == 'F' ||
+       normalized.back() == 'd' || normalized.back() == 'D')) {
+    normalized.pop_back();
+  }
+  try {
+    std::size_t parsed = 0;
+    const double value = std::stod(normalized, &parsed);
+    if (parsed != normalized.size() || !std::isfinite(value)) {
+      return std::nullopt;
+    }
+    if (kind == SimpleTypeKind::Float) {
+      const float narrowed = static_cast<float>(value);
+      return std::isfinite(narrowed)
+                 ? std::optional<double>{static_cast<double>(narrowed)}
+                 : std::nullopt;
+    }
+    return value;
+  } catch (...) {
+    return std::nullopt;
+  }
 }
 
 std::optional<std::int64_t> parseIntegerConstant(std::string_view text) {
@@ -2050,6 +2105,11 @@ TypedDeclaration Typechecker::typecheckDeclaration(const AstDeclaration& declara
           constantIntegerValue(declaration.initializer, signatureScope);
     }
     if (declaration.isInline && declaration.kind == AstDeclarationKind::Val &&
+        isFloatingConstantType(typed.inferredType.kind)) {
+      symbol.specializedFloatingValue =
+          constantFloatingValue(declaration.initializer, signatureScope);
+    }
+    if (declaration.isInline && declaration.kind == AstDeclarationKind::Val &&
         typed.inferredType.kind == SimpleTypeKind::String) {
       symbol.specializedStringValue =
           constantStringValue(declaration.initializer, signatureScope);
@@ -2336,6 +2396,11 @@ TypedDeclaration Typechecker::typecheckDeclaration(const AstDeclaration& declara
         isIntegerConstantType(typedMember.inferredType.kind)) {
       updated.specializedIntegerValue =
           constantIntegerValue(member.initializer, memberScope);
+    }
+    if (typedMember.isInline && typedMember.kind == AstDeclarationKind::Val &&
+        isFloatingConstantType(typedMember.inferredType.kind)) {
+      updated.specializedFloatingValue =
+          constantFloatingValue(member.initializer, memberScope);
     }
     if (typedMember.isInline && typedMember.kind == AstDeclarationKind::Val &&
         typedMember.inferredType.kind == SimpleTypeKind::String) {
@@ -5072,6 +5137,30 @@ Typechecker::constantBooleanValue(const AstExpression& expression,
                                            : *leftChar != *rightChar;
           }
         }
+
+        const std::optional<double> leftFloating =
+            constantFloatingValue(expression.children.front(), scope);
+        const std::optional<double> rightFloating =
+            constantFloatingValue(expression.children.back(), scope);
+        if (leftFloating.has_value() && rightFloating.has_value()) {
+          if (expression.text == "==") {
+            return *leftFloating == *rightFloating;
+          }
+          if (expression.text == "!=") {
+            return *leftFloating != *rightFloating;
+          }
+          if (expression.text == "<") {
+            return *leftFloating < *rightFloating;
+          }
+          if (expression.text == ">") {
+            return *leftFloating > *rightFloating;
+          }
+          if (expression.text == "<=") {
+            return *leftFloating <= *rightFloating;
+          }
+          return *leftFloating >= *rightFloating;
+        }
+
         const std::optional<std::int64_t> left =
             constantIntegerValue(expression.children.front(), scope);
         const std::optional<std::int64_t> right =
@@ -5196,6 +5285,55 @@ Typechecker::constantCharValue(const AstExpression& expression,
       if (constant.kind == SimpleTypeKind::Char &&
           !constant.singletonLiteral.empty()) {
         return decodeCharLiteral(constant.singletonLiteral);
+      }
+    }
+    return std::nullopt;
+  default:
+    return std::nullopt;
+  }
+}
+
+std::optional<double>
+Typechecker::constantFloatingValue(const AstExpression& expression,
+                                   const Scope& scope) const {
+  switch (expression.kind) {
+  case AstExpressionKind::FloatingLiteral:
+    return parseFloatingConstant(expression.text,
+                                 floatingConstantType(expression.text));
+  case AstExpressionKind::Identifier:
+    if (auto symbol = scope.find(expression.text); symbol != scope.end()) {
+      return symbol->second.specializedFloatingValue;
+    }
+    return std::nullopt;
+  case AstExpressionKind::Select:
+    if (expression.children.size() == 1 &&
+        expression.children.front().kind == AstExpressionKind::Identifier) {
+      if (auto receiver = scope.find(expression.children.front().text);
+          receiver != scope.end()) {
+        if (std::optional<SymbolInfo> member = resolvedMemberForReceiverType(
+                receiver->second.type, expression.text)) {
+          return member->specializedFloatingValue;
+        }
+      }
+    }
+    return std::nullopt;
+  case AstExpressionKind::TypeApply:
+    if (isConstValueExpression(expression, scope) &&
+        typeArgumentsFor(expression).size() == 1) {
+      const TypeInfo constant =
+          typeFromDeclaredName(expression.declaredType, &scope, &expression.span);
+      if (isFloatingConstantType(constant.kind) &&
+          !constant.singletonLiteral.empty()) {
+        return parseFloatingConstant(constant.singletonLiteral, constant.kind);
+      }
+    }
+    return std::nullopt;
+  case AstExpressionKind::Unary:
+    if (expression.children.size() == 1 &&
+        (expression.text == "+" || expression.text == "-")) {
+      if (const std::optional<double> operand =
+              constantFloatingValue(expression.children.front(), scope)) {
+        return expression.text == "-" ? -*operand : *operand;
       }
     }
     return std::nullopt;
@@ -5522,6 +5660,8 @@ std::optional<TypeInfo> Typechecker::recordInlineApplication(
           inlineParameter && parameterKind == SimpleTypeKind::Boolean;
       const bool integerInlineParameter =
           inlineParameter && isIntegerConstantType(parameterKind);
+      const bool floatingInlineParameter =
+          inlineParameter && isFloatingConstantType(parameterKind);
       const bool stringInlineParameter =
           inlineParameter && parameterKind == SimpleTypeKind::String;
       const bool charInlineParameter =
@@ -5532,13 +5672,16 @@ std::optional<TypeInfo> Typechecker::recordInlineApplication(
                ? constantBooleanValue(*sourceArgument, scope).has_value()
            : integerInlineParameter
                ? constantIntegerValue(*sourceArgument, scope).has_value()
+           : floatingInlineParameter
+               ? constantFloatingValue(*sourceArgument, scope).has_value()
            : stringInlineParameter
                ? constantStringValue(*sourceArgument, scope).has_value()
            : charInlineParameter
                ? constantCharValue(*sourceArgument, scope).has_value()
                : false);
       if ((!booleanInlineParameter && !integerInlineParameter &&
-           !stringInlineParameter && !charInlineParameter) ||
+           !floatingInlineParameter && !stringInlineParameter &&
+           !charInlineParameter) ||
           sourceArgument == nullptr || hasConstantArgument) {
         continue;
       }
@@ -5552,6 +5695,8 @@ std::optional<TypeInfo> Typechecker::recordInlineApplication(
                         !parameter->second.specializedBooleanValue.has_value()) ||
                        (integerInlineParameter &&
                         !parameter->second.specializedIntegerValue.has_value()) ||
+                       (floatingInlineParameter &&
+                        !parameter->second.specializedFloatingValue.has_value()) ||
                        (stringInlineParameter &&
                         !parameter->second.specializedStringValue.has_value()) ||
                        (charInlineParameter &&
@@ -5705,6 +5850,11 @@ std::optional<TypeInfo> Typechecker::recordInlineApplication(
           sourceArgument == nullptr
               ? std::nullopt
               : constantIntegerValue(*sourceArgument, scope);
+    } else if (isFloatingConstantType(type.kind)) {
+      parameter.specializedFloatingValue =
+          sourceArgument == nullptr
+              ? std::nullopt
+              : constantFloatingValue(*sourceArgument, scope);
     } else if (type.kind == SimpleTypeKind::String) {
       parameter.specializedStringValue =
           sourceArgument == nullptr
@@ -7654,6 +7804,8 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
               constantBooleanValue(local.children.front(), blockScope);
           symbol.specializedIntegerValue =
               constantIntegerValue(local.children.front(), blockScope);
+          symbol.specializedFloatingValue =
+              constantFloatingValue(local.children.front(), blockScope);
           symbol.specializedStringValue =
               constantStringValue(local.children.front(), blockScope);
           symbol.specializedCharValue =
@@ -10801,6 +10953,18 @@ TypeInfo Typechecker::typeFromDeclaredName(const std::string& name, const Scope*
                                compact);
       }
       return TypeInfo{SimpleTypeKind::Unknown, compact};
+    }
+    if (hasFloatingConstantSyntax(compact)) {
+      const SimpleTypeKind kind = floatingConstantType(compact);
+      if (parseFloatingConstant(compact, kind).has_value()) {
+        TypeInfo literal{kind, compact};
+        literal.runtimeName = kind == SimpleTypeKind::Float ? "Float" : "Double";
+        literal.singletonLiteral.reserve(compact.size());
+        std::copy_if(compact.begin(), compact.end(),
+                     std::back_inserter(literal.singletonLiteral),
+                     [](char ch) { return ch != '_'; });
+        return literal;
+      }
     }
   }
   if (normalized.size() >= 3 && normalized.front() == '\'' &&

@@ -37,6 +37,24 @@ object Constants {
       case _ => new OtherResult("precise-other")
     }
 
+  transparent inline def doubleLabelOf[D]: String =
+    inline constValue[D] match {
+      case 1.5 => "double-exact"
+      case 2.5 | 6.25e1 => "double-alternative"
+      case _ => "double-fallback"
+    }
+
+  transparent inline def floatLabelOf[F]: String =
+    inline constValue[F] match {
+      case 1.5F => "float-exact"
+      case 2.5F | 6.25e1F => "float-alternative"
+      case _ => "float-fallback"
+    }
+
+  inline def floatingParameterLabel(inline value: Double): String =
+    inline if (value >= 2.0) "floating-parameter"
+    else "floating-parameter-fallback"
+
   transparent inline def stringLabelOf[S]: String =
     inline constValue[S] match {
       case "alpha" => "string-alpha"
@@ -88,10 +106,19 @@ object Main {
     println(Constants.qualifiedValueOf["literal"])
     println(Constants.valueOf[true])
     println(Constants.valueOf['x'])
+    println(Constants.valueOf[1.25])
+    println(Constants.valueOf[1.25F])
     println(Constants.labelOf[7])
     println(Constants.labelOf[9])
     println(Constants.resultFor[7].sevenOnly())
     println(Constants.resultFor[9].otherOnly())
+    println(Constants.doubleLabelOf[1.5])
+    println(Constants.doubleLabelOf[62.5])
+    println(Constants.doubleLabelOf[9.5])
+    println(Constants.floatLabelOf[1.5F])
+    println(Constants.floatLabelOf[62.5F])
+    println(Constants.floatLabelOf[9.5F])
+    println(Constants.floatingParameterLabel(2.5))
     println(Constants.stringLabelOf["alpha"])
     println(Constants.stringLabelOf["line\nbreak"])
     println(Constants.stringLabelOf["other"])

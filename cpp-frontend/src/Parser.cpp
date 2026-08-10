@@ -2097,6 +2097,7 @@ AstExpression Parser::parseMatchExpression(AstExpression selector,
       const auto supportedLiteral = [](const AstExpression& pattern) {
         return pattern.kind == AstExpressionKind::BooleanLiteral ||
                pattern.kind == AstExpressionKind::IntegerLiteral ||
+               pattern.kind == AstExpressionKind::FloatingLiteral ||
                pattern.kind == AstExpressionKind::StringLiteral ||
                pattern.kind == AstExpressionKind::CharLiteral;
       };
@@ -2120,9 +2121,9 @@ AstExpression Parser::parseMatchExpression(AstExpression selector,
           !supportedCatchAll) {
         diagnostics_.error(
             current.pattern.span,
-            "inline match currently supports Boolean, integer, String, and Char "
-            "literals, one unguarded type pattern per case, and a final wildcard "
-            "or binding");
+            "inline match currently supports Boolean, integer, floating-point, "
+            "String, and Char literals, one unguarded type pattern per case, and "
+            "a final wildcard or binding");
       }
     }
 

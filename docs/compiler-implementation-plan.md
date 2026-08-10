@@ -1035,24 +1035,26 @@ Current scaffold status:
   `using inline` parameters resolved from inferred givens, explicit `using`
   expressions, or nested contextual forwarding. Ordinary and contextual
   non-inline parameters retain their single-evaluation local binding.
-  Call-site rechecking tracks compile-time Boolean, integer, String, and Char
-  arguments for both ordinary and inline parameters. An ordinary `if` formed
-  from those values is opportunistically reduced, while `inline if` requires a
-  constant condition and diagnoses a dynamic one. Boolean conditions support
-  `!`, `&&`,
-  `||`, `==`, and `!=`. `Byte`, `Short`, `Int`, and `Long` constants propagate
+  Call-site rechecking tracks compile-time Boolean, integer, Float, Double,
+  String, and Char arguments for both ordinary and inline parameters. An
+  ordinary `if` formed from those values is opportunistically reduced, while
+  `inline if` requires a constant condition and diagnoses a dynamic one.
+  Boolean conditions support `!`, `&&`, `||`, `==`, and `!=`. `Byte`, `Short`,
+  `Int`, and `Long` constants propagate
   through unary `+`/`-`, checked `+`, `-`, `*`, `/`, and `%` arithmetic, and
   `==`, `!=`, `<`, `>`, `<=`, and `>=` comparisons. Overflow and zero divisors
-  do not fold. String and Char `==`/`!=` comparisons use decoded literal values.
+  do not fold. Float and Double literals, including unary signs, participate in
+  `==`, `!=`, `<`, `>`, `<=`, and `>=` comparisons using their narrowed scalar
+  values. String and Char `==`/`!=` comparisons use decoded literal values.
   Successful reduction records and emits only the selected
   branch. Dynamic ordinary conditions retain a runtime conditional and
   preserve by-value single evaluation. Ordinary constant parameters propagate
   through nested inline calls and can refine transparent-inline results to the
   selected concrete branch type.
   Braced Scala 3 `inline match` expressions reuse the ordinary match lowering
-  for compile-time Boolean, integer, String, and Char selectors.
-  Ordered Boolean/integer/String/Char literal cases, literal alternatives, and
-  a required final wildcard or binding are supported; each lowered case has
+  for compile-time Boolean, integer, Float, Double, String, and Char selectors.
+  Ordered scalar/String/Char literal cases, literal alternatives, and a required
+  final wildcard or binding are supported; each lowered case has
   distinct branch-selection metadata and only the selected body reaches NIR.
   A dynamic selector is rejected during call-site specialization. One unguarded type
   pattern per case can also be reduced from a call-site static type. Positive
@@ -1061,12 +1063,12 @@ Current scaffold status:
   abstract, composite, or otherwise overlapping static type remains
   non-reducible. Pattern bindings retain their narrowed type, so transparent
   inline calls can expose a selected concrete result API without emitting a
-  runtime test. String and Char selectors can come from singleton
-  `constValue` results, inline parameters, or stable inline values; escaped
-  literals compare by decoded value. Guards, type-pattern alternatives,
-  singleton-value patterns, literal floats/`null`, and indentation-only match
-  syntax remain later milestones and receive focused diagnostics where
-  applicable.
+  runtime test. Float, Double, String, and Char selectors can come from
+  singleton `constValue` results, inline parameters, or stable inline values;
+  floating-point spellings compare by their narrowed scalar value and escaped
+  text literals compare by decoded value. Guards, type-pattern alternatives,
+  singleton-value patterns, `null`, and indentation-only match syntax remain
+  later milestones and receive focused diagnostics where applicable.
   Compiler-owned `scala.compiletime.erasedValue[T]` can now provide the static
   selector for the same bounded type-pattern reduction. Exact imports, import
   aliases, and the qualified spelling are recognized. The frontend re-resolves
@@ -1079,15 +1081,17 @@ Current scaffold status:
   exercises reference/scalar/fallback selection, aliased and qualified forms,
   transparent-result refinement, runtime output, diagnostics, and NIR erasure.
   Compiler-owned `scala.compiletime.constValue[T]` now materializes Boolean,
-  Int, Long, String, and Char singleton types as typed literals. Exact imports,
-  aliases, and the qualified spelling resolve to the intrinsic; non-singleton
-  concrete types and abstract uses outside an inline definition are diagnosed.
+  Int, Long, Float, Double, String, and Char singleton types as typed literals.
+  Exact imports, aliases, and the qualified spelling resolve to the intrinsic;
+  non-singleton concrete types and abstract uses outside an inline definition
+  are diagnosed.
   An abstract `T` is deferred while checking a generic inline definition and
   must become a supported singleton at each call site. The resulting value can
-  be returned directly or drive Boolean/integer/String/Char `inline match`
-  reduction and transparent-result refinement. Expanded caller NIR contains
-  the literal or selected branch only: the intrinsic, synthetic selector local,
-  runtime comparisons, and unselected branches are absent. Focused runtime,
+  be returned directly or drive Boolean/integer/floating-point/String/Char
+  `inline match` reduction and transparent-result refinement. Expanded caller
+  NIR contains the literal or selected branch only: the intrinsic, synthetic
+  selector local, runtime comparisons, and unselected branches are absent.
+  Focused runtime,
   diagnostics, import-resolution, transparent-type, and NIR coverage shares
   `SmokeTests6.cpp` with the related `erasedValue` slice.
   Compiler-owned `scala.compiletime.error(message)` now emits user-defined
@@ -1117,8 +1121,9 @@ Current scaffold status:
   shares `SmokeTests6.cpp` without adding another native test build.
   Constants propagate through nested inline calls and work with generic evidence
   selection, contextual and curried calls, effectful instance receivers, and
-  transparent-result refinement. Symbolic Boolean, integer, String, and Char
-  inline parameters defer nested specialization until the enclosing call site.
+  transparent-result refinement. Symbolic Boolean, integer, Float, Double,
+  String, and Char inline parameters defer nested specialization until the
+  enclosing call site.
   Non-constant arguments remain valid unless an `inline if` requires
   reduction. In this bounded slice both branches must still typecheck at the
   original definition site. Partially applied calls and the remaining Scala 3
@@ -1128,10 +1133,11 @@ Current scaffold status:
   composed with supported unary/binary operators. An initializer can also refer
   by identifier or object selection to an earlier validated inline value, so
   dependency-ordered aliases and compound constant chains remain compile-time
-  values. Boolean and integer results propagate through those chains for
-  ordinary and mandatory conditional reduction. NIR substitutes every alias
-  from its definition owner, preventing caller-local shadowing and leaving no
-  accessor call. Dynamic and missing initializers, ordinary-value references,
+  values. Boolean, integer, and literal floating-point results propagate through
+  those chains for ordinary and mandatory conditional reduction. NIR
+  substitutes every alias from its definition owner, preventing caller-local
+  shadowing and leaving no accessor call. Dynamic and missing initializers,
+  ordinary-value references,
   forward, self, and cyclic inline-value references, class/trait-owned inline
   values, `inline var`, and abstract inline values remain outside this bounded
   slice and receive focused diagnostics where applicable.

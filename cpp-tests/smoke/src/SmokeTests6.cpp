@@ -84,6 +84,8 @@ class NamedValue[A](val value: String) extends Named[A] {
 }
 
 object TypeKinds {
+  inline val stableDouble: Double = 2.5
+  inline val stableFloat: Float = 3.5F
   inline val stableString: String = "stable"
   inline val stableChar: Char = 's'
 
@@ -111,6 +113,54 @@ object TypeKinds {
     inline constValue[B] match {
       case true => new PreciseResult("constant-precise")
       case _ => new FallbackResult("constant-fallback")
+    }
+
+  transparent inline def doubleChoice[D]: String =
+    inline constValue[D] match {
+      case 1.5 => "double-exact"
+      case 2.5 | 6.25e1 => "double-alternative"
+      case _ => "double-fallback"
+    }
+
+  transparent inline def floatChoice[F]: String =
+    inline constValue[F] match {
+      case 1.5F => "float-exact"
+      case 2.5F | 6.25e1F => "float-alternative"
+      case _ => "float-fallback"
+    }
+
+  inline def doubleParameterChoice(inline value: Double): String =
+    inline value match {
+      case 4.5 => "double-parameter"
+      case _ => "double-parameter-fallback"
+    }
+
+  inline def floatParameterChoice(inline value: Float): String =
+    inline value match {
+      case 4.5F => "float-parameter"
+      case _ => "float-parameter-fallback"
+    }
+
+  inline def stableDoubleChoice: String =
+    inline stableDouble match {
+      case 2.5 => "stable-double"
+      case _ => "stable-double-fallback"
+    }
+
+  inline def stableFloatChoice: String =
+    inline stableFloat match {
+      case 3.5F => "stable-float"
+      case _ => "stable-float-fallback"
+    }
+
+  inline def floatingCondition(inline value: Double): String =
+    inline if (value >= 2.0) "floating-condition"
+    else "floating-condition-fallback"
+
+  transparent inline def floatingResult[D]: ErasedResult =
+    inline constValue[D] match {
+      case 7.5 => new PreciseResult("floating-precise")
+      case _ => new FallbackResult("floating-fallback-result")
     }
 
   inline def requireSeven[N](inline message: String): String =
@@ -228,11 +278,25 @@ object Main {
   def stringConstant: String = TypeKinds.aliasedValueOf["literal"]
   def booleanConstant: Boolean = TypeKinds.valueOf[true]
   def charConstant: Char = TypeKinds.valueOf['x']
+  def doubleConstant: Double = TypeKinds.valueOf[1.25]
+  def floatConstant: Float = TypeKinds.valueOf[1.25F]
   def constantMatchSeven: String = TypeKinds.integerChoice[7]
   def constantMatchOther: String = TypeKinds.integerChoice[9]
   def constantBooleanFalse: String = TypeKinds.booleanChoice[false]
   def constantPrecise: String = TypeKinds.constantResult[true].preciseOnly()
   def constantFallback: String = TypeKinds.constantResult[false].fallbackOnly()
+  def doubleExact: String = TypeKinds.doubleChoice[1.5]
+  def doubleAlternative: String = TypeKinds.doubleChoice[62.5]
+  def doubleFallback: String = TypeKinds.doubleChoice[9.5]
+  def floatExact: String = TypeKinds.floatChoice[1.5F]
+  def floatAlternative: String = TypeKinds.floatChoice[62.5F]
+  def floatFallback: String = TypeKinds.floatChoice[9.5F]
+  def doubleParameter: String = TypeKinds.doubleParameterChoice(4.5)
+  def floatParameter: String = TypeKinds.floatParameterChoice(4.5F)
+  def stableDouble: String = TypeKinds.stableDoubleChoice
+  def stableFloat: String = TypeKinds.stableFloatChoice
+  def reducedFloatingCondition: String = TypeKinds.floatingCondition(2.5)
+  def floatingPrecise: String = TypeKinds.floatingResult[7.5].preciseOnly()
   def acceptedSeven: String = TypeKinds.requireSeven[7]("ignored-seven")
   def acceptedTrue: String = TypeKinds.qualifiedRequire[true]("ignored-true")
   def acceptedCondition: String =
@@ -277,6 +341,18 @@ object Main {
     println(constantBooleanFalse)
     println(constantPrecise)
     println(constantFallback)
+    println(doubleExact)
+    println(doubleAlternative)
+    println(doubleFallback)
+    println(floatExact)
+    println(floatAlternative)
+    println(floatFallback)
+    println(doubleParameter)
+    println(floatParameter)
+    println(stableDouble)
+    println(stableFloat)
+    println(reducedFloatingCondition)
+    println(floatingPrecise)
     println(acceptedSeven)
     println(acceptedTrue)
     println(acceptedCondition)
@@ -380,6 +456,8 @@ object Main {
 
   def runtimeString(): String = "runtime"
   def runtimeChar(): Char = 'r'
+  def runtimeDouble(): Double = 1.0
+  def runtimeFloat(): Float = 1.0F
 
   inline def requiresStringMatch(inline value: String): String =
     inline value match {
@@ -393,8 +471,22 @@ object Main {
       case _ => "other"
     }
 
+  inline def requiresDoubleMatch(inline value: Double): String =
+    inline value match {
+      case 1.0 => "known"
+      case _ => "other"
+    }
+
+  inline def requiresFloatMatch(inline value: Float): String =
+    inline value match {
+      case 1.0F => "known"
+      case _ => "other"
+    }
+
   val unresolvedStringMatch = requiresStringMatch(runtimeString())
   val unresolvedCharMatch = requiresCharMatch(runtimeChar())
+  val unresolvedDoubleMatch = requiresDoubleMatch(runtimeDouble())
+  val unresolvedFloatMatch = requiresFloatMatch(runtimeFloat())
 
   val escaped = erasedValue[String]
   val qualifiedEscaped = scala.compiletime.erasedValue[Int]
@@ -477,6 +569,10 @@ object Main {
       functionText(result.nirText, "demo.inlineerased.Main.booleanConstant");
   const std::string_view charConstant =
       functionText(result.nirText, "demo.inlineerased.Main.charConstant");
+  const std::string_view doubleConstant =
+      functionText(result.nirText, "demo.inlineerased.Main.doubleConstant");
+  const std::string_view floatConstant =
+      functionText(result.nirText, "demo.inlineerased.Main.floatConstant");
   const std::string_view constantMatchSeven =
       functionText(result.nirText, "demo.inlineerased.Main.constantMatchSeven");
   const std::string_view constantMatchOther =
@@ -487,6 +583,30 @@ object Main {
       functionText(result.nirText, "demo.inlineerased.Main.constantPrecise");
   const std::string_view constantFallback =
       functionText(result.nirText, "demo.inlineerased.Main.constantFallback");
+  const std::string_view doubleExact =
+      functionText(result.nirText, "demo.inlineerased.Main.doubleExact");
+  const std::string_view doubleAlternative =
+      functionText(result.nirText, "demo.inlineerased.Main.doubleAlternative");
+  const std::string_view doubleFallback =
+      functionText(result.nirText, "demo.inlineerased.Main.doubleFallback");
+  const std::string_view floatExact =
+      functionText(result.nirText, "demo.inlineerased.Main.floatExact");
+  const std::string_view floatAlternative =
+      functionText(result.nirText, "demo.inlineerased.Main.floatAlternative");
+  const std::string_view floatFallback =
+      functionText(result.nirText, "demo.inlineerased.Main.floatFallback");
+  const std::string_view doubleParameter =
+      functionText(result.nirText, "demo.inlineerased.Main.doubleParameter");
+  const std::string_view floatParameter =
+      functionText(result.nirText, "demo.inlineerased.Main.floatParameter");
+  const std::string_view stableDouble =
+      functionText(result.nirText, "demo.inlineerased.Main.stableDouble");
+  const std::string_view stableFloat =
+      functionText(result.nirText, "demo.inlineerased.Main.stableFloat");
+  const std::string_view reducedFloatingCondition = functionText(
+      result.nirText, "demo.inlineerased.Main.reducedFloatingCondition");
+  const std::string_view floatingPrecise =
+      functionText(result.nirText, "demo.inlineerased.Main.floatingPrecise");
   const std::string_view acceptedSeven =
       functionText(result.nirText, "demo.inlineerased.Main.acceptedSeven");
   const std::string_view acceptedTrue =
@@ -561,6 +681,8 @@ object Main {
       fullyReduced(stringConstant) && contains(stringConstant, "\"literal\"") &&
       fullyReduced(booleanConstant) && contains(booleanConstant, "true") &&
       fullyReduced(charConstant) && contains(charConstant, "'x'") &&
+      fullyReduced(doubleConstant) && contains(doubleConstant, "1.25") &&
+      fullyReduced(floatConstant) && contains(floatConstant, "1.25F") &&
       fullyReduced(constantMatchSeven) &&
       contains(constantMatchSeven, "\"constant-seven\"") &&
       !contains(constantMatchSeven, "constant-other") &&
@@ -611,6 +733,28 @@ object Main {
            !contains(function, "TypeKinds.");
   };
   const bool literalMatchesReduced =
+      selectedLiteral(doubleExact, "\"double-exact\"", "double-fallback") &&
+      selectedLiteral(doubleAlternative, "\"double-alternative\"",
+                      "double-fallback") &&
+      selectedLiteral(doubleFallback, "\"double-fallback\"", "double-exact") &&
+      selectedLiteral(floatExact, "\"float-exact\"", "float-fallback") &&
+      selectedLiteral(floatAlternative, "\"float-alternative\"",
+                      "float-fallback") &&
+      selectedLiteral(floatFallback, "\"float-fallback\"", "float-exact") &&
+      selectedLiteral(doubleParameter, "\"double-parameter\"",
+                      "double-parameter-fallback") &&
+      selectedLiteral(floatParameter, "\"float-parameter\"",
+                      "float-parameter-fallback") &&
+      selectedLiteral(stableDouble, "\"stable-double\"",
+                      "stable-double-fallback") &&
+      selectedLiteral(stableFloat, "\"stable-float\"",
+                      "stable-float-fallback") &&
+      selectedLiteral(reducedFloatingCondition, "\"floating-condition\"",
+                      "floating-condition-fallback") &&
+      fullyReduced(floatingPrecise) &&
+      contains(floatingPrecise, "demo.inlineerased.PreciseResult") &&
+      contains(floatingPrecise, ".preciseOnly") &&
+      !contains(floatingPrecise, "FallbackResult") &&
       selectedLiteral(stringAlpha, "\"string-alpha\"", "string-fallback") &&
       selectedLiteral(stringAlternative, "\"string-alternative\"",
                       "string-fallback") &&
@@ -633,7 +777,11 @@ object Main {
       status == 0 &&
       outputText == "11\n42\n9000000000\nliteral\ntrue\nx\nconstant-seven\n"
                     "constant-other\nconstant-false\nconstant-precise\n"
-                    "constant-fallback\naccepted-seven\naccepted-true\n"
+                    "constant-fallback\ndouble-exact\ndouble-alternative\n"
+                    "double-fallback\nfloat-exact\nfloat-alternative\n"
+                    "float-fallback\ndouble-parameter\nfloat-parameter\n"
+                    "stable-double\nstable-float\nfloating-condition\n"
+                    "floating-precise\naccepted-seven\naccepted-true\n"
                     "accepted-condition\n"
                     "string\nint\nlong\nother\nalias-string\n"
                     "alias-other\n"
@@ -694,7 +842,7 @@ object Main {
       countOccurrences(
           invalid.diagnosticsText,
           "inline match selector must be reducible from a compile-time value or "
-          "static type") == 3 &&
+          "static type") == 5 &&
       fullyReduced(stringName) && contains(stringName, "\"string\"") &&
       !contains(stringName, "\"other\"") && fullyReduced(intName) &&
       contains(intName, "\"int\"") && fullyReduced(longName) &&
@@ -719,6 +867,8 @@ object Main {
                       "', string-constant='" + std::string(stringConstant) +
                       "', boolean-constant='" + std::string(booleanConstant) +
                       "', char-constant='" + std::string(charConstant) +
+                      "', double-constant='" + std::string(doubleConstant) +
+                      "', float-constant='" + std::string(floatConstant) +
                       "', constant-match-seven='" +
                       std::string(constantMatchSeven) +
                       "', constant-match-other='" +
@@ -727,6 +877,21 @@ object Main {
                       std::string(constantBooleanFalse) +
                       "', constant-precise='" + std::string(constantPrecise) +
                       "', constant-fallback='" + std::string(constantFallback) +
+                      "', double-exact='" + std::string(doubleExact) +
+                      "', double-alternative='" +
+                      std::string(doubleAlternative) +
+                      "', double-fallback='" + std::string(doubleFallback) +
+                      "', float-exact='" + std::string(floatExact) +
+                      "', float-alternative='" +
+                      std::string(floatAlternative) +
+                      "', float-fallback='" + std::string(floatFallback) +
+                      "', double-parameter='" + std::string(doubleParameter) +
+                      "', float-parameter='" + std::string(floatParameter) +
+                      "', stable-double='" + std::string(stableDouble) +
+                      "', stable-float='" + std::string(stableFloat) +
+                      "', floating-condition='" +
+                      std::string(reducedFloatingCondition) +
+                      "', floating-precise='" + std::string(floatingPrecise) +
                       "', accepted-seven='" + std::string(acceptedSeven) +
                       "', accepted-true='" + std::string(acceptedTrue) +
                       "', accepted-condition='" +
