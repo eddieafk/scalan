@@ -95,10 +95,12 @@ build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
 # refinement. General and contextual `inline` parameters use substitution
 # semantics; compile-time Boolean, integer, and floating-point arguments reduce
 # ordinary or mandatory `inline if` branches, including bounded recursive inline
-# expansion. Braced `inline match` expressions reduce ordered Boolean, integer,
-# Float, Double, String, Char, and null literal cases, literal alternatives,
-# singleton object patterns and alternatives, and a final wildcard or binding
-# at the call site, including escaped literals and stable inline selectors.
+# expansion. Braced and Scala 3 indentation-based `inline match` expressions
+# reduce ordered Boolean, integer, Float, Double, String, Char, and null literal
+# cases, literal alternatives, singleton object patterns and alternatives, and
+# a final wildcard or binding at the call site, including escaped literals and
+# stable inline selectors. Indented sibling cases must align; nested matches
+# close when their case indentation returns to the enclosing level.
 # Singleton cases compare exact call-site module identity, including qualified
 # nested objects. Null cases distinguish proven null values from literals,
 # constructed values, module singletons, and scalar values while leaving dynamic

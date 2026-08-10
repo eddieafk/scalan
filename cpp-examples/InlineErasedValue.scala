@@ -92,22 +92,19 @@ object TypeDefaults {
     }
 
   inline def nullChoice(value: Any): String =
-    inline value match {
+    inline value match
       case null => "null-selected"
       case _ => "null-fallback"
-    }
 
   inline def nullAlternativeChoice(value: Any): String =
-    inline value match {
+    inline value match
       case "text" | null => "null-or-text"
       case _ => "null-alternative-fallback"
-    }
 
   transparent inline def nullResult(value: Any): ErasedResult =
-    inline value match {
+    inline value match
       case null => new PreciseResult("null-precise")
       case _ => new FallbackResult("null-fallback")
-    }
 
   transparent inline def alternativeResultFor[T]: ErasedResult =
     inline erasedValue[T] match {

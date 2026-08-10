@@ -24,6 +24,44 @@ bool isCapitalizedIdentifier(std::string_view text) {
   return !text.empty() && std::isupper(static_cast<unsigned char>(text.front())) != 0;
 }
 
+bool hasLeadingNewline(const Token& token) {
+  return std::any_of(token.leadingTrivia.begin(), token.leadingTrivia.end(),
+                     [](const Trivia& trivia) { return trivia.containsNewline; });
+}
+
+std::size_t tokenColumn(const std::vector<Token>& tokens, std::size_t index) {
+  const Token& token = tokens[index];
+  for (std::size_t cursor = index + 1; cursor > 0; --cursor) {
+    const Token& candidate = tokens[cursor - 1];
+    for (auto trivia = candidate.leadingTrivia.rbegin();
+         trivia != candidate.leadingTrivia.rend(); ++trivia) {
+      if (trivia->span.source != token.span.source) {
+        continue;
+      }
+      const std::size_t newline = trivia->text.rfind('\n');
+      if (newline != std::string::npos) {
+        const std::size_t lineStart = trivia->span.start + newline + 1;
+        return token.span.start >= lineStart ? token.span.start - lineStart : 0;
+      }
+    }
+  }
+  return token.span.start;
+}
+
+std::size_t statementIndentation(const std::vector<Token>& tokens,
+                                 std::size_t endIndex) {
+  std::size_t startIndex = endIndex;
+  while (startIndex > 0) {
+    const TokenKind previousKind = tokens[startIndex - 1].kind;
+    if (previousKind == TokenKind::Semicolon || previousKind == TokenKind::LeftBrace ||
+        previousKind == TokenKind::RightBrace) {
+      break;
+    }
+    --startIndex;
+  }
+  return tokenColumn(tokens, startIndex);
+}
+
 std::size_t formatSpecifierLength(std::string_view text) {
   if (text.empty() || text.front() != '%') {
     return 0;
@@ -1942,8 +1980,8 @@ AstExpression Parser::parseSummonFromExpression(const Token& identifier) {
   return expression;
 }
 
-AstExpression Parser::parseMatchExpression(AstExpression selector,
-                                           const Token& keyword, bool isInline,
+AstExpression Parser::parseMatchExpression(AstExpression selector, const Token& keyword,
+                                           bool isInline,
                                            support::SourceSpan inlineSpan) {
   struct MatchCase {
     AstExpression pattern;
@@ -1957,14 +1995,50 @@ AstExpression Parser::parseMatchExpression(AstExpression selector,
     bool hasGuard = false;
   };
 
-  if (!consume(TokenKind::LeftBrace, "expected '{' after match")) {
+  const std::size_t matchTokenIndex = current_ - 1;
+  const bool bracedCases = match(TokenKind::LeftBrace);
+  if (!bracedCases && !check(TokenKind::KeywordCase)) {
+    diagnostics_.error(peek().span,
+                       "expected '{' or an indentation-based case after match");
     return selector;
+  }
+
+  std::optional<std::size_t> caseIndentation;
+  if (!bracedCases) {
+    caseIndentation = tokenColumn(tokens_, current_);
+    if (!hasLeadingNewline(peek())) {
+      diagnostics_.error(peek().span,
+                         "indentation-based match cases must start on a new line");
+    }
+    if (*caseIndentation <= statementIndentation(tokens_, matchTokenIndex)) {
+      diagnostics_.error(
+          peek().span, "indentation-based match cases must be more indented than their "
+                       "enclosing statement");
+    }
   }
 
   std::vector<MatchCase> cases;
   consumeSeparators();
-  while (!isAtEnd() && !check(TokenKind::RightBrace)) {
+  while (!isAtEnd() && (!bracedCases || !check(TokenKind::RightBrace))) {
+    if (!bracedCases && check(TokenKind::KeywordCase)) {
+      const std::size_t currentIndentation = tokenColumn(tokens_, current_);
+      if (currentIndentation < *caseIndentation) {
+        break;
+      }
+      if (!hasLeadingNewline(peek())) {
+        diagnostics_.error(peek().span,
+                           "indentation-based match cases must start on a new line");
+      }
+      if (currentIndentation != *caseIndentation) {
+        diagnostics_.error(
+            peek().span,
+            "indentation-based match cases must align with the first case");
+      }
+    }
     if (!match(TokenKind::KeywordCase)) {
+      if (!bracedCases) {
+        break;
+      }
       diagnostics_.error(peek().span, "expected case in match expression");
       break;
     }
@@ -2146,7 +2220,9 @@ AstExpression Parser::parseMatchExpression(AstExpression selector,
     cases.push_back(std::move(current));
     consumeSeparators();
   }
-  consume(TokenKind::RightBrace, "expected '}' after match cases");
+  if (bracedCases) {
+    consume(TokenKind::RightBrace, "expected '}' after match cases");
+  }
 
   const auto isCatchAll = [](const MatchCase& current) {
     return ((current.isWildcard || !current.bindingName.empty()) &&

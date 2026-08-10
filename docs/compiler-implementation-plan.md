@@ -312,6 +312,10 @@ Current scaffold status:
   interpolated string tokens as string-like expressions.
 - Parser consumes explicit and inferred semicolons at package, declaration,
   member, argument, and block boundaries.
+- Match expressions accept either braces or a Scala 3 indentation-based case
+  region. Leading-trivia columns enforce aligned sibling cases and allow nested
+  matches to close at the enclosing case indentation without global indent and
+  dedent tokens.
 - Parser accepts explicit `override type`, `override def`, `override val`, and
   `override var` modifiers for the current abstract-member implementation
   subset. Type declarations are currently member-only.
@@ -1052,12 +1056,14 @@ Current scaffold status:
   preserve by-value single evaluation. Ordinary constant parameters propagate
   through nested inline calls and can refine transparent-inline results to the
   selected concrete branch type.
-  Braced Scala 3 `inline match` expressions reuse the ordinary match lowering
-  for compile-time Boolean, integer, Float, Double, String, Char, null, and exact
-  module selectors. Ordered scalar/String/Char/null literal cases, literal or
-  singleton object alternatives, and a required final wildcard or binding are
-  supported; each lowered case has distinct branch-selection metadata and only
-  the selected body reaches NIR. A reducible
+  Braced and Scala 3 indentation-based `inline match` expressions reuse the
+  ordinary match lowering for compile-time Boolean, integer, Float, Double,
+  String, Char, null, and exact module selectors. Indented sibling cases align
+  to the first case, and a nested match closes when its indentation returns to
+  the enclosing case level. Ordered scalar/String/Char/null literal cases,
+  literal or singleton object alternatives, and a required final wildcard or
+  binding are supported; each lowered case has distinct branch-selection
+  metadata and only the selected body reaches NIR. A reducible
   Boolean guard can further constrain literal, singleton object, wildcard,
   binding, or type cases. Singleton patterns and their alternatives compare
   exact call-site module identity, including qualified nested objects, while
@@ -1085,21 +1091,21 @@ Current scaffold status:
   Double, String, and Char selectors can come from
   singleton `constValue` results, inline parameters, or stable inline values;
   floating-point spellings compare by their narrowed scalar value and escaped
-  text literals compare by decoded value. Indentation-only match syntax remains
-  a later milestone and receives focused diagnostics where applicable.
+  text literals compare by decoded value.
   Compiler-owned `scala.compiletime.erasedValue[T]` can now provide the static
   selector for the same bounded type-pattern reduction. Exact imports, import
   aliases, and the qualified spelling are recognized. The frontend re-resolves
-  `T` in the concrete inline-application scope, restricts the intrinsic to a
-  braced `inline match`, rejects pattern bindings because no term value exists,
-  and diagnoses abstract call-site types that cannot select a branch. Expanded
-  caller NIR contains only the selected body: the synthetic `$match` local,
-  runtime type tests, and the intrinsic itself are absent. Focused coverage is
-  isolated in `SmokeTests6.cpp` to preserve incremental harness build times and
-  exercises reference/scalar/fallback selection, aliased and qualified forms,
-  transparent-result refinement, guarded wildcard, singleton object, and
-  null patterns, consistently bound alternatives, typed and untyped
-  selector-binding guards, runtime output, diagnostics, and NIR erasure.
+  `T` in the concrete inline-application scope, restricts the intrinsic to an
+  `inline match` case region, rejects pattern bindings because no term value
+  exists, and diagnoses abstract call-site types that cannot select a branch.
+  Expanded caller NIR contains only the selected body: the synthetic `$match`
+  local, runtime type tests, and the intrinsic itself are absent. Focused
+  coverage is isolated in `SmokeTests6.cpp` to preserve incremental harness
+  build times and exercises reference/scalar/fallback selection, aliased and
+  qualified forms, transparent-result refinement, guarded wildcard, singleton
+  object, null patterns, braced and nested indentation-based syntax,
+  consistently bound alternatives, typed and untyped selector-binding guards,
+  runtime output, diagnostics, and NIR erasure.
   Compiler-owned `scala.compiletime.constValue[T]` now materializes Boolean,
   Int, Long, Float, Double, String, and Char singleton types as typed literals.
   Exact imports, aliases, and the qualified spelling resolve to the intrinsic;

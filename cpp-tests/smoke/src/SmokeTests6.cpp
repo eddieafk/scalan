@@ -282,6 +282,31 @@ object TypeKinds {
       case _ => new FallbackResult("null-result-fallback")
     }
 
+  inline def indentedChoice(
+      value: Any,
+      inline enabled: Boolean): String =
+    inline value match
+      case null if enabled => "indented-null"
+      case Ready | Waiting => "indented-singleton"
+      case selected: String | selected: Int =>
+        "indented-bound:" + selected.toString
+      case _ => "indented-fallback"
+
+  transparent inline def indentedResult(value: Any): ErasedResult =
+    inline value match
+      case null => new PreciseResult("indented-precise")
+      case _ => new FallbackResult("indented-result-fallback")
+
+  inline def nestedIndentedChoice(
+      value: Any,
+      inline enabled: Boolean): String =
+    inline value match
+      case null =>
+        inline enabled match
+          case true => "nested-indented-true"
+          case _ => "nested-indented-false"
+      case _ => "nested-indented-outer"
+
   inline def requireSeven[N](inline message: String): String =
     inline constValue[N] match {
       case 7 => "accepted-seven"
@@ -506,6 +531,29 @@ object Main {
   def nullPrecise: String = TypeKinds.nullResult(null).preciseOnly()
   def nullResultFallback: String =
     TypeKinds.nullResult(new OtherSignal).fallbackOnly()
+  def indentedNull: String = TypeKinds.indentedChoice(null, true)
+  def indentedRejected: String = TypeKinds.indentedChoice(null, false)
+  def indentedSingleton: String =
+    TypeKinds.indentedChoice(Ready, runtimeGuard())
+  def indentedString: String = TypeKinds.indentedChoice("text", true)
+  def indentedInt: String = TypeKinds.indentedChoice(7, true)
+  def indentedFallback: String =
+    TypeKinds.indentedChoice(new OtherSignal, true)
+  def indentedPrecise: String =
+    TypeKinds.indentedResult(null).preciseOnly()
+  def indentedResultFallback: String =
+    TypeKinds.indentedResult(new OtherSignal).fallbackOnly()
+  def nestedIndentedTrue: String =
+    TypeKinds.nestedIndentedChoice(null, true)
+  def nestedIndentedFalse: String =
+    TypeKinds.nestedIndentedChoice(null, false)
+  def nestedIndentedOuter: String =
+    TypeKinds.nestedIndentedChoice(new OtherSignal, runtimeGuard())
+
+  def ordinaryIndented(value: Int): String =
+    value match
+      case 1 => "ordinary-indented-one"
+      case _ => "ordinary-indented-other"
   def acceptedSeven: String = TypeKinds.requireSeven[7]("ignored-seven")
   def acceptedTrue: String = TypeKinds.qualifiedRequire[true]("ignored-true")
   def acceptedCondition: String =
@@ -615,6 +663,19 @@ object Main {
     println(stableNullSelected)
     println(nullPrecise)
     println(nullResultFallback)
+    println(indentedNull)
+    println(indentedRejected)
+    println(indentedSingleton)
+    println(indentedString)
+    println(indentedInt)
+    println(indentedFallback)
+    println(indentedPrecise)
+    println(indentedResultFallback)
+    println(nestedIndentedTrue)
+    println(nestedIndentedFalse)
+    println(nestedIndentedOuter)
+    println(ordinaryIndented(1))
+    println(ordinaryIndented(2))
     println(acceptedSeven)
     println(acceptedTrue)
     println(acceptedCondition)
@@ -852,6 +913,25 @@ object Main {
 }
 )";
 
+  constexpr const char* indentationInvalidSource =
+      R"(package demo.invalidindentationmatch
+
+object Main {
+  inline def misaligned(inline value: Int): String =
+    inline value match
+      case 1 => "one"
+        case _ => "other"
+
+  inline def unindented(inline value: Int): String =
+    inline value match
+  case 1 => "one"
+  case _ => "other"
+
+  inline def sameLine(inline value: Int): String =
+    inline value match case 1 => "one"; case _ => "other"
+}
+)";
+
   const std::filesystem::path temporary = std::filesystem::temp_directory_path();
   const std::filesystem::path binary =
       temporary / "cpp-scalanative-smoke-inline-erased-value";
@@ -873,6 +953,10 @@ object Main {
   scalanative::support::DiagnosticEngine invalidDiagnostics;
   const scalanative::tools::build::BuildResult invalid = driver.buildSource(
       "InvalidInlineErasedValue.scala", invalidSource, {}, invalidDiagnostics);
+  scalanative::support::DiagnosticEngine indentationInvalidDiagnostics;
+  const scalanative::tools::build::BuildResult indentationInvalid =
+      driver.buildSource("InvalidIndentationMatch.scala", indentationInvalidSource, {},
+                         indentationInvalidDiagnostics);
 
   if (!result.ok) {
     if (contains(result.diagnosticsText, "clang toolchain not found")) {
@@ -1021,6 +1105,30 @@ object Main {
       functionText(result.nirText, "demo.inlineerased.Main.nullPrecise");
   const std::string_view nullResultFallback =
       functionText(result.nirText, "demo.inlineerased.Main.nullResultFallback");
+  const std::string_view indentedNull =
+      functionText(result.nirText, "demo.inlineerased.Main.indentedNull");
+  const std::string_view indentedRejected =
+      functionText(result.nirText, "demo.inlineerased.Main.indentedRejected");
+  const std::string_view indentedSingleton =
+      functionText(result.nirText, "demo.inlineerased.Main.indentedSingleton");
+  const std::string_view indentedString =
+      functionText(result.nirText, "demo.inlineerased.Main.indentedString");
+  const std::string_view indentedInt =
+      functionText(result.nirText, "demo.inlineerased.Main.indentedInt");
+  const std::string_view indentedFallback =
+      functionText(result.nirText, "demo.inlineerased.Main.indentedFallback");
+  const std::string_view indentedPrecise =
+      functionText(result.nirText, "demo.inlineerased.Main.indentedPrecise");
+  const std::string_view indentedResultFallback =
+      functionText(result.nirText, "demo.inlineerased.Main.indentedResultFallback");
+  const std::string_view nestedIndentedTrue =
+      functionText(result.nirText, "demo.inlineerased.Main.nestedIndentedTrue");
+  const std::string_view nestedIndentedFalse =
+      functionText(result.nirText, "demo.inlineerased.Main.nestedIndentedFalse");
+  const std::string_view nestedIndentedOuter =
+      functionText(result.nirText, "demo.inlineerased.Main.nestedIndentedOuter");
+  const std::string_view ordinaryIndented =
+      functionText(result.nirText, "demo.inlineerased.Main.ordinaryIndented");
   const std::string_view acceptedSeven =
       functionText(result.nirText, "demo.inlineerased.Main.acceptedSeven");
   const std::string_view acceptedTrue =
@@ -1316,6 +1424,36 @@ object Main {
       selectedLiteral(nullResultFallback,
                       "demo.inlineerased.FallbackResult", "PreciseResult") &&
       contains(nullResultFallback, ".fallbackOnly") &&
+      selectedLiteral(indentedNull, "\"indented-null\"",
+                      "indented-fallback") &&
+      selectedLiteral(indentedRejected, "\"indented-fallback\"",
+                      "indented-null") &&
+      selectedLiteral(indentedSingleton, "\"indented-singleton\"",
+                      "indented-fallback") &&
+      !contains(indentedSingleton, "runtimeGuard") &&
+      selectedLiteral(indentedString, "\"indented-bound:\"",
+                      "indented-fallback") &&
+      contains(indentedString, "%selected") &&
+      selectedLiteral(indentedInt, "\"indented-bound:\"",
+                      "indented-fallback") &&
+      contains(indentedInt, "%selected") &&
+      selectedLiteral(indentedFallback, "\"indented-fallback\"",
+                      "indented-bound:") &&
+      selectedLiteral(indentedPrecise,
+                      "demo.inlineerased.PreciseResult", "FallbackResult") &&
+      contains(indentedPrecise, ".preciseOnly") &&
+      selectedLiteral(indentedResultFallback,
+                      "demo.inlineerased.FallbackResult", "PreciseResult") &&
+      contains(indentedResultFallback, ".fallbackOnly") &&
+      selectedLiteral(nestedIndentedTrue, "\"nested-indented-true\"",
+                      "nested-indented-false") &&
+      selectedLiteral(nestedIndentedFalse, "\"nested-indented-false\"",
+                      "nested-indented-true") &&
+      selectedLiteral(nestedIndentedOuter, "\"nested-indented-outer\"",
+                      "nested-indented-true") &&
+      !contains(nestedIndentedOuter, "runtimeGuard") &&
+      !ordinaryIndented.empty() &&
+      contains(ordinaryIndented, "ordinary-indented") &&
       fullyReduced(alternativeString) &&
       contains(alternativeString, "\"alternative-string-int\"") &&
       !contains(alternativeString, "alternative-other") &&
@@ -1368,6 +1506,12 @@ object Main {
                     "null-fallback\nnull-fallback\nnull-fallback\n"
                     "null-binding\nnull-binding-fallback\nstable-null\n"
                     "null-precise\nnull-result-fallback\n"
+                    "indented-null\nindented-fallback\nindented-singleton\n"
+                    "indented-bound:text\nindented-bound:7\n"
+                    "indented-fallback\nindented-precise\n"
+                    "indented-result-fallback\nnested-indented-true\n"
+                    "nested-indented-false\nnested-indented-outer\n"
+                    "ordinary-indented-one\nordinary-indented-other\n"
                     "accepted-seven\naccepted-true\n"
                     "accepted-condition\n"
                     "string\nint\nlong\nother\nalias-string\n"
@@ -1432,6 +1576,14 @@ object Main {
           "erasedValue inline match patterns cannot bind a runtime value") == 2 &&
       contains(invalid.diagnosticsText,
                "erasedValue requires exactly one type argument") &&
+      !indentationInvalid.ok &&
+      contains(indentationInvalid.diagnosticsText,
+               "indentation-based match cases must align with the first case") &&
+      contains(indentationInvalid.diagnosticsText,
+               "indentation-based match cases must be more indented than their "
+               "enclosing statement") &&
+      contains(indentationInvalid.diagnosticsText,
+               "indentation-based match cases must start on a new line") &&
       countOccurrences(
           invalid.diagnosticsText,
           "inline match selector must be reducible from a compile-time value or "
@@ -1454,6 +1606,8 @@ object Main {
                : fail("inline erasedValue smoke test failed (output='" + outputText +
                       "', diagnostics='" + result.diagnosticsText +
                       "', invalid-diagnostics='" + invalid.diagnosticsText +
+                      "', indentation-invalid-diagnostics='" +
+                      indentationInvalid.diagnosticsText +
                       "', direct-constant='" + std::string(directConstant) +
                       "', int-constant='" + std::string(intConstant) +
                       "', long-constant='" + std::string(longConstant) +
