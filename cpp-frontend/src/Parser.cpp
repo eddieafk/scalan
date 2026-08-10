@@ -675,6 +675,17 @@ AstDeclaration Parser::parseImport(const Token& keyword) {
                            : declaration.importPath.substr(dot + 1);
   }
 
+  if (declaration.importPath == support::StdNames::ScalaCompiletimeSummonFrom &&
+      !declaration.name.empty()) {
+    summonFromNames_.insert(declaration.name);
+  } else if (declaration.importPath == support::StdNames::ScalaCompiletime) {
+    for (const AstImportSelector& selector : declaration.importSelectors) {
+      if (selector.name == support::StdNames::SummonFrom && selector.alias != "_") {
+        summonFromNames_.insert(selector.alias);
+      }
+    }
+  }
+
   consumeSeparators();
   return declaration;
 }
@@ -1253,6 +1264,7 @@ Parser::parseMemberBlock(std::vector<AstExpression>* constructorBody,
   if (!consume(TokenKind::LeftBrace, "expected '{' to start member block")) {
     return members;
   }
+  const std::unordered_set<std::string> outerSummonFromNames = summonFromNames_;
 
   consumeSeparators();
   while (!isAtEnd() && !check(TokenKind::RightBrace)) {
@@ -1288,6 +1300,7 @@ Parser::parseMemberBlock(std::vector<AstExpression>* constructorBody,
 
   consume(TokenKind::RightBrace, "expected '}' after member block");
   consumeSeparators();
+  summonFromNames_ = outerSummonFromNames;
   return members;
 }
 
@@ -1494,8 +1507,25 @@ AstExpression Parser::parsePrimaryExpression() {
     expression.span = modifier.span;
     return expression;
   }
+  if (check(TokenKind::Identifier) && peek().text == "scala" &&
+      current_ + 5 < tokens_.size() &&
+      tokens_[current_ + 1].kind == TokenKind::Dot &&
+      tokens_[current_ + 2].kind == TokenKind::Identifier &&
+      tokens_[current_ + 2].text == "compiletime" &&
+      tokens_[current_ + 3].kind == TokenKind::Dot &&
+      tokens_[current_ + 4].kind == TokenKind::Identifier &&
+      tokens_[current_ + 4].text == support::StdNames::SummonFrom &&
+      (tokens_[current_ + 5].kind == TokenKind::LeftBrace ||
+       tokens_[current_ + 5].kind == TokenKind::Colon)) {
+    advance();
+    advance();
+    advance();
+    advance();
+    const Token identifier = advance();
+    return parseSummonFromExpression(identifier);
+  }
   if (match(TokenKind::Identifier)) {
-    if (previous().text == "summonFrom" &&
+    if (summonFromNames_.contains(previous().text) &&
         (check(TokenKind::LeftBrace) || check(TokenKind::Colon))) {
       return parseSummonFromExpression(previous());
     }
@@ -1597,6 +1627,7 @@ AstExpression Parser::parseBlockExpression() {
   AstExpression block;
   block.kind = AstExpressionKind::Block;
   block.span = start.span;
+  const std::unordered_set<std::string> outerSummonFromNames = summonFromNames_;
 
   consumeSeparators();
   while (!isAtEnd() && !check(TokenKind::RightBrace)) {
@@ -1637,6 +1668,7 @@ AstExpression Parser::parseBlockExpression() {
   }
 
   consume(TokenKind::RightBrace, "expected '}' after block");
+  summonFromNames_ = outerSummonFromNames;
   return block;
 }
 

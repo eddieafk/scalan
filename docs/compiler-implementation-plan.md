@@ -992,7 +992,10 @@ Current scaffold status:
   `case given T` and `case given _: T` contextual bindings, and an optional
   final wildcard fallback. Indented sibling cases must align, begin on a new
   line, and be more indented than their enclosing statement; nested regions
-  close when their case indentation returns to the enclosing level.
+  close when their case indentation returns to the enclosing level. Canonical
+  and renamed imports from `scala.compiletime`, along with the fully qualified
+  `scala.compiletime.summonFrom` spelling, resolve to the same construct in
+  either syntax.
   Each typed case probes ordinary contextual search without reporting missing
   evidence, while ambiguity and diverging or unsupported materialization retain
   focused diagnostics instead of falling through. The selected branch and its

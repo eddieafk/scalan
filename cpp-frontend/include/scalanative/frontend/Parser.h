@@ -5,6 +5,7 @@
 #include "scalanative/support/Diagnostics.h"
 
 #include <string>
+#include <unordered_set>
 #include <vector>
 
 namespace scalanative::frontend {
@@ -82,6 +83,7 @@ private:
   support::DiagnosticEngine& diagnostics_;
   std::size_t current_ = 0;
   std::size_t nextSyntheticLocal_ = 0;
+  std::unordered_set<std::string> summonFromNames_{"summonFrom"};
 };
 
 } // namespace scalanative::frontend

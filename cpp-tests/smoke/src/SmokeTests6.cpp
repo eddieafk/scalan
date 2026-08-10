@@ -58,6 +58,8 @@ import scala.compiletime.{constValue => constant}
 import scala.compiletime.{error => compiletimeError}
 import scala.compiletime.summonInline
 import scala.compiletime.{summonInline => inlineSummon}
+import scala.compiletime.summonFrom
+import scala.compiletime.{summonFrom => contextualChoice}
 
 trait ErasedResult {
   def text(): String
@@ -325,6 +327,17 @@ object TypeKinds {
             "nested-indented-summon:" + outer.label() + ":" + inner.label()
           case _ => "nested-indented-inner-fallback:" + outer.label()
       case _ => "nested-indented-outer-fallback"
+
+  inline def aliasedIndentedSummon[A]: String =
+    contextualChoice:
+      case found: Named[A] => "aliased-indented-summon:" + found.label()
+      case _ => "aliased-indented-summon-fallback"
+
+  inline def qualifiedSummon[A]: String =
+    scala.compiletime.summonFrom {
+      case given Named[A] => "qualified-summon:" + summonInline[Named[A]].label()
+      case _ => "qualified-summon-fallback"
+    }
 
   inline def requireSeven[N](inline message: String): String =
     inline constValue[N] match {
@@ -625,6 +638,11 @@ object Main {
     TypeKinds.nestedIndentedSummon[Int, Other]
   def nestedIndentedOuterFallback: String =
     TypeKinds.nestedIndentedSummon[Other, Int]
+  def aliasedIndentedSummoned: String =
+    TypeKinds.aliasedIndentedSummon[Int]
+  def aliasedIndentedSummonFallback: String =
+    TypeKinds.aliasedIndentedSummon[Other]
+  def qualifiedSummonedFrom: String = TypeKinds.qualifiedSummon[Long]
 
   def main(args: Array[String]): Unit = {
     println(directConstant)
@@ -748,6 +766,9 @@ object Main {
     println(nestedIndentedSummoned)
     println(nestedIndentedInnerFallback)
     println(nestedIndentedOuterFallback)
+    println(aliasedIndentedSummoned)
+    println(aliasedIndentedSummonFallback)
+    println(qualifiedSummonedFrom)
     println(Shadowing.value)
   }
 }
@@ -1264,6 +1285,12 @@ object Main {
       result.nirText, "demo.inlineerased.Main.nestedIndentedInnerFallback");
   const std::string_view nestedIndentedOuterFallback = functionText(
       result.nirText, "demo.inlineerased.Main.nestedIndentedOuterFallback");
+  const std::string_view aliasedIndentedSummoned = functionText(
+      result.nirText, "demo.inlineerased.Main.aliasedIndentedSummoned");
+  const std::string_view aliasedIndentedSummonFallback = functionText(
+      result.nirText, "demo.inlineerased.Main.aliasedIndentedSummonFallback");
+  const std::string_view qualifiedSummonedFrom = functionText(
+      result.nirText, "demo.inlineerased.Main.qualifiedSummonedFrom");
 
   const auto fullyReduced = [](std::string_view function) {
     return !function.empty() && !contains(function, "$match") &&
@@ -1343,7 +1370,18 @@ object Main {
       fullyReduced(nestedIndentedOuterFallback) &&
       contains(nestedIndentedOuterFallback,
                "\"nested-indented-outer-fallback\"") &&
-      !contains(nestedIndentedOuterFallback, ".label");
+      !contains(nestedIndentedOuterFallback, ".label") &&
+      fullyReduced(aliasedIndentedSummoned) &&
+      contains(aliasedIndentedSummoned, "\"aliased-indented-summon:\"") &&
+      contains(aliasedIndentedSummoned, ".label") &&
+      fullyReduced(aliasedIndentedSummonFallback) &&
+      contains(aliasedIndentedSummonFallback,
+               "\"aliased-indented-summon-fallback\"") &&
+      !contains(aliasedIndentedSummonFallback, ".label") &&
+      fullyReduced(qualifiedSummonedFrom) &&
+      contains(qualifiedSummonedFrom, "\"qualified-summon:\"") &&
+      contains(qualifiedSummonedFrom, ".label") &&
+      !contains(qualifiedSummonedFrom, "qualified-summon-fallback");
   const auto selectedLiteral = [&](std::string_view function,
                                    std::string_view selected,
                                    std::string_view unselected) {
@@ -1614,7 +1652,10 @@ object Main {
                     "indented-given:summoned-string\n"
                     "nested-indented-summon:summoned-int:summoned-long\n"
                     "nested-indented-inner-fallback:summoned-int\n"
-                    "nested-indented-outer-fallback\nordinary-shadow\n" &&
+                    "nested-indented-outer-fallback\n"
+                    "aliased-indented-summon:summoned-int\n"
+                    "aliased-indented-summon-fallback\n"
+                    "qualified-summon:summoned-long\nordinary-shadow\n" &&
       !invalid.ok &&
       contains(invalid.diagnosticsText, "failure: boom") &&
       contains(invalid.diagnosticsText, "aliased: boom") &&
@@ -1822,7 +1863,13 @@ object Main {
                       "', nested-indented-inner-fallback='" +
                       std::string(nestedIndentedInnerFallback) +
                       "', nested-indented-outer-fallback='" +
-                      std::string(nestedIndentedOuterFallback) + "')");
+                      std::string(nestedIndentedOuterFallback) +
+                      "', aliased-indented-summoned='" +
+                      std::string(aliasedIndentedSummoned) +
+                      "', aliased-indented-summon-fallback='" +
+                      std::string(aliasedIndentedSummonFallback) +
+                      "', qualified-summoned-from='" +
+                      std::string(qualifiedSummonedFrom) + "')");
 }
 
 } // namespace

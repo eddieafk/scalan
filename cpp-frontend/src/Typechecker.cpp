@@ -2592,6 +2592,14 @@ void Typechecker::addRuntimeBuiltins(Scope& scope) {
   summonInline.typeParameters.push_back(std::move(summonedType));
   globalSymbols_[summonInline.symbolName] = std::move(summonInline);
 
+  SymbolInfo summonFrom;
+  summonFrom.kind = AstDeclarationKind::Def;
+  summonFrom.name = std::string(support::StdNames::SummonFrom);
+  summonFrom.symbolName =
+      std::string(support::StdNames::ScalaCompiletimeSummonFrom);
+  summonFrom.type = TypeInfo{SimpleTypeKind::Object, "Object"};
+  globalSymbols_[summonFrom.symbolName] = std::move(summonFrom);
+
   SymbolInfo notImplemented;
   notImplemented.kind = AstDeclarationKind::Def;
   notImplemented.name = std::string(support::StdNames::NotImplemented);

@@ -1,5 +1,8 @@
 package examples.inlinesummonfrom
 
+import scala.compiletime.summonFrom
+import scala.compiletime.{summonFrom => contextualChoice}
+
 trait Named[A] {
   def label(): String
 }
@@ -44,7 +47,7 @@ object Selectors {
   inline def nested[A]: String = "nested:" + selected[A]
 
   inline def decorated[A](value: String): String =
-    summonFrom {
+    contextualChoice {
       case found: Named[A] =>
         prefix + found.label() + ":" + value + ":" + value
       case _ => "fallback:" + value + ":" + value
@@ -56,10 +59,9 @@ object Selectors {
   inline def passed[A](value: A): A = value
 
   inline def inferredSelected[A](value: A): String =
-    summonFrom {
+    scala.compiletime.summonFrom:
       case found: Named[A] => prefix + found.label()
       case _ => "inferred-fallback"
-    }
 
   inline def inferredNull[A](): A = null
 
