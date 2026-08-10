@@ -28,6 +28,9 @@ struct StdNames final {
   inline static constexpr std::string_view SummonFrom = "summonFrom";
   inline static constexpr std::string_view ScalaCompiletimeSummonFrom =
       "scala.compiletime.summonFrom";
+  inline static constexpr std::string_view Uninitialized = "uninitialized";
+  inline static constexpr std::string_view ScalaCompiletimeUninitialized =
+      "scala.compiletime.uninitialized";
   inline static constexpr std::string_view JavaLangObject = "java.lang.Object";
   inline static constexpr std::string_view JavaLangThrowable = "java.lang.Throwable";
   inline static constexpr std::string_view JavaLangError = "java.lang.Error";

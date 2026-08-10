@@ -850,6 +850,12 @@ bool isCodeOfCallee(const frontend::AstExpression& expression,
                              support::StdNames::ScalaCompiletimeCodeOf);
 }
 
+bool isUninitializedExpression(const frontend::AstExpression& expression,
+                               const ValueContext& context) {
+  return isCompiletimeCallee(
+      expression, context, support::StdNames::ScalaCompiletimeUninitialized);
+}
+
 bool isCompiletimeErrorCallee(const frontend::AstExpression& expression,
                               const ValueContext& context) {
   return isCompiletimeCallee(expression, context,
@@ -1830,6 +1836,39 @@ std::string literalTypeFor(const frontend::AstExpression& expression) {
   }
 }
 
+nir::Value uninitializedValueFor(const frontend::TypeInfo& type,
+                                 support::SourceSpan span) {
+  using frontend::SimpleTypeKind;
+  const std::string runtimeType = runtimeTypeName(type);
+  switch (type.kind) {
+  case SimpleTypeKind::Unit:
+    return nir::unitValue(span);
+  case SimpleTypeKind::Boolean:
+    return nir::literalValue("false", "Boolean", span);
+  case SimpleTypeKind::Byte:
+  case SimpleTypeKind::Short:
+  case SimpleTypeKind::Int:
+    return nir::literalValue("0", runtimeType, span);
+  case SimpleTypeKind::Long:
+    return nir::literalValue("0L", "Long", span);
+  case SimpleTypeKind::Float:
+    return nir::literalValue("0.0F", "Float", span);
+  case SimpleTypeKind::Double:
+    return nir::literalValue("0.0", "Double", span);
+  case SimpleTypeKind::Char:
+    return nir::literalValue("'\\0'", "Char", span);
+  case SimpleTypeKind::String:
+  case SimpleTypeKind::Symbol:
+  case SimpleTypeKind::Null:
+  case SimpleTypeKind::Object:
+    return nir::literalValue("null", runtimeType, span);
+  case SimpleTypeKind::Unknown:
+  case SimpleTypeKind::Nothing:
+    return nir::literalValue("null", "Object", span);
+  }
+  return nir::literalValue("null", "Object", span);
+}
+
 std::string runtimeToStringName(frontend::SimpleTypeKind kind) {
   switch (kind) {
   case frontend::SimpleTypeKind::Boolean:
@@ -2320,6 +2359,12 @@ nir::Value valueFor(const frontend::AstExpression& expression,
           inlineApplicationFor(expression, context)) {
     return inlineApplicationValueFor(*application, context);
   }
+  if (isUninitializedExpression(expression, context)) {
+    if (const frontend::TypeInfo* type = annotatedTypeFor(expression, context)) {
+      return uninitializedValueFor(*type, expression.span);
+    }
+    return nir::literalValue("null", "Object", expression.span);
+  }
 
   switch (expression.kind) {
   case AstExpressionKind::Empty:
@@ -2419,13 +2464,18 @@ nir::Value valueFor(const frontend::AstExpression& expression,
               ? nullptr
               : findDeclarationBySymbol(*context.declarations, context.currentOwner);
       if (selectedDeclaration != nullptr && owner != nullptr &&
-          owner->kind == frontend::AstDeclarationKind::Object &&
-          (selectedDeclaration->kind == frontend::AstDeclarationKind::Val ||
-           selectedDeclaration->kind == frontend::AstDeclarationKind::Var)) {
-        return nir::callValue(
-            nir::localValue(context.currentOwner + "." + selectedDeclaration->name,
-                            expression.span),
-            {}, expression.span);
+          owner->kind == frontend::AstDeclarationKind::Object) {
+        if (selectedDeclaration->kind == frontend::AstDeclarationKind::Def &&
+            expression.text == support::StdNames::Uninitialized) {
+          return nir::localValue(selectedDeclaration->symbolName, expression.span);
+        }
+        if (selectedDeclaration->kind == frontend::AstDeclarationKind::Val ||
+            selectedDeclaration->kind == frontend::AstDeclarationKind::Var) {
+          return nir::callValue(
+              nir::localValue(context.currentOwner + "." + selectedDeclaration->name,
+                              expression.span),
+              {}, expression.span);
+        }
       }
     }
     return nir::localValue(resolveIdentifierName(expression.text, context),

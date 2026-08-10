@@ -1759,6 +1759,8 @@ TypedModule Typechecker::typecheck(const AstModule& module) {
   inlineExpansionDepth_ = 0;
   erasedValueSelectorDepth_ = 0;
   inlineDefinitionDepth_ = 0;
+  allowedUninitializedExpression_ = nullptr;
+  allowedUninitializedType_ = TypeInfo{};
   TypedModule typed;
   typed.packageName = module.packageName;
   Scope scope;
@@ -1997,9 +1999,33 @@ TypedDeclaration Typechecker::typecheckDeclaration(const AstDeclaration& declara
       if (inlineDefinition) {
         ++inlineDefinitionDepth_;
       }
+      const AstExpression* previousUninitializedExpression =
+          allowedUninitializedExpression_;
+      TypeInfo previousUninitializedType = allowedUninitializedType_;
+      const bool uninitializedInitializer =
+          isUninitializedExpression(declaration.initializer, expressionScope);
+      if (uninitializedInitializer) {
+        const auto enclosing = globalSymbols_.find(owner);
+        const bool mutableField =
+            declaration.kind == AstDeclarationKind::Var &&
+            enclosing != globalSymbols_.end() &&
+            (enclosing->second.kind == AstDeclarationKind::Class ||
+             enclosing->second.kind == AstDeclarationKind::Object);
+        if (mutableField) {
+          allowedUninitializedExpression_ = &declaration.initializer;
+          allowedUninitializedType_ = declared;
+          if (declared.kind == SimpleTypeKind::Unknown) {
+            diagnostics_.error(
+                declaration.initializer.span,
+                "uninitialized field requires an explicit declared type");
+          }
+        }
+      }
       inferred = inferExpressionType(
           declaration.initializer, expressionScope,
           declared.kind == SimpleTypeKind::Unknown ? nullptr : &declared);
+      allowedUninitializedExpression_ = previousUninitializedExpression;
+      allowedUninitializedType_ = std::move(previousUninitializedType);
       if (inlineDefinition) {
         --inlineDefinitionDepth_;
       }
@@ -2589,6 +2615,14 @@ void Typechecker::addRuntimeBuiltins(Scope& scope) {
   codeOf.contextualParameterClauses = {false};
   codeOf.isTransparent = true;
   globalSymbols_[codeOf.symbolName] = std::move(codeOf);
+
+  SymbolInfo uninitialized;
+  uninitialized.kind = AstDeclarationKind::Def;
+  uninitialized.name = std::string(support::StdNames::Uninitialized);
+  uninitialized.symbolName =
+      std::string(support::StdNames::ScalaCompiletimeUninitialized);
+  uninitialized.type = TypeInfo{SimpleTypeKind::Nothing, "Nothing"};
+  globalSymbols_[uninitialized.symbolName] = std::move(uninitialized);
 
   SymbolInfo constValue;
   constValue.kind = AstDeclarationKind::Def;
@@ -5072,6 +5106,36 @@ bool Typechecker::isCodeOfCallee(const AstExpression& expression,
   return path.has_value() && *path == support::StdNames::ScalaCompiletimeCodeOf;
 }
 
+bool Typechecker::isUninitializedExpression(const AstExpression& expression,
+                                            const Scope& scope) const {
+  if (expression.kind == AstExpressionKind::Identifier) {
+    const auto symbol = scope.find(expression.text);
+    return symbol != scope.end() &&
+           symbol->second.symbolName ==
+               support::StdNames::ScalaCompiletimeUninitialized;
+  }
+
+  std::function<std::optional<std::string>(const AstExpression&)> qualifiedPath;
+  qualifiedPath = [&](const AstExpression& candidate)
+      -> std::optional<std::string> {
+    if (candidate.kind == AstExpressionKind::Identifier) {
+      return candidate.text;
+    }
+    if (candidate.kind != AstExpressionKind::Select ||
+        candidate.children.size() != 1) {
+      return std::nullopt;
+    }
+    std::optional<std::string> receiver =
+        qualifiedPath(candidate.children.front());
+    return receiver.has_value()
+               ? std::optional<std::string>(*receiver + "." + candidate.text)
+               : std::nullopt;
+  };
+  const std::optional<std::string> path = qualifiedPath(expression);
+  return path.has_value() &&
+         *path == support::StdNames::ScalaCompiletimeUninitialized;
+}
+
 bool Typechecker::isRequireConstCallee(const AstExpression& expression,
                                        const Scope& scope) const {
   if (expression.kind == AstExpressionKind::Identifier) {
@@ -6409,6 +6473,16 @@ bool Typechecker::arrayElementConforms(const TypeInfo& expected,
 TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
                                               Scope& scope,
                                               const TypeInfo* expectedType) {
+  if (isUninitializedExpression(expression, scope)) {
+    if (allowedUninitializedExpression_ != &expression) {
+      diagnostics_.error(
+          expression.span,
+          "uninitialized may only initialize a mutable class or object field");
+      return TypeInfo{SimpleTypeKind::Nothing, "Nothing"};
+    }
+    return allowedUninitializedType_;
+  }
+
   switch (expression.kind) {
   case AstExpressionKind::Empty:
     return TypeInfo{SimpleTypeKind::Unknown, "Unknown"};
@@ -6845,6 +6919,14 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
   case AstExpressionKind::Call: {
     if (expression.children.empty()) {
       return TypeInfo{SimpleTypeKind::Unknown, "Unknown"};
+    }
+    if (isUninitializedExpression(expression.children.front(), scope)) {
+      for (std::size_t index = 1; index < expression.children.size(); ++index) {
+        (void)inferExpressionType(expression.children[index], scope);
+      }
+      diagnostics_.error(expression.span,
+                         "uninitialized must be used without an argument list");
+      return TypeInfo{SimpleTypeKind::Nothing, "Nothing"};
     }
     if (isCodeOfCallee(expression.children.front(), scope)) {
       TypeInfo result{SimpleTypeKind::String, "String"};

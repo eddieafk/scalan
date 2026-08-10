@@ -134,6 +134,11 @@ build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
 # qualified, specialized-inline, and nested-inline calls become String literals
 # in caller NIR, and those literals can contribute to `compiletime.error`
 # messages.
+# Compiler-owned `scala.compiletime.uninitialized` is accepted only as the
+# complete initializer of an explicitly typed mutable class or object field.
+# Canonical, renamed, and qualified spellings emit that field type's zero value
+# (`null`, numeric zero, or `false`) directly in initializer NIR and leave no
+# runtime intrinsic behind.
 # Compiler-owned `scala.compiletime.error(message)` supports literal, aliased,
 # and concatenated constant String messages. Calls inside inline definitions
 # are deferred to specialization and report only when the selected expansion
@@ -163,6 +168,10 @@ build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
 build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
   --output /tmp/compiletime-constants \
   cpp-examples/CompiletimeConstants.scala
+
+build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
+  --output /tmp/compiletime-uninitialized \
+  cpp-examples/CompiletimeUninitialized.scala
 
 build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
   --output /tmp/compiletime-summon-inline \

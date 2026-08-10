@@ -1146,6 +1146,17 @@ Current scaffold status:
   concatenation for `compiletime.error`, and reach caller NIR without the
   intrinsic or argument evaluation. Runtime, diagnostic, import-resolution,
   nested-specialization, and NIR-erasure coverage remains in `SmokeTests6.cpp`.
+  Compiler-owned `scala.compiletime.uninitialized` now supplies bulk-zero
+  initialization for mutable class and object fields with explicit declared
+  types. Exact imports, aliases, and the qualified spelling are recognized;
+  immutable fields, trait or top-level fields, method results, local variables,
+  inferred field types, and an applied `uninitialized()` form receive focused
+  diagnostics. The NIR emitter replaces valid uses with the declared type's
+  `null`, numeric zero, zero character, or `false` literal in the generated
+  `$init`, so no callable intrinsic reaches LLVM. `SmokeTests6.cpp` covers
+  generic/reference/scalar fields, mutation, shadowing, diagnostics, runtime
+  output, and NIR erasure, while `cpp-examples/CompiletimeUninitialized.scala`
+  provides a compact public example.
   Compiler-owned `scala.compiletime.error(message)` now emits user-defined
   diagnostics when a call survives inline expansion. Exact imports, aliases,
   and the qualified spelling resolve to the intrinsic. Literal Strings,

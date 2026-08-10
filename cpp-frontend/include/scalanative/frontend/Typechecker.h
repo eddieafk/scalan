@@ -281,6 +281,8 @@ private:
                                             const Scope& scope) const;
   [[nodiscard]] bool isCodeOfCallee(const AstExpression& expression,
                                     const Scope& scope) const;
+  [[nodiscard]] bool isUninitializedExpression(
+      const AstExpression& expression, const Scope& scope) const;
   [[nodiscard]] bool isCompiletimeErrorCallee(const AstExpression& expression,
                                               const Scope& scope) const;
   [[nodiscard]] bool isRequireConstCallee(const AstExpression& expression,
@@ -481,6 +483,8 @@ private:
   std::size_t inlineExpansionDepth_ = 0;
   std::size_t erasedValueSelectorDepth_ = 0;
   std::size_t inlineDefinitionDepth_ = 0;
+  const AstExpression* allowedUninitializedExpression_ = nullptr;
+  TypeInfo allowedUninitializedType_;
 };
 
 [[nodiscard]] const char* simpleTypeKindName(SimpleTypeKind kind);

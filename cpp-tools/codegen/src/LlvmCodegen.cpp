@@ -3634,6 +3634,8 @@ int decodedCharLiteral(std::string_view text) {
     return '\\';
   case '\'':
     return '\'';
+  case '0':
+    return 0;
   default:
     return -1;
   }

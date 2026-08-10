@@ -64,6 +64,8 @@ import scala.compiletime.summonInline
 import scala.compiletime.{summonInline => inlineSummon}
 import scala.compiletime.summonFrom
 import scala.compiletime.{summonFrom => contextualChoice}
+import scala.compiletime.uninitialized
+import scala.compiletime.{uninitialized => zeroed}
 
 trait ErasedResult {
   def text(): String
@@ -95,6 +97,22 @@ trait Named[A] {
 
 class NamedValue[A](val value: String) extends Named[A] {
   def label(): String = value
+}
+
+class UninitializedBox[A] {
+  var value: A = uninitialized
+  var count: Int = zeroed
+  var enabled: Boolean = scala.compiletime.uninitialized
+  var byteValue: Byte = uninitialized
+  var shortValue: Short = zeroed
+  var longValue: Long = uninitialized
+  var floatValue: Float = uninitialized
+  var doubleValue: Double = uninitialized
+  var charValue: Char = uninitialized
+}
+
+object UninitializedState {
+  var label: String = uninitialized
 }
 
 object TypeKinds {
@@ -500,7 +518,9 @@ object TypeKinds {
 
 object Shadowing {
   def summonInline[A](): String = "ordinary-shadow"
+  def uninitialized(): String = "ordinary-uninitialized"
   def value: String = summonInline[Int]()
+  def uninitializedValue: String = uninitialized()
 }
 
 object Main {
@@ -659,6 +679,21 @@ object Main {
     TypeKinds.nestedExpressionCode(runtimeNumber() * 5)
   def qualifiedCode: String =
     TypeKinds.qualifiedExpressionCode(new Other)
+  def uninitializedDefaults: String = {
+    val box = new UninitializedBox[Any]();
+    (box.value == null).toString + ":" + box.count.toString + ":" +
+      box.enabled.toString + ":" + box.byteValue.toString + ":" +
+      box.shortValue.toString + ":" + box.longValue.toString + ":" +
+      box.floatValue.toString + ":" + box.doubleValue.toString + ":" +
+      (UninitializedState.label == null).toString
+  }
+  def assignedUninitializedFields: String = {
+    val box = new UninitializedBox[String]();
+    box.value = "assigned"
+    box.count = 7
+    box.enabled = true
+    box.value + ":" + box.count.toString + ":" + box.enabled.toString
+  }
   def stringName: String = TypeKinds.nameOf[String]
   def intName: String = TypeKinds.nameOf[Int]
   def longName: String = TypeKinds.nameOf[Long]
@@ -805,6 +840,8 @@ object Main {
     println(aliasedCode)
     println(nestedCode)
     println(qualifiedCode)
+    println(uninitializedDefaults)
+    println(assignedUninitializedFields)
     println(stringName)
     println(intName)
     println(longName)
@@ -850,6 +887,7 @@ object Main {
     println(aliasedIndentedSummonFallback)
     println(qualifiedSummonedFrom)
     println(Shadowing.value)
+    println(Shadowing.uninitializedValue)
   }
 }
 )";
@@ -865,15 +903,37 @@ import scala.compiletime.requireConst
 import scala.compiletime.{requireConst => ensureConst}
 import scala.compiletime.summonInline
 import scala.compiletime.{summonInline => inlineSummon}
+import scala.compiletime.uninitialized
+import scala.compiletime.{uninitialized => zeroed}
 
 trait Named[A]
 class NamedValue[A] extends Named[A]
+
+var invalidTopLevel: Int = uninitialized
+
+trait InvalidTraitField {
+  var value: Int = uninitialized
+}
+
+class InvalidImmutableField {
+  val value: String = zeroed
+}
 
 object Main {
   given firstLongNamed: Named[Long] = new NamedValue[Long]
   given secondLongNamed: Named[Long] = new NamedValue[Long]
 
   inline val errorPrefix = "aliased: "
+
+  var inferredField = uninitialized
+  var calledField: Int = uninitialized()
+
+  def invalidMethodResult: Int = scala.compiletime.uninitialized
+
+  def invalidLocal(): Int = {
+    var local: Int = uninitialized
+    local
+  }
 
   inline def fail(inline message: String): Nothing =
     compiletimeError("failure: " + message)
@@ -1417,6 +1477,12 @@ object Main {
       result.nirText, "demo.inlineerased.Main.aliasedIndentedSummonFallback");
   const std::string_view qualifiedSummonedFrom = functionText(
       result.nirText, "demo.inlineerased.Main.qualifiedSummonedFrom");
+  const std::string_view uninitializedBoxInit = functionText(
+      result.nirText, "demo.inlineerased.UninitializedBox.$init");
+  const std::string_view uninitializedStateInit = functionText(
+      result.nirText, "demo.inlineerased.UninitializedState.$init");
+  const std::string_view ordinaryUninitialized = functionText(
+      result.nirText, "demo.inlineerased.Shadowing.uninitializedValue");
 
   const auto fullyReduced = [](std::string_view function) {
     return !function.empty() && !contains(function, "$match") &&
@@ -1426,8 +1492,26 @@ object Main {
            !contains(function, "requireConst") &&
            !contains(function, "constValue") &&
            !contains(function, "erasedValue") &&
-           !contains(function, "summonInline") && !contains(function, "TypeKinds.");
+           !contains(function, "summonInline") &&
+           !contains(function, "scala.compiletime.uninitialized") &&
+           !contains(function, "TypeKinds.");
   };
+  const bool uninitializedReduced =
+      !uninitializedBoxInit.empty() &&
+      !contains(uninitializedBoxInit, "scala.compiletime.uninitialized") &&
+      contains(uninitializedBoxInit, "null") &&
+      contains(uninitializedBoxInit, "false") &&
+      contains(uninitializedBoxInit, "0L") &&
+      contains(uninitializedBoxInit, "0.0F") &&
+      contains(uninitializedBoxInit, "0.0") &&
+      contains(uninitializedBoxInit, "'\\0'") &&
+      !uninitializedStateInit.empty() &&
+      !contains(uninitializedStateInit, "scala.compiletime.uninitialized") &&
+      contains(uninitializedStateInit, "null") &&
+      !ordinaryUninitialized.empty() &&
+      contains(ordinaryUninitialized,
+               "demo.inlineerased.Shadowing.uninitialized()") &&
+      !contains(ordinaryUninitialized, "scala.compiletime.uninitialized");
   const bool constantsReduced =
       fullyReduced(directConstant) && contains(directConstant, "11") &&
       fullyReduced(intConstant) && contains(intConstant, "42") &&
@@ -1796,6 +1880,8 @@ object Main {
                     "requirement-skipped\n"
                     "runtimeNumber() + 2\nruntimeNumber() + 3\n"
                     "runtimeNumber() - 4\nruntimeNumber() * 5\nnew Other\n"
+                    "true:0:false:0:0:0:0.000000:0.000000:true\n"
+                    "assigned:7:true\n"
                     "string\nint\nlong\nother\nalias-string\n"
                     "alias-other\n"
                     "precise\nfallback\nalternative-string-int\n"
@@ -1818,8 +1904,20 @@ object Main {
                     "nested-indented-outer-fallback\n"
                     "aliased-indented-summon:summoned-int\n"
                     "aliased-indented-summon-fallback\n"
-                    "qualified-summon:summoned-long\nordinary-shadow\n" &&
+                    "qualified-summon:summoned-long\nordinary-shadow\n"
+                    "ordinary-uninitialized\n" &&
       !invalid.ok &&
+      countOccurrences(
+          invalid.diagnosticsText,
+          "uninitialized may only initialize a mutable class or object field") ==
+          5 &&
+      countOccurrences(
+          invalid.diagnosticsText,
+          "uninitialized field requires an explicit declared type") == 1 &&
+      countOccurrences(
+          invalid.diagnosticsText,
+          "uninitialized must be used without an argument list") == 1 &&
+      uninitializedReduced &&
       contains(invalid.diagnosticsText, "failure: boom") &&
       contains(invalid.diagnosticsText, "aliased: boom") &&
       contains(invalid.diagnosticsText, "false branch") &&
@@ -2047,7 +2145,13 @@ object Main {
                       "', aliased-indented-summon-fallback='" +
                       std::string(aliasedIndentedSummonFallback) +
                       "', qualified-summoned-from='" +
-                      std::string(qualifiedSummonedFrom) + "')");
+                      std::string(qualifiedSummonedFrom) +
+                      "', uninitialized-box-init='" +
+                      std::string(uninitializedBoxInit) +
+                      "', uninitialized-state-init='" +
+                      std::string(uninitializedStateInit) +
+                      "', ordinary-uninitialized='" +
+                      std::string(ordinaryUninitialized) + "')");
 }
 
 } // namespace
