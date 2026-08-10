@@ -5095,23 +5095,25 @@ Typechecker::constantBooleanValue(const AstExpression& expression,
       return std::nullopt;
     }
     {
-      if (expression.text == "&&" || expression.text == "||" ||
-          expression.text == "==" || expression.text == "!=") {
+      if (expression.text == "&&" || expression.text == "||") {
+        const std::optional<bool> left =
+            constantBooleanValue(expression.children.front(), scope);
+        if (!left.has_value()) {
+          return std::nullopt;
+        }
+        if ((expression.text == "&&" && !*left) ||
+            (expression.text == "||" && *left)) {
+          return *left;
+        }
+        return constantBooleanValue(expression.children.back(), scope);
+      }
+      if (expression.text == "==" || expression.text == "!=") {
         const std::optional<bool> left =
             constantBooleanValue(expression.children.front(), scope);
         const std::optional<bool> right =
             constantBooleanValue(expression.children.back(), scope);
         if (left.has_value() && right.has_value()) {
-          if (expression.text == "&&") {
-            return *left && *right;
-          }
-          if (expression.text == "||") {
-            return *left || *right;
-          }
-          if (expression.text == "==") {
-            return *left == *right;
-          }
-          return *left != *right;
+          return expression.text == "==" ? *left == *right : *left != *right;
         }
       }
 

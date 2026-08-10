@@ -163,6 +163,14 @@ object TypeKinds {
       case _ => new FallbackResult("floating-fallback-result")
     }
 
+  inline def guardedIntegerChoice(
+      inline value: Int,
+      inline enabled: Boolean): String =
+    inline value match {
+      case 7 if enabled => "guarded-seven"
+      case _ => "guarded-fallback"
+    }
+
   inline def requireSeven[N](inline message: String): String =
     inline constValue[N] match {
       case 7 => "accepted-seven"
@@ -199,6 +207,26 @@ object TypeKinds {
     inline scala.compiletime.erasedValue[T] match {
       case _: String => new PreciseResult("precise")
       case _ => new FallbackResult("fallback")
+    }
+
+  transparent inline def alternativeNameOf[T]: String =
+    inline erasedValue[T] match {
+      case _: String | _: Int => "alternative-string-int"
+      case _: Long | _: Double => "alternative-number"
+      case _ => "alternative-other"
+    }
+
+  transparent inline def guardedAlternativeNameOf[T](
+      inline enabled: Boolean): String =
+    inline erasedValue[T] match {
+      case _: String | _: Int if enabled => "guarded-alternative"
+      case _ => "guarded-alternative-fallback"
+    }
+
+  transparent inline def alternativeResult[T]: ErasedResult =
+    inline erasedValue[T] match {
+      case _: String | _: Int => new PreciseResult("alternative-precise")
+      case _ => new FallbackResult("alternative-fallback")
     }
 
   transparent inline def stringChoice[S]: String =
@@ -272,6 +300,8 @@ object Main {
   given stringEvidence: Named[String] = new NamedValue[String]("summoned-string")
   given longEvidence: Named[Long] = new NamedValue[Long]("summoned-long")
 
+  def runtimeGuard(): Boolean = true
+
   def directConstant: Int = constValue[11]
   def intConstant: Int = TypeKinds.valueOf[42]
   def longConstant: Long = TypeKinds.qualifiedValueOf[9000000000L]
@@ -297,6 +327,9 @@ object Main {
   def stableFloat: String = TypeKinds.stableFloatChoice
   def reducedFloatingCondition: String = TypeKinds.floatingCondition(2.5)
   def floatingPrecise: String = TypeKinds.floatingResult[7.5].preciseOnly()
+  def guardedSeven: String = TypeKinds.guardedIntegerChoice(7, true)
+  def guardedFallback: String = TypeKinds.guardedIntegerChoice(7, false)
+  def guardedSkipped: String = TypeKinds.guardedIntegerChoice(8, runtimeGuard())
   def acceptedSeven: String = TypeKinds.requireSeven[7]("ignored-seven")
   def acceptedTrue: String = TypeKinds.qualifiedRequire[true]("ignored-true")
   def acceptedCondition: String =
@@ -309,6 +342,18 @@ object Main {
   def aliasOtherName: String = TypeKinds.aliasNameOf[Other]
   def preciseResult: String = TypeKinds.resultFor[String].preciseOnly()
   def fallbackResult: String = TypeKinds.resultFor[Other].fallbackOnly()
+  def alternativeString: String = TypeKinds.alternativeNameOf[String]
+  def alternativeInt: String = TypeKinds.alternativeNameOf[Int]
+  def alternativeDouble: String = TypeKinds.alternativeNameOf[Double]
+  def alternativeOther: String = TypeKinds.alternativeNameOf[Other]
+  def guardedAlternative: String =
+    TypeKinds.guardedAlternativeNameOf[String](true)
+  def rejectedAlternative: String =
+    TypeKinds.guardedAlternativeNameOf[Int](false)
+  def skippedAlternative: String =
+    TypeKinds.guardedAlternativeNameOf[Other](runtimeGuard())
+  def alternativePrecise: String =
+    TypeKinds.alternativeResult[String].preciseOnly()
   def stringAlpha: String = TypeKinds.stringChoice["alpha"]
   def stringAlternative: String = TypeKinds.stringChoice["line\nbreak"]
   def stringFallback: String = TypeKinds.stringChoice["other"]
@@ -353,6 +398,9 @@ object Main {
     println(stableFloat)
     println(reducedFloatingCondition)
     println(floatingPrecise)
+    println(guardedSeven)
+    println(guardedFallback)
+    println(guardedSkipped)
     println(acceptedSeven)
     println(acceptedTrue)
     println(acceptedCondition)
@@ -364,6 +412,14 @@ object Main {
     println(aliasOtherName)
     println(preciseResult)
     println(fallbackResult)
+    println(alternativeString)
+    println(alternativeInt)
+    println(alternativeDouble)
+    println(alternativeOther)
+    println(guardedAlternative)
+    println(rejectedAlternative)
+    println(skippedAlternative)
+    println(alternativePrecise)
     println(stringAlpha)
     println(stringAlternative)
     println(stringFallback)
@@ -458,6 +514,7 @@ object Main {
   def runtimeChar(): Char = 'r'
   def runtimeDouble(): Double = 1.0
   def runtimeFloat(): Float = 1.0F
+  def runtimeBoolean(): Boolean = true
 
   inline def requiresStringMatch(inline value: String): String =
     inline value match {
@@ -483,10 +540,26 @@ object Main {
       case _ => "other"
     }
 
+  inline def requiresGuardedMatch(
+      inline value: Int,
+      inline enabled: Boolean): String =
+    inline value match {
+      case 1 if enabled => "known"
+      case _ => "other"
+    }
+
+  inline def requiresGuardedType[T](inline enabled: Boolean): String =
+    inline erasedValue[T] match {
+      case _: String | _: Int if enabled => "known"
+      case _ => "other"
+    }
+
   val unresolvedStringMatch = requiresStringMatch(runtimeString())
   val unresolvedCharMatch = requiresCharMatch(runtimeChar())
   val unresolvedDoubleMatch = requiresDoubleMatch(runtimeDouble())
   val unresolvedFloatMatch = requiresFloatMatch(runtimeFloat())
+  val unresolvedGuardedMatch = requiresGuardedMatch(1, runtimeBoolean())
+  val unresolvedGuardedType = requiresGuardedType[String](runtimeBoolean())
 
   val escaped = erasedValue[String]
   val qualifiedEscaped = scala.compiletime.erasedValue[Int]
@@ -607,6 +680,12 @@ object Main {
       result.nirText, "demo.inlineerased.Main.reducedFloatingCondition");
   const std::string_view floatingPrecise =
       functionText(result.nirText, "demo.inlineerased.Main.floatingPrecise");
+  const std::string_view guardedSeven =
+      functionText(result.nirText, "demo.inlineerased.Main.guardedSeven");
+  const std::string_view guardedFallback =
+      functionText(result.nirText, "demo.inlineerased.Main.guardedFallback");
+  const std::string_view guardedSkipped =
+      functionText(result.nirText, "demo.inlineerased.Main.guardedSkipped");
   const std::string_view acceptedSeven =
       functionText(result.nirText, "demo.inlineerased.Main.acceptedSeven");
   const std::string_view acceptedTrue =
@@ -627,6 +706,22 @@ object Main {
       functionText(result.nirText, "demo.inlineerased.Main.preciseResult");
   const std::string_view fallbackResult =
       functionText(result.nirText, "demo.inlineerased.Main.fallbackResult");
+  const std::string_view alternativeString =
+      functionText(result.nirText, "demo.inlineerased.Main.alternativeString");
+  const std::string_view alternativeInt =
+      functionText(result.nirText, "demo.inlineerased.Main.alternativeInt");
+  const std::string_view alternativeDouble =
+      functionText(result.nirText, "demo.inlineerased.Main.alternativeDouble");
+  const std::string_view alternativeOther =
+      functionText(result.nirText, "demo.inlineerased.Main.alternativeOther");
+  const std::string_view guardedAlternative =
+      functionText(result.nirText, "demo.inlineerased.Main.guardedAlternative");
+  const std::string_view rejectedAlternative =
+      functionText(result.nirText, "demo.inlineerased.Main.rejectedAlternative");
+  const std::string_view skippedAlternative =
+      functionText(result.nirText, "demo.inlineerased.Main.skippedAlternative");
+  const std::string_view alternativePrecise =
+      functionText(result.nirText, "demo.inlineerased.Main.alternativePrecise");
   const std::string_view stringAlpha =
       functionText(result.nirText, "demo.inlineerased.Main.stringAlpha");
   const std::string_view stringAlternative =
@@ -773,6 +868,38 @@ object Main {
       contains(stringPrecise, "demo.inlineerased.PreciseResult") &&
       contains(stringPrecise, ".preciseOnly") &&
       !contains(stringPrecise, "FallbackResult");
+  const bool guardedMatchesReduced =
+      selectedLiteral(guardedSeven, "\"guarded-seven\"", "guarded-fallback") &&
+      selectedLiteral(guardedFallback, "\"guarded-fallback\"",
+                      "guarded-seven") &&
+      selectedLiteral(guardedSkipped, "\"guarded-fallback\"",
+                      "guarded-seven") &&
+      !contains(guardedSkipped, "runtimeGuard") &&
+      fullyReduced(alternativeString) &&
+      contains(alternativeString, "\"alternative-string-int\"") &&
+      !contains(alternativeString, "alternative-other") &&
+      fullyReduced(alternativeInt) &&
+      contains(alternativeInt, "\"alternative-string-int\"") &&
+      !contains(alternativeInt, "alternative-other") &&
+      fullyReduced(alternativeDouble) &&
+      contains(alternativeDouble, "\"alternative-number\"") &&
+      !contains(alternativeDouble, "alternative-other") &&
+      fullyReduced(alternativeOther) &&
+      contains(alternativeOther, "\"alternative-other\"") &&
+      !contains(alternativeOther, "alternative-string-int") &&
+      fullyReduced(guardedAlternative) &&
+      contains(guardedAlternative, "\"guarded-alternative\"") &&
+      !contains(guardedAlternative, "guarded-alternative-fallback") &&
+      fullyReduced(rejectedAlternative) &&
+      contains(rejectedAlternative, "\"guarded-alternative-fallback\"") &&
+      !contains(rejectedAlternative, "\"guarded-alternative\"") &&
+      fullyReduced(skippedAlternative) &&
+      contains(skippedAlternative, "\"guarded-alternative-fallback\"") &&
+      !contains(skippedAlternative, "runtimeGuard") &&
+      fullyReduced(alternativePrecise) &&
+      contains(alternativePrecise, "demo.inlineerased.PreciseResult") &&
+      contains(alternativePrecise, ".preciseOnly") &&
+      !contains(alternativePrecise, "FallbackResult");
   const bool valid =
       status == 0 &&
       outputText == "11\n42\n9000000000\nliteral\ntrue\nx\nconstant-seven\n"
@@ -781,11 +908,17 @@ object Main {
                     "double-fallback\nfloat-exact\nfloat-alternative\n"
                     "float-fallback\ndouble-parameter\nfloat-parameter\n"
                     "stable-double\nstable-float\nfloating-condition\n"
-                    "floating-precise\naccepted-seven\naccepted-true\n"
+                    "floating-precise\nguarded-seven\nguarded-fallback\n"
+                    "guarded-fallback\naccepted-seven\naccepted-true\n"
                     "accepted-condition\n"
                     "string\nint\nlong\nother\nalias-string\n"
                     "alias-other\n"
-                    "precise\nfallback\nstring-alpha\nstring-alternative\n"
+                    "precise\nfallback\nalternative-string-int\n"
+                    "alternative-string-int\nalternative-number\n"
+                    "alternative-other\nguarded-alternative\n"
+                    "guarded-alternative-fallback\n"
+                    "guarded-alternative-fallback\nalternative-precise\n"
+                    "string-alpha\nstring-alternative\n"
                     "string-fallback\nchar-x\nchar-alternative\nchar-fallback\n"
                     "string-parameter\nchar-parameter\nstable-string\n"
                     "stable-char\nstring-precise\n"
@@ -826,6 +959,7 @@ object Main {
                "summonInline requires exactly one type argument") &&
       summonInlineReduced &&
       literalMatchesReduced &&
+      guardedMatchesReduced &&
       countOccurrences(invalid.diagnosticsText,
                        "constValue requires a constant singleton type") == 3 &&
       contains(invalid.diagnosticsText,
@@ -842,7 +976,7 @@ object Main {
       countOccurrences(
           invalid.diagnosticsText,
           "inline match selector must be reducible from a compile-time value or "
-          "static type") == 5 &&
+          "static type") == 7 &&
       fullyReduced(stringName) && contains(stringName, "\"string\"") &&
       !contains(stringName, "\"other\"") && fullyReduced(intName) &&
       contains(intName, "\"int\"") && fullyReduced(longName) &&
@@ -892,6 +1026,9 @@ object Main {
                       "', floating-condition='" +
                       std::string(reducedFloatingCondition) +
                       "', floating-precise='" + std::string(floatingPrecise) +
+                      "', guarded-seven='" + std::string(guardedSeven) +
+                      "', guarded-fallback='" + std::string(guardedFallback) +
+                      "', guarded-skipped='" + std::string(guardedSkipped) +
                       "', accepted-seven='" + std::string(acceptedSeven) +
                       "', accepted-true='" + std::string(acceptedTrue) +
                       "', accepted-condition='" +
@@ -903,6 +1040,20 @@ object Main {
                       "', alias-other-name='" + std::string(aliasOtherName) +
                       "', precise-result='" + std::string(preciseResult) +
                       "', fallback-result='" + std::string(fallbackResult) +
+                      "', alternative-string='" +
+                      std::string(alternativeString) +
+                      "', alternative-int='" + std::string(alternativeInt) +
+                      "', alternative-double='" +
+                      std::string(alternativeDouble) +
+                      "', alternative-other='" + std::string(alternativeOther) +
+                      "', guarded-alternative='" +
+                      std::string(guardedAlternative) +
+                      "', rejected-alternative='" +
+                      std::string(rejectedAlternative) +
+                      "', skipped-alternative='" +
+                      std::string(skippedAlternative) +
+                      "', alternative-precise='" +
+                      std::string(alternativePrecise) +
                       "', string-alpha='" + std::string(stringAlpha) +
                       "', string-alternative='" + std::string(stringAlternative) +
                       "', string-fallback='" + std::string(stringFallback) +

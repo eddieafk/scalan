@@ -2103,7 +2103,6 @@ AstExpression Parser::parseMatchExpression(AstExpression selector,
       };
       const bool supportedTypePattern =
           !current.typePattern.empty() &&
-          current.alternativeTypePatterns.empty() &&
           (current.isWildcard || !current.bindingName.empty());
       const bool supportedLiteralPattern =
           current.typePattern.empty() && !current.isWildcard &&
@@ -2113,16 +2112,17 @@ AstExpression Parser::parseMatchExpression(AstExpression selector,
       const bool supportedCatchAll =
           current.typePattern.empty() &&
           (current.isWildcard || !current.bindingName.empty());
-      if (current.hasGuard) {
+      if (current.hasGuard && !current.bindingName.empty()) {
         diagnostics_.error(current.pattern.span,
-                           "inline match guards are not supported yet");
+                           "inline match guards on binding patterns are not "
+                           "supported yet");
       }
       if (!supportedTypePattern && !supportedLiteralPattern &&
           !supportedCatchAll) {
         diagnostics_.error(
             current.pattern.span,
             "inline match currently supports Boolean, integer, floating-point, "
-            "String, and Char literals, one unguarded type pattern per case, and "
+            "String, and Char literals, wildcard type-pattern alternatives, and "
             "a final wildcard or binding");
       }
     }
@@ -2159,7 +2159,7 @@ AstExpression Parser::parseMatchExpression(AstExpression selector,
                    [&](const MatchCase& current) { return !isCatchAll(current); })) {
     diagnostics_.error(
         keyword.span,
-        "inline match requires at least one literal case before its catch-all");
+        "inline match requires at least one reducible case before its catch-all");
   }
 
   const std::string selectorName = "$match" + std::to_string(nextSyntheticLocal_++);

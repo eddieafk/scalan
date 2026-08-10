@@ -1039,8 +1039,9 @@ Current scaffold status:
   String, and Char arguments for both ordinary and inline parameters. An
   ordinary `if` formed from those values is opportunistically reduced, while
   `inline if` requires a constant condition and diagnoses a dynamic one.
-  Boolean conditions support `!`, `&&`, `||`, `==`, and `!=`. `Byte`, `Short`,
-  `Int`, and `Long` constants propagate
+  Boolean conditions support `!`, `&&`, `||`, `==`, and `!=`; `&&` and `||`
+  fold in left-to-right short-circuit order. `Byte`, `Short`, `Int`, and `Long`
+  constants propagate
   through unary `+`/`-`, checked `+`, `-`, `*`, `/`, and `%` arithmetic, and
   `==`, `!=`, `<`, `>`, `<=`, and `>=` comparisons. Overflow and zero divisors
   do not fold. Float and Double literals, including unary signs, participate in
@@ -1054,21 +1055,25 @@ Current scaffold status:
   Braced Scala 3 `inline match` expressions reuse the ordinary match lowering
   for compile-time Boolean, integer, Float, Double, String, and Char selectors.
   Ordered scalar/String/Char literal cases, literal alternatives, and a required
-  final wildcard or binding are supported; each lowered case has
-  distinct branch-selection metadata and only the selected body reaches NIR.
-  A dynamic selector is rejected during call-site specialization. One unguarded type
-  pattern per case can also be reduced from a call-site static type. Positive
-  subtype tests, exact boxed scalar/String tests (without numeric widening), and
-  provably disjoint concrete-class tests are selected conservatively; a broad,
-  abstract, composite, or otherwise overlapping static type remains
-  non-reducible. Pattern bindings retain their narrowed type, so transparent
-  inline calls can expose a selected concrete result API without emitting a
-  runtime test. Float, Double, String, and Char selectors can come from
+  final wildcard or binding are supported; each lowered case has distinct
+  branch-selection metadata and only the selected body reaches NIR. A reducible
+  Boolean guard can further constrain literal, wildcard, or wildcard type cases.
+  Ordered short-circuiting means a guard on a nonmatching case need not itself be
+  constant. A dynamic selected guard or selector is rejected during call-site
+  specialization. Individual type patterns and wildcard type-pattern
+  alternatives can be reduced from a call-site static type. Positive subtype
+  tests, exact boxed scalar/String tests (without numeric widening), and provably
+  disjoint concrete-class tests are selected conservatively; a broad, abstract,
+  composite, or otherwise overlapping static type remains non-reducible.
+  Pattern bindings retain their narrowed type, so transparent inline calls can
+  expose a selected concrete result API without emitting a runtime test. Float,
+  Double, String, and Char selectors can come from
   singleton `constValue` results, inline parameters, or stable inline values;
   floating-point spellings compare by their narrowed scalar value and escaped
-  text literals compare by decoded value. Guards, type-pattern alternatives,
-  singleton-value patterns, `null`, and indentation-only match syntax remain
-  later milestones and receive focused diagnostics where applicable.
+  text literals compare by decoded value. Guards that require selector bindings,
+  bound type-pattern alternatives, singleton-value patterns, `null`, and
+  indentation-only match syntax remain later milestones and receive focused
+  diagnostics where applicable.
   Compiler-owned `scala.compiletime.erasedValue[T]` can now provide the static
   selector for the same bounded type-pattern reduction. Exact imports, import
   aliases, and the qualified spelling are recognized. The frontend re-resolves
@@ -1079,7 +1084,8 @@ Current scaffold status:
   runtime type tests, and the intrinsic itself are absent. Focused coverage is
   isolated in `SmokeTests6.cpp` to preserve incremental harness build times and
   exercises reference/scalar/fallback selection, aliased and qualified forms,
-  transparent-result refinement, runtime output, diagnostics, and NIR erasure.
+  transparent-result refinement, guarded wildcard alternatives, runtime output,
+  diagnostics, and NIR erasure.
   Compiler-owned `scala.compiletime.constValue[T]` now materializes Boolean,
   Int, Long, Float, Double, String, and Char singleton types as typed literals.
   Exact imports, aliases, and the qualified spelling resolve to the intrinsic;

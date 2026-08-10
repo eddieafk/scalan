@@ -98,9 +98,11 @@ build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
 # expansion. Braced `inline match` expressions reduce ordered Boolean, integer,
 # Float, Double, String, and Char literal cases, literal alternatives, and a final
 # wildcard or binding at the call site, including escaped literals and stable
-# inline selectors.
-# Unguarded type patterns also reduce from call-site static types, including
-# boxed scalar tests and transparent-inline result refinement.
+# inline selectors. Compile-time guards use ordered short-circuit reduction, so
+# a guard belonging to a nonmatching case need not itself be constant.
+# Type patterns and wildcard type-pattern alternatives reduce from call-site
+# static types, including boxed scalar tests and transparent-inline result
+# refinement.
 # Compiler-owned `scala.compiletime.erasedValue[T]`, through its canonical
 # import (including aliases) or qualified name, drives generic type-only inline
 # matches without materializing a selector in expanded caller NIR.

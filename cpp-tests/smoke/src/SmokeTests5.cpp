@@ -950,9 +950,15 @@ class UnsupportedInlineValueOwner {
       R"(package demo.invalidinlinematchparser
 
 object Main {
-  inline def guarded(inline value: Int): String =
+  inline def bindingGuard(inline value: Int): String =
     inline value match {
-      case 0 if true => "zero"
+      case selected if selected == 0 => "zero"
+      case _ => "other"
+    }
+
+  inline def boundAlternative(inline value: Object): String =
+    inline value match {
+      case selected: String | _: Int => "selected"
       case _ => "other"
     }
 
@@ -1385,10 +1391,12 @@ object Main {
                "'inline' must modify a def or val in this milestone") &&
       !inlineMatchParserInvalid.ok &&
       contains(inlineMatchParserInvalid.diagnosticsText,
-               "inline match guards are not supported yet") &&
+               "inline match guards on binding patterns are not supported yet") &&
+      contains(inlineMatchParserInvalid.diagnosticsText,
+               "match type pattern alternatives require wildcard patterns") &&
       contains(inlineMatchParserInvalid.diagnosticsText,
                "inline match currently supports Boolean, integer, floating-point, "
-               "String, and Char literals, one unguarded type pattern per case, and "
+               "String, and Char literals, wildcard type-pattern alternatives, and "
                "a final wildcard or binding") &&
       contains(intSelected, "call %demo.inlinecalls.Main.intNamed()") &&
       contains(intSelected, "call %demo.inlinecalls.Selectors.prefix()") &&
