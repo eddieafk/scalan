@@ -171,6 +171,28 @@ object TypeKinds {
       case _ => "guarded-fallback"
     }
 
+  inline def bindingGuardedIntegerChoice(
+      inline value: Int,
+      inline enabled: Boolean): String =
+    inline value match {
+      case selected if selected == 7 && enabled => "binding-" + selected.toString
+      case 8 => "binding-eight"
+      case _ => "binding-fallback"
+    }
+
+  inline def bindingGuardedStringChoice(inline value: String): String =
+    inline value match {
+      case selected if selected == "bound" => selected
+      case _ => "binding-string-fallback"
+    }
+
+  transparent inline def bindingGuardedResult(
+      inline value: Int): ErasedResult =
+    inline value match {
+      case selected if selected == 7 => new PreciseResult("binding-precise")
+      case _ => new FallbackResult("binding-result-fallback")
+    }
+
   inline def requireSeven[N](inline message: String): String =
     inline constValue[N] match {
       case 7 => "accepted-seven"
@@ -330,6 +352,18 @@ object Main {
   def guardedSeven: String = TypeKinds.guardedIntegerChoice(7, true)
   def guardedFallback: String = TypeKinds.guardedIntegerChoice(7, false)
   def guardedSkipped: String = TypeKinds.guardedIntegerChoice(8, runtimeGuard())
+  def bindingGuardedSelected: String =
+    TypeKinds.bindingGuardedIntegerChoice(7, true)
+  def bindingGuardedRejected: String =
+    TypeKinds.bindingGuardedIntegerChoice(7, false)
+  def bindingGuardedNext: String =
+    TypeKinds.bindingGuardedIntegerChoice(8, runtimeGuard())
+  def bindingStringSelected: String =
+    TypeKinds.bindingGuardedStringChoice("bound")
+  def bindingStringFallback: String =
+    TypeKinds.bindingGuardedStringChoice("other")
+  def bindingPrecise: String =
+    TypeKinds.bindingGuardedResult(7).preciseOnly()
   def acceptedSeven: String = TypeKinds.requireSeven[7]("ignored-seven")
   def acceptedTrue: String = TypeKinds.qualifiedRequire[true]("ignored-true")
   def acceptedCondition: String =
@@ -401,6 +435,12 @@ object Main {
     println(guardedSeven)
     println(guardedFallback)
     println(guardedSkipped)
+    println(bindingGuardedSelected)
+    println(bindingGuardedRejected)
+    println(bindingGuardedNext)
+    println(bindingStringSelected)
+    println(bindingStringFallback)
+    println(bindingPrecise)
     println(acceptedSeven)
     println(acceptedTrue)
     println(acceptedCondition)
@@ -554,12 +594,21 @@ object Main {
       case _ => "other"
     }
 
+  inline def requiresBindingGuard(
+      inline value: Int,
+      inline enabled: Boolean): String =
+    inline value match {
+      case selected if selected == 1 && enabled => "known"
+      case _ => "other"
+    }
+
   val unresolvedStringMatch = requiresStringMatch(runtimeString())
   val unresolvedCharMatch = requiresCharMatch(runtimeChar())
   val unresolvedDoubleMatch = requiresDoubleMatch(runtimeDouble())
   val unresolvedFloatMatch = requiresFloatMatch(runtimeFloat())
   val unresolvedGuardedMatch = requiresGuardedMatch(1, runtimeBoolean())
   val unresolvedGuardedType = requiresGuardedType[String](runtimeBoolean())
+  val unresolvedBindingGuard = requiresBindingGuard(1, runtimeBoolean())
 
   val escaped = erasedValue[String]
   val qualifiedEscaped = scala.compiletime.erasedValue[Int]
@@ -686,6 +735,18 @@ object Main {
       functionText(result.nirText, "demo.inlineerased.Main.guardedFallback");
   const std::string_view guardedSkipped =
       functionText(result.nirText, "demo.inlineerased.Main.guardedSkipped");
+  const std::string_view bindingGuardedSelected = functionText(
+      result.nirText, "demo.inlineerased.Main.bindingGuardedSelected");
+  const std::string_view bindingGuardedRejected = functionText(
+      result.nirText, "demo.inlineerased.Main.bindingGuardedRejected");
+  const std::string_view bindingGuardedNext =
+      functionText(result.nirText, "demo.inlineerased.Main.bindingGuardedNext");
+  const std::string_view bindingStringSelected = functionText(
+      result.nirText, "demo.inlineerased.Main.bindingStringSelected");
+  const std::string_view bindingStringFallback = functionText(
+      result.nirText, "demo.inlineerased.Main.bindingStringFallback");
+  const std::string_view bindingPrecise =
+      functionText(result.nirText, "demo.inlineerased.Main.bindingPrecise");
   const std::string_view acceptedSeven =
       functionText(result.nirText, "demo.inlineerased.Main.acceptedSeven");
   const std::string_view acceptedTrue =
@@ -875,6 +936,22 @@ object Main {
       selectedLiteral(guardedSkipped, "\"guarded-fallback\"",
                       "guarded-seven") &&
       !contains(guardedSkipped, "runtimeGuard") &&
+      selectedLiteral(bindingGuardedSelected, "\"binding-\"",
+                      "binding-fallback") &&
+      contains(bindingGuardedSelected, "%selected") &&
+      contains(bindingGuardedSelected, "intToString") &&
+      selectedLiteral(bindingGuardedRejected, "\"binding-fallback\"",
+                      "binding-eight") &&
+      selectedLiteral(bindingGuardedNext, "\"binding-eight\"",
+                      "binding-fallback") &&
+      !contains(bindingGuardedNext, "runtimeGuard") &&
+      selectedLiteral(bindingStringSelected, "\"bound\"",
+                      "binding-string-fallback") &&
+      selectedLiteral(bindingStringFallback, "\"binding-string-fallback\"",
+                      "\"bound\"") &&
+      selectedLiteral(bindingPrecise, "demo.inlineerased.PreciseResult",
+                      "FallbackResult") &&
+      contains(bindingPrecise, ".preciseOnly") &&
       fullyReduced(alternativeString) &&
       contains(alternativeString, "\"alternative-string-int\"") &&
       !contains(alternativeString, "alternative-other") &&
@@ -909,7 +986,9 @@ object Main {
                     "float-fallback\ndouble-parameter\nfloat-parameter\n"
                     "stable-double\nstable-float\nfloating-condition\n"
                     "floating-precise\nguarded-seven\nguarded-fallback\n"
-                    "guarded-fallback\naccepted-seven\naccepted-true\n"
+                    "guarded-fallback\nbinding-7\nbinding-fallback\n"
+                    "binding-eight\nbound\nbinding-string-fallback\n"
+                    "binding-precise\naccepted-seven\naccepted-true\n"
                     "accepted-condition\n"
                     "string\nint\nlong\nother\nalias-string\n"
                     "alias-other\n"
@@ -976,7 +1055,7 @@ object Main {
       countOccurrences(
           invalid.diagnosticsText,
           "inline match selector must be reducible from a compile-time value or "
-          "static type") == 7 &&
+          "static type") == 8 &&
       fullyReduced(stringName) && contains(stringName, "\"string\"") &&
       !contains(stringName, "\"other\"") && fullyReduced(intName) &&
       contains(intName, "\"int\"") && fullyReduced(longName) &&

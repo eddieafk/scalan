@@ -5037,6 +5037,57 @@ Typechecker::constantBooleanValue(const AstExpression& expression,
       return false;
     }
     return std::nullopt;
+  case AstExpressionKind::Block: {
+    if (expression.children.size() != 2) {
+      return std::nullopt;
+    }
+    const AstExpression& bindingDeclaration = expression.children.front();
+    if (bindingDeclaration.kind != AstExpressionKind::LocalDeclaration ||
+        bindingDeclaration.mutableLocal || bindingDeclaration.text.empty() ||
+        bindingDeclaration.children.size() != 1) {
+      return std::nullopt;
+    }
+
+    const AstExpression* selectorReference =
+        &bindingDeclaration.children.front();
+    if (selectorReference->kind == AstExpressionKind::TypeApply &&
+        selectorReference->children.size() == 1 &&
+        selectorReference->children.front().kind == AstExpressionKind::Select &&
+        selectorReference->children.front().text ==
+            support::StdNames::AsInstanceOf &&
+        selectorReference->children.front().children.size() == 1) {
+      selectorReference =
+          &selectorReference->children.front().children.front();
+    }
+    if (selectorReference->kind != AstExpressionKind::Identifier ||
+        !selectorReference->text.starts_with("$match")) {
+      return std::nullopt;
+    }
+    const auto selector = scope.find(selectorReference->text);
+    if (selector == scope.end()) {
+      return std::nullopt;
+    }
+
+    SymbolInfo binding;
+    binding.kind = AstDeclarationKind::Val;
+    binding.name = bindingDeclaration.text;
+    binding.symbolName = bindingDeclaration.text;
+    binding.type = selector->second.type;
+    binding.isLexicalValue = true;
+    binding.specializedBooleanValue =
+        selector->second.specializedBooleanValue;
+    binding.specializedIntegerValue =
+        selector->second.specializedIntegerValue;
+    binding.specializedFloatingValue =
+        selector->second.specializedFloatingValue;
+    binding.specializedStringValue = selector->second.specializedStringValue;
+    binding.specializedCharValue = selector->second.specializedCharValue;
+    binding.specializedStaticType = selector->second.specializedStaticType;
+
+    Scope bindingScope = scope;
+    bindingScope[bindingDeclaration.text] = std::move(binding);
+    return constantBooleanValue(expression.children.back(), bindingScope);
+  }
   case AstExpressionKind::Identifier:
     if (auto symbol = scope.find(expression.text); symbol != scope.end()) {
       return symbol->second.specializedBooleanValue;

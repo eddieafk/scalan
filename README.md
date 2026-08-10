@@ -99,7 +99,9 @@ build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
 # Float, Double, String, and Char literal cases, literal alternatives, and a final
 # wildcard or binding at the call site, including escaped literals and stable
 # inline selectors. Compile-time guards use ordered short-circuit reduction, so
-# a guard belonging to a nonmatching case need not itself be constant.
+# a guard belonging to a nonmatching case need not itself be constant. Guards
+# can reference an untyped selector binding when that binding carries a reducible
+# call-site value.
 # Type patterns and wildcard type-pattern alternatives reduce from call-site
 # static types, including boxed scalar tests and transparent-inline result
 # refinement.

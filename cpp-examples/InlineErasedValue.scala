@@ -46,6 +46,21 @@ object TypeDefaults {
       case _ => "guarded-fallback"
     }
 
+  inline def bindingGuardedChoice(
+      inline value: Int,
+      inline enabled: Boolean): String =
+    inline value match {
+      case selected if selected == 7 && enabled => "binding-" + selected.toString
+      case 8 => "binding-eight"
+      case _ => "binding-fallback"
+    }
+
+  inline def bindingGuardedString(inline value: String): String =
+    inline value match {
+      case selected if selected == "bound" => selected
+      case _ => "binding-string-fallback"
+    }
+
   transparent inline def alternativeResultFor[T]: ErasedResult =
     inline erasedValue[T] match {
       case _: String | _: Int => new PreciseResult("alternative-precise")
@@ -67,6 +82,11 @@ object Main {
     println(TypeDefaults.alternativeNameOf[Other])
     println(TypeDefaults.guardedNameOf[String](true))
     println(TypeDefaults.guardedNameOf[Int](false))
+    println(TypeDefaults.bindingGuardedChoice(7, true))
+    println(TypeDefaults.bindingGuardedChoice(7, false))
+    println(TypeDefaults.bindingGuardedChoice(8, true))
+    println(TypeDefaults.bindingGuardedString("bound"))
+    println(TypeDefaults.bindingGuardedString("other"))
     println(TypeDefaults.alternativeResultFor[Int].preciseOnly())
   }
 }
