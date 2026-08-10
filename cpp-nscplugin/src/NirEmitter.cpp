@@ -539,6 +539,15 @@ std::string qualifyTypeName(const std::string& name, const ValueContext& context
   if (name == "NotImplementedError") {
     return std::string(support::StdNames::ScalaNotImplementedError);
   }
+  if (name == "Option" || name == support::StdNames::ScalaOption) {
+    return std::string(support::StdNames::ScalaOption);
+  }
+  if (name == "Some" || name == support::StdNames::ScalaSome) {
+    return std::string(support::StdNames::ScalaSome);
+  }
+  if (name == "None" || name == support::StdNames::ScalaNone) {
+    return std::string(support::StdNames::ScalaNone);
+  }
   if (name == "Exception") {
     return std::string(support::StdNames::JavaLangException);
   }
@@ -842,6 +851,12 @@ bool isConstValueCallee(const frontend::AstExpression& expression,
                         const ValueContext& context) {
   return isCompiletimeCallee(expression, context,
                              support::StdNames::ScalaCompiletimeConstValue);
+}
+
+bool isConstValueOptCallee(const frontend::AstExpression& expression,
+                           const ValueContext& context) {
+  return isCompiletimeCallee(
+      expression, context, support::StdNames::ScalaCompiletimeConstValueOpt);
 }
 
 bool isCodeOfCallee(const frontend::AstExpression& expression,
@@ -2365,6 +2380,17 @@ nir::Value valueFor(const frontend::AstExpression& expression,
     }
     return nir::literalValue("null", "Object", expression.span);
   }
+  if ((expression.kind == AstExpressionKind::Identifier ||
+       expression.kind == AstExpressionKind::ModuleReference) &&
+      expression.text == "None" &&
+      !context.localNames.contains(expression.text)) {
+    if (const frontend::TypeInfo* type = annotatedTypeFor(expression, context);
+        type != nullptr &&
+        runtimeTypeName(*type) == support::StdNames::ScalaNone) {
+      return nir::localValue(std::string(support::StdNames::ScalaNone),
+                             expression.span);
+    }
+  }
 
   switch (expression.kind) {
   case AstExpressionKind::Empty:
@@ -2761,11 +2787,18 @@ nir::Value valueFor(const frontend::AstExpression& expression,
       }
       const std::string selectedReceiver = memberReceiverType(expression, context);
       auto adaptSelectedValue = [&](nir::Value selected) {
+        const frontend::TypeInfo someValueType{
+            frontend::SimpleTypeKind::Object, "Object"};
         const frontend::TypeInfo* erasedSelectedType =
             selectedDeclaration == nullptr
                 ? findConstructorParameterType(context, selectedReceiver,
                                                expression.text)
                 : &selectedDeclaration->inferredType;
+        if (erasedSelectedType == nullptr &&
+            selectedReceiver == support::StdNames::ScalaSome &&
+            expression.text == support::StdNames::OptionValue) {
+          erasedSelectedType = &someValueType;
+        }
         const std::string primitive =
             erasedSelectedType == nullptr
                 ? std::string{}
@@ -2832,6 +2865,25 @@ nir::Value valueFor(const frontend::AstExpression& expression,
       nir::Value receiver = expressionValueFor(expression.children.front(), context);
       const frontend::TypeInfo* receiverType =
           annotatedTypeFor(expression.children.front(), context);
+      const bool isSomeConstruction =
+          (receiver.kind == nir::ValueKind::New &&
+           receiver.text == support::StdNames::ScalaSome) ||
+          (receiver.kind == nir::ValueKind::AsInstanceOf &&
+           receiver.operands.size() == 1 &&
+           receiver.operands.front().kind == nir::ValueKind::New &&
+           receiver.operands.front().text == support::StdNames::ScalaSome);
+      if (isSomeConstruction) {
+        const std::string receiverName =
+            "constValueOpt$receiver$" + std::to_string(expression.span.start);
+        std::vector<nir::Value> values;
+        values.push_back(nir::localLetValue(
+            receiverName, std::string(support::StdNames::ScalaSome),
+            std::move(receiver), expression.span));
+        values.push_back(adaptSelectedValue(nir::selectValue(
+            nir::localValue(receiverName, expression.span), expression.text,
+            expression.span)));
+        return nir::blockValue(std::move(values), expression.span);
+      }
       if (receiverType != nullptr &&
           receiverType->compositeKind != frontend::CompositeTypeKind::None &&
           !selectedReceiver.empty()) {
@@ -2857,6 +2909,25 @@ nir::Value valueFor(const frontend::AstExpression& expression,
                                  runtimeTypeName(*constant), expression.span);
       }
       return nir::literalValue("null", "Object", expression.span);
+    }
+    if (isConstValueOptCallee(callee, context)) {
+      const frontend::TypeInfo* optional = annotatedTypeFor(expression, context);
+      const frontend::TypeInfo* constant =
+          optional != nullptr && optional->typeArguments.size() == 1
+              ? &optional->typeArguments.front()
+              : nullptr;
+      if (constant == nullptr || constant->singletonLiteral.empty()) {
+        return nir::localValue(std::string(support::StdNames::ScalaNone),
+                               expression.span);
+      }
+      nir::Value value = nir::literalValue(
+          constant->singletonLiteral, runtimeTypeName(*constant), expression.span);
+      if (const std::string boxed = boxedObjectTypeName(constant->kind);
+          !boxed.empty()) {
+        value = nir::boxValue(boxed, std::move(value), expression.span);
+      }
+      return nir::newValue(std::string(support::StdNames::ScalaSome),
+                           {std::move(value)}, expression.span);
     }
     if (isErasedValueCallee(callee, context)) {
       return nir::literalValue("null", "Object", expression.span);
@@ -2916,7 +2987,8 @@ nir::Value valueFor(const frontend::AstExpression& expression,
     }
     if (callee.kind != AstExpressionKind::Select || callee.children.size() != 1) {
       if (callee.kind == AstExpressionKind::Identifier &&
-          callee.text == support::StdNames::SummonInline) {
+          (callee.text == support::StdNames::SummonInline ||
+           callee.text == support::StdNames::ConstValueOpt)) {
         if (const frontend::TypedDeclaration* shadow = findMemberDeclaration(
                 context, context.currentOwner, callee.text);
             shadow != nullptr && shadow->kind == frontend::AstDeclarationKind::Def) {
@@ -4428,6 +4500,32 @@ nir::Module NirEmitter::emit(const frontend::TypedModule& module) const {
   }
 
   const support::SourceSpan noSpan = support::SourceSpan::none();
+  const std::string optionName(support::StdNames::ScalaOption);
+  const std::string someName(support::StdNames::ScalaSome);
+  const std::string noneName(support::StdNames::ScalaNone);
+  builder.addDefinition(
+      nir::Definition{nir::DefinitionKind::Trait,
+                      optionName,
+                      "@" + std::string(support::StdNames::JavaLangObject),
+                      {},
+                      noSpan});
+  builder.addDefinition(nir::Definition{nir::DefinitionKind::Class,
+                                        someName,
+                                        "@" + optionName,
+                                        {},
+                                        noSpan});
+  builder.addDefinition(nir::Definition{
+      nir::DefinitionKind::Field,
+      someName + "." + std::string(support::StdNames::OptionValue),
+      "Object",
+      {},
+      noSpan});
+  builder.addDefinition(nir::Definition{nir::DefinitionKind::Module,
+                                        noneName,
+                                        "@" + optionName,
+                                        {},
+                                        noSpan});
+
   const std::string throwableName(support::StdNames::JavaLangThrowable);
   const std::string suppressedNodeName(
       support::StdNames::RuntimeSuppressedExceptionNode);

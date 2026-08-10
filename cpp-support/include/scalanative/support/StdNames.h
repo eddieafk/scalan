@@ -13,6 +13,13 @@ struct StdNames final {
   inline static constexpr std::string_view ConstValue = "constValue";
   inline static constexpr std::string_view ScalaCompiletimeConstValue =
       "scala.compiletime.constValue";
+  inline static constexpr std::string_view ConstValueOpt = "constValueOpt";
+  inline static constexpr std::string_view ScalaCompiletimeConstValueOpt =
+      "scala.compiletime.constValueOpt";
+  inline static constexpr std::string_view ScalaOption = "scala.Option";
+  inline static constexpr std::string_view ScalaSome = "scala.Some";
+  inline static constexpr std::string_view ScalaNone = "scala.None";
+  inline static constexpr std::string_view OptionValue = "value";
   inline static constexpr std::string_view CompiletimeError = "error";
   inline static constexpr std::string_view ScalaCompiletimeError =
       "scala.compiletime.error";

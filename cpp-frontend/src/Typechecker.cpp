@@ -2568,6 +2568,85 @@ TypedDeclaration Typechecker::typecheckDeclaration(const AstDeclaration& declara
 }
 
 void Typechecker::addRuntimeBuiltins(Scope& scope) {
+  SymbolInfo option;
+  option.kind = AstDeclarationKind::Trait;
+  option.name = "Option";
+  option.symbolName = std::string(support::StdNames::ScalaOption);
+  option.type = TypeInfo{SimpleTypeKind::Object, option.symbolName};
+  option.parentSymbolName = std::string(support::StdNames::JavaLangObject);
+  option.parentSymbolNames = {option.parentSymbolName};
+  TypeParameterInfo optionParameter;
+  optionParameter.name = "A";
+  optionParameter.symbolName = option.symbolName + ".A";
+  optionParameter.lowerBound = TypeInfo{SimpleTypeKind::Nothing, "Nothing"};
+  optionParameter.upperBound = TypeInfo{SimpleTypeKind::Object, "Object"};
+  optionParameter.variance = TypeVariance::Covariant;
+  option.typeParameters.push_back(optionParameter);
+  scope[option.name] = option;
+  globalSymbols_[option.symbolName] = option;
+  declaredMemberScopes_[option.symbolName] = {};
+  memberScopes_[option.symbolName] = {};
+
+  SymbolInfo some;
+  some.kind = AstDeclarationKind::Class;
+  some.name = "Some";
+  some.symbolName = std::string(support::StdNames::ScalaSome);
+  some.type = TypeInfo{SimpleTypeKind::Object, some.symbolName};
+  some.parentSymbolName = option.symbolName;
+  some.parentSymbolNames = {option.symbolName};
+  TypeParameterInfo someParameter = optionParameter;
+  someParameter.symbolName = some.symbolName + ".A";
+  some.typeParameters.push_back(someParameter);
+  TypeInfo someValueType{SimpleTypeKind::Object, "A"};
+  someValueType.runtimeName = "Object";
+  someValueType.typeParameter = true;
+  someValueType.typeParameterSymbolName = someParameter.symbolName;
+  some.parameters = {"value: A"};
+  some.parameterTypes = {someValueType};
+  some.parameterClauseSizes = {1};
+  some.contextualParameterClauses = {false};
+  TypeInfo optionParent{SimpleTypeKind::Object,
+                        option.symbolName + " [ A ]"};
+  optionParent.runtimeName = option.symbolName;
+  optionParent.typeConstructorName = option.symbolName;
+  optionParent.typeArguments = {someValueType};
+  some.parentTypes = {optionParent};
+  scope[some.name] = some;
+  globalSymbols_[some.symbolName] = some;
+
+  Scope someMembers;
+  SymbolInfo someValue;
+  someValue.kind = AstDeclarationKind::Val;
+  someValue.name = std::string(support::StdNames::OptionValue);
+  someValue.symbolName = some.symbolName + "." + someValue.name;
+  someValue.type = someValueType;
+  someValue.hasImplementation = true;
+  someValue.isInstanceMember = true;
+  someMembers[someValue.name] = someValue;
+  globalSymbols_[someValue.symbolName] = someValue;
+  declaredMemberScopes_[some.symbolName] = someMembers;
+  memberScopes_[some.symbolName] = someMembers;
+
+  SymbolInfo none;
+  none.kind = AstDeclarationKind::Object;
+  none.name = "None";
+  none.symbolName = std::string(support::StdNames::ScalaNone);
+  none.type = TypeInfo{SimpleTypeKind::Object, none.symbolName};
+  none.type.runtimeName = none.symbolName;
+  none.parentSymbolName = option.symbolName;
+  none.parentSymbolNames = {option.symbolName};
+  TypeInfo nothingType{SimpleTypeKind::Nothing, "Nothing"};
+  TypeInfo noneParent{SimpleTypeKind::Object,
+                      option.symbolName + " [ Nothing ]"};
+  noneParent.runtimeName = option.symbolName;
+  noneParent.typeConstructorName = option.symbolName;
+  noneParent.typeArguments = {nothingType};
+  none.parentTypes = {noneParent};
+  scope[none.name] = none;
+  globalSymbols_[none.symbolName] = none;
+  declaredMemberScopes_[none.symbolName] = {};
+  memberScopes_[none.symbolName] = {};
+
   SymbolInfo compiletime;
   compiletime.kind = AstDeclarationKind::Object;
   compiletime.name = "compiletime";
@@ -2637,6 +2716,31 @@ void Typechecker::addRuntimeBuiltins(Scope& scope) {
   constantType.upperBound = TypeInfo{SimpleTypeKind::Object, "Object"};
   constValue.typeParameters.push_back(std::move(constantType));
   globalSymbols_[constValue.symbolName] = std::move(constValue);
+
+  SymbolInfo constValueOpt;
+  constValueOpt.kind = AstDeclarationKind::Def;
+  constValueOpt.name = std::string(support::StdNames::ConstValueOpt);
+  constValueOpt.symbolName =
+      std::string(support::StdNames::ScalaCompiletimeConstValueOpt);
+  TypeParameterInfo optionalType;
+  optionalType.name = "T";
+  optionalType.symbolName = constValueOpt.symbolName + ".T";
+  optionalType.lowerBound = TypeInfo{SimpleTypeKind::Nothing, "Nothing"};
+  optionalType.upperBound = TypeInfo{SimpleTypeKind::Object, "Object"};
+  constValueOpt.typeParameters.push_back(optionalType);
+  TypeInfo optionalArgument{SimpleTypeKind::Object, "T"};
+  optionalArgument.runtimeName = "Object";
+  optionalArgument.typeParameter = true;
+  optionalArgument.typeParameterSymbolName = optionalType.symbolName;
+  constValueOpt.type = TypeInfo{
+      SimpleTypeKind::Object,
+      std::string(support::StdNames::ScalaOption) + " [ T ]"};
+  constValueOpt.type.runtimeName = std::string(support::StdNames::ScalaOption);
+  constValueOpt.type.typeConstructorName =
+      std::string(support::StdNames::ScalaOption);
+  constValueOpt.type.typeArguments = {optionalArgument};
+  constValueOpt.isTransparent = true;
+  globalSymbols_[constValueOpt.symbolName] = std::move(constValueOpt);
 
   SymbolInfo erasedValue;
   erasedValue.kind = AstDeclarationKind::Def;
@@ -5048,6 +5152,36 @@ bool Typechecker::isConstValueExpression(const AstExpression& expression,
          isConstValueCallee(expression.children.front(), scope);
 }
 
+bool Typechecker::isConstValueOptCallee(const AstExpression& expression,
+                                        const Scope& scope) const {
+  if (expression.kind == AstExpressionKind::Identifier) {
+    const auto symbol = scope.find(expression.text);
+    return symbol != scope.end() &&
+           symbol->second.symbolName ==
+               support::StdNames::ScalaCompiletimeConstValueOpt;
+  }
+
+  std::function<std::optional<std::string>(const AstExpression&)> qualifiedPath;
+  qualifiedPath = [&](const AstExpression& candidate)
+      -> std::optional<std::string> {
+    if (candidate.kind == AstExpressionKind::Identifier) {
+      return candidate.text;
+    }
+    if (candidate.kind != AstExpressionKind::Select ||
+        candidate.children.size() != 1) {
+      return std::nullopt;
+    }
+    std::optional<std::string> receiver =
+        qualifiedPath(candidate.children.front());
+    return receiver.has_value()
+               ? std::optional<std::string>(*receiver + "." + candidate.text)
+               : std::nullopt;
+  };
+  const std::optional<std::string> path = qualifiedPath(expression);
+  return path.has_value() &&
+         *path == support::StdNames::ScalaCompiletimeConstValueOpt;
+}
+
 bool Typechecker::isCompiletimeErrorCallee(const AstExpression& expression,
                                            const Scope& scope) const {
   if (expression.kind == AstExpressionKind::Identifier) {
@@ -6657,6 +6791,7 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
     const bool isSizeOf = callee.kind == AstExpressionKind::Identifier &&
                           callee.text == support::StdNames::SizeOf;
     const bool isConstValue = isConstValueCallee(callee, scope);
+    const bool isConstValueOpt = isConstValueOptCallee(callee, scope);
     const bool isErasedValue = isErasedValueCallee(callee, scope);
     const bool isSummonInline = isSummonInlineCallee(callee, scope);
     const bool isSummon =
@@ -6691,6 +6826,23 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
                          "constValue requires a constant singleton type: " +
                              expression.declaredType);
       return TypeInfo{SimpleTypeKind::Unknown, "Unknown"};
+    }
+    if (isConstValueOpt) {
+      if (typeArguments.size() != 1) {
+        diagnostics_.error(expression.span,
+                           "constValueOpt requires exactly one type argument");
+        return TypeInfo{SimpleTypeKind::Unknown, "Unknown"};
+      }
+      const TypeInfo argument =
+          typeFromDeclaredName(expression.declaredType, &scope, &expression.span);
+      TypeInfo optionType{
+          SimpleTypeKind::Object,
+          std::string(support::StdNames::ScalaOption) + " [ " + argument.name +
+              " ]"};
+      optionType.runtimeName = std::string(support::StdNames::ScalaOption);
+      optionType.typeConstructorName = std::string(support::StdNames::ScalaOption);
+      optionType.typeArguments = {argument};
+      return optionType;
     }
     if (isErasedValue) {
       if (typeArguments.size() != 1) {

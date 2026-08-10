@@ -42,7 +42,7 @@ still use the selected preset normally. During work on the newest coverage, use:
 
 ```sh
 cmake --build build/debug --target cpp-smoke-tests -j2
-CPP_SCALANATIVE_SMOKE_TESTS6_ONLY=1 \
+CPP_SCALANATIVE_SMOKE_TESTS7_ONLY=1 \
   build/debug/cpp-tests/smoke/cpp-smoke-tests
 ```
 
@@ -123,6 +123,12 @@ build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
 # Generic inline definitions defer the intrinsic until specialization, so
 # constant inline matches and transparent result refinement emit only the
 # selected result.
+# Compiler-owned `scala.compiletime.constValueOpt[T]` returns a typed
+# `Some[T]` containing the materialized singleton value, or `None` when `T`
+# is not a constant type. Canonical, renamed, qualified, and specialized-inline
+# calls lower without a runtime intrinsic; the current compiler-owned
+# `Option`/`Some`/`None` shape supplies `Some.value` and identity with `None`
+# while broader collection-library operations remain a later library milestone.
 # Compiler-owned `scala.compiletime.requireConst(value)` accepts Boolean, Byte,
 # Short, Int, Long, Float, Double, Char, and String expressions and verifies
 # them after inline substitution and constant folding. Canonical, renamed, and
@@ -168,6 +174,10 @@ build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
 build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
   --output /tmp/compiletime-constants \
   cpp-examples/CompiletimeConstants.scala
+
+build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
+  --output /tmp/compiletime-const-value-opt \
+  cpp-examples/CompiletimeConstValueOpt.scala
 
 build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
   --output /tmp/compiletime-uninitialized \

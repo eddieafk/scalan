@@ -1126,6 +1126,22 @@ Current scaffold status:
   Focused runtime,
   diagnostics, import-resolution, transparent-type, and NIR coverage shares
   `SmokeTests6.cpp` with the related `erasedValue` slice.
+  Compiler-owned `scala.compiletime.constValueOpt[T]` now constructs the Scala 3
+  result shape without rejecting a non-singleton type: a supported Boolean,
+  Int, Long, Float, Double, String, or Char singleton becomes `Some[T]`, while
+  every other concrete type becomes `None`. Exact imports, renamed imports, and
+  the qualified spelling resolve to the intrinsic, and an abstract `T` in a
+  transparent inline definition is decided after call-site specialization.
+  The frontend provides minimal compiler-owned covariant `Option` and `Some`
+  types plus the `None` singleton; NIR stores the boxed singleton in
+  `scala.Some.value`, recovers its static scalar or String type on selection,
+  and emits `scala.None` directly for the fallback. No `constValueOpt` call
+  reaches NIR or LLVM. Focused native-output, malformed-arity, shadowing,
+  import-resolution, specialization, runtime-shape, boxing/unboxing, and NIR
+  erasure coverage starts the compact `SmokeTests7.cpp` translation unit, while
+  `cpp-examples/CompiletimeConstValueOpt.scala` provides the public example.
+  General `Option` collection methods and companion construction remain part of
+  the staged standard-library surface rather than this compiler intrinsic.
   Compiler-owned `scala.compiletime.requireConst(value)` accepts Boolean, Byte,
   Short, Int, Long, Float, Double, Char, and String arguments through canonical,
   renamed, or qualified calls. It reuses inline substitution and constant
