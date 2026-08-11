@@ -1288,8 +1288,25 @@ Current scaffold status:
   covers native output, exact primitive/String/reference projections, both
   empty identities, chained and cons-built operands, operand order and count,
   demand-driven layouts, boundary diagnostics, and NIR erasure.
-  `cpp-examples/TupleConcat.scala` is the public example. General mapping and
-  higher-order tuple operations remain later milestones.
+  `cpp-examples/TupleConcat.scala` is the public example.
+  Closed tuples now support Scala 3 `map` with named objects or classes extending
+  the demand-driven `scala.PolyFunction` marker and defining the generic unary
+  method `apply[A](value: A)`. Typechecking specializes that method independently
+  with every concrete tuple element type, reproducing `Tuple.Map` results for
+  identity mappings, constant result constructors, and applied constructors such
+  as `Box[A]`. The resulting TupleN retains exact primitive, String, and generic
+  reference element types. NIR binds the tuple receiver before the mapper exactly
+  once, reads erased fields in order, invokes the existing erased generic `apply`
+  ABI once per element, boxes primitive/String results for Object storage, and
+  builds one flat tuple. Mapping `EmptyTuple` still evaluates its mapper argument
+  but performs no applications and returns the stable module. The PolyFunction
+  marker is synthesized only when demanded, preserving unrelated program output.
+  `SmokeTests14.cpp` starts a new compact partition covering native output,
+  identity/applied/constant result specialization, exact projections, effect and
+  application order, empty behavior, demand-driven layout, diagnostics, and NIR
+  erasure. `cpp-examples/TupleMap.scala` is the public example. Polymorphic
+  function literals and general higher-kinded type-lambda application remain
+  later language milestones.
   Compiler-owned `scala.compiletime.requireConst(value)` accepts Boolean, Byte,
   Short, Int, Long, Float, Double, Char, and String arguments through canonical,
   renamed, or qualified calls. It reuses inline substitution and constant

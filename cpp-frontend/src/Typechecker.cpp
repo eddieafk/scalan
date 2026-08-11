@@ -1684,6 +1684,12 @@ standardDerivationDeclarations(const AstModule& module) {
   emptyTuple.span = noSpan;
   emptyTuple.parentTypes = {"scala.Tuple"};
 
+  AstDeclaration polyFunction;
+  polyFunction.kind = AstDeclarationKind::Trait;
+  polyFunction.name = "PolyFunction";
+  polyFunction.span = noSpan;
+
+  bool needsPolyFunction = false;
   std::vector<std::size_t> tupleArities;
   std::size_t maximumUnknownTupleConsDepth = 0;
   std::size_t maximumTupleShrinkDepth = 0;
@@ -1699,6 +1705,18 @@ standardDerivationDeclarations(const AstModule& module) {
       collectDeclaredTupleArities =
           [&](const std::vector<AstDeclaration>& declarations) {
             for (const AstDeclaration& declaration : declarations) {
+              const auto mentionsPolyFunction = [](std::string_view typeName) {
+                return typeName.find("PolyFunction") != std::string_view::npos;
+              };
+              needsPolyFunction =
+                  needsPolyFunction ||
+                  mentionsPolyFunction(declaration.declaredType) ||
+                  std::any_of(declaration.parentTypes.begin(),
+                              declaration.parentTypes.end(),
+                              mentionsPolyFunction) ||
+                  std::any_of(declaration.parameters.begin(),
+                              declaration.parameters.end(),
+                              mentionsPolyFunction);
               if (const auto elements = tupleTypeElements(declaration.declaredType);
                   elements.has_value() && elements->size() <= 22) {
                 declaredTupleArities[declaration.name] = elements->size();
@@ -1738,6 +1756,10 @@ standardDerivationDeclarations(const AstModule& module) {
   const std::function<std::optional<std::size_t>(const AstExpression&)>
       collectTupleExpressions =
           [&](const AstExpression& expression) -> std::optional<std::size_t> {
+        needsPolyFunction =
+            needsPolyFunction ||
+            (expression.kind == AstExpressionKind::Select &&
+             expression.text == support::StdNames::TupleMap);
         maximumTupleShrinkDepth =
             std::max(maximumTupleShrinkDepth, tupleShrinkDepth(expression));
         std::optional<std::size_t> knownArity;
@@ -2081,6 +2103,9 @@ standardDerivationDeclarations(const AstModule& module) {
   std::vector<std::pair<std::string, AstDeclaration>> declarations;
   declarations.emplace_back("scala", std::move(tuple));
   declarations.emplace_back("scala", std::move(emptyTuple));
+  if (needsPolyFunction) {
+    declarations.emplace_back("scala", std::move(polyFunction));
+  }
   for (AstDeclaration& tupleType : tupleTypes) {
     declarations.emplace_back("scala", std::move(tupleType));
   }
@@ -7681,6 +7706,109 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
       return TypeInfo{SimpleTypeKind::Nothing, "Nothing"};
     }
     const AstExpression& callCallee = expression.children.front();
+    if (callCallee.kind == AstExpressionKind::Select &&
+        callCallee.children.size() == 1 &&
+        callCallee.text == support::StdNames::TupleMap) {
+      const TypeInfo receiver =
+          inferExpressionType(callCallee.children.front(), scope);
+      const bool emptyTuple =
+          receiver.name == support::StdNames::ScalaEmptyTuple ||
+          receiver.runtimeName == support::StdNames::ScalaEmptyTuple;
+      const std::string receiverConstructor =
+          receiver.typeConstructorName.empty() ? receiver.runtimeName
+                                               : receiver.typeConstructorName;
+      const std::optional<std::size_t> arity =
+          tupleArityForConstructor(receiverConstructor);
+      const bool abstractTuple =
+          receiver.name == support::StdNames::ScalaTuple ||
+          receiver.runtimeName == support::StdNames::ScalaTuple;
+      if (emptyTuple || arity.has_value() || abstractTuple) {
+        std::vector<TypeInfo> argumentTypes;
+        argumentTypes.reserve(expression.children.size() - 1);
+        for (std::size_t index = 1; index < expression.children.size(); ++index) {
+          argumentTypes.push_back(
+              inferExpressionType(expression.children[index], scope));
+        }
+        if (expression.children.size() != 2) {
+          diagnostics_.error(
+              expression.span,
+              "tuple map requires exactly one polymorphic function");
+          return TypeInfo{SimpleTypeKind::Unknown, "Unknown"};
+        }
+        if (abstractTuple ||
+            (!emptyTuple &&
+             (!arity.has_value() || receiver.typeArguments.size() != *arity))) {
+          diagnostics_.error(expression.span,
+                             "map requires a concrete tuple receiver");
+          return TypeInfo{SimpleTypeKind::Unknown, "Unknown"};
+        }
+
+        const SymbolInfo* application = knownMemberForReceiverType(
+            argumentTypes.front(),
+            std::string(support::StdNames::TupleApply));
+        const SymbolInfo* polyFunction = typeSymbolForDeclaredName(
+            std::string(support::StdNames::ScalaPolyFunction), &scope);
+        const bool polymorphicUnaryApplication =
+            polyFunction != nullptr &&
+            isAssignable(polyFunction->type, argumentTypes.front()) &&
+            application != nullptr &&
+            application->kind == AstDeclarationKind::Def &&
+            application->typeParameters.size() == 1 &&
+            application->parameterTypes.size() == 1 &&
+            application->parameterClauseSizes.size() == 1 &&
+            application->parameterClauseSizes.front() == 1 &&
+            application->contextualParameters.size() == 1 &&
+            !application->contextualParameters.front() &&
+            application->typeParameters.front().upperBound.kind ==
+                SimpleTypeKind::Object &&
+            application->typeParameters.front().upperBound.name == "Object" &&
+            application->typeParameters.front().lowerBound.kind ==
+                SimpleTypeKind::Nothing &&
+            application->parameterTypes.front().typeParameter &&
+            application->parameterTypes.front().typeParameterSymbolName ==
+                application->typeParameters.front().symbolName;
+        if (!polymorphicUnaryApplication) {
+          diagnostics_.error(
+              expression.children[1].span,
+              "tuple map function must define apply[A](value: A)");
+          return TypeInfo{SimpleTypeKind::Unknown, "Unknown"};
+        }
+
+        if (emptyTuple) {
+          auto empty = globalSymbols_.find(
+              std::string(support::StdNames::ScalaEmptyTuple));
+          if (empty == globalSymbols_.end()) {
+            diagnostics_.error(
+                expression.span,
+                "unresolved tuple map result: scala.EmptyTuple");
+            return TypeInfo{SimpleTypeKind::Unknown, "Unknown"};
+          }
+          return empty->second.type;
+        }
+
+        std::vector<TypeInfo> mappedElements;
+        mappedElements.reserve(receiver.typeArguments.size());
+        for (const TypeInfo& element : receiver.typeArguments) {
+          mappedElements.push_back(
+              specializeResolvedTypeApplication(*application, {element},
+                                                expression.span, true)
+                  .type);
+        }
+        const std::string resultConstructor =
+            std::string(support::StdNames::ScalaTuple) +
+            std::to_string(mappedElements.size());
+        auto result = globalSymbols_.find(resultConstructor);
+        if (result == globalSymbols_.end()) {
+          diagnostics_.error(expression.span,
+                             "unresolved tuple map constructor: " +
+                                 resultConstructor);
+          return TypeInfo{SimpleTypeKind::Unknown, "Unknown"};
+        }
+        return specializeResolvedTypeApplication(
+                   result->second, mappedElements, expression.span, true)
+            .type;
+      }
+    }
     const AstExpression* tupleApplyReceiver = nullptr;
     std::optional<TypeInfo> tupleApplyReceiverType;
     if (callCallee.kind == AstExpressionKind::Select &&

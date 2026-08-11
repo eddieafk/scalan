@@ -3272,6 +3272,88 @@ nir::Value valueFor(const frontend::AstExpression& expression,
       return inlineApplicationValueFor(*application, context);
     }
     const frontend::AstExpression& callCallee = expression.children.front();
+    if (callCallee.kind == AstExpressionKind::Select &&
+        callCallee.children.size() == 1 &&
+        callCallee.text == support::StdNames::TupleMap &&
+        expression.children.size() == 2) {
+      const frontend::AstExpression& receiverExpression =
+          callCallee.children.front();
+      const frontend::AstExpression& functionExpression = expression.children[1];
+      const frontend::TypeInfo* receiverType =
+          annotatedTypeFor(receiverExpression, context);
+      const frontend::TypeInfo* functionType =
+          annotatedTypeFor(functionExpression, context);
+      const frontend::TypeInfo* resultType =
+          annotatedTypeFor(expression, context);
+      const bool emptyTuple =
+          receiverType != nullptr &&
+          runtimeTypeName(*receiverType) == support::StdNames::ScalaEmptyTuple;
+      const bool concreteTuple =
+          receiverType != nullptr &&
+          isTupleClassName(runtimeTypeName(*receiverType)) &&
+          !receiverType->typeArguments.empty();
+      const frontend::TypedDeclaration* application =
+          functionType == nullptr
+              ? nullptr
+              : findMemberDeclaration(context, runtimeTypeName(*functionType),
+                                      std::string(support::StdNames::TupleApply));
+      if ((emptyTuple || concreteTuple) && functionType != nullptr &&
+          resultType != nullptr && application != nullptr &&
+          application->typeParameters.size() == 1 &&
+          application->parameterTypes.size() == 1) {
+        const std::string receiverName =
+            "tupleMap$receiver$" + std::to_string(expression.span.start);
+        const std::string functionName =
+            "tupleMap$function$" + std::to_string(expression.span.start);
+        std::vector<nir::Value> evaluation;
+        evaluation.push_back(nir::localLetValue(
+            receiverName, runtimeTypeName(*receiverType),
+            expressionValueFor(receiverExpression, context),
+            receiverExpression.span));
+        evaluation.push_back(nir::localLetValue(
+            functionName, runtimeTypeName(*functionType),
+            expressionValueFor(functionExpression, context),
+            functionExpression.span));
+
+        if (emptyTuple) {
+          evaluation.push_back(nir::localValue(
+              std::string(support::StdNames::ScalaEmptyTuple), expression.span));
+          return nir::blockValue(std::move(evaluation), expression.span);
+        }
+        if (!isTupleClassName(runtimeTypeName(*resultType)) ||
+            resultType->typeArguments.size() !=
+                receiverType->typeArguments.size()) {
+          return nir::unknownValue("<malformed-tuple-map>", expression.span);
+        }
+
+        std::vector<nir::Value> mappedElements;
+        mappedElements.reserve(receiverType->typeArguments.size());
+        for (std::size_t index = 1;
+             index <= receiverType->typeArguments.size(); ++index) {
+          nir::Value element = nir::selectValue(
+              nir::localValue(receiverName, receiverExpression.span),
+              "_" + std::to_string(index), receiverExpression.span);
+          nir::Value callee = nir::selectValue(
+              nir::localValue(functionName, functionExpression.span),
+              std::string(support::StdNames::TupleApply),
+              functionExpression.span);
+          nir::Value mapped = nir::callValue(
+              std::move(callee), {std::move(element)}, expression.span);
+          if (const std::string boxed =
+                  boxedObjectTypeName(application->inferredType.kind);
+              !boxed.empty() &&
+              runtimeTypeName(application->inferredType) != "Object") {
+            mapped =
+                nir::boxValue(boxed, std::move(mapped), expression.span);
+          }
+          mappedElements.push_back(std::move(mapped));
+        }
+        evaluation.push_back(
+            nir::newValue(runtimeTypeName(*resultType),
+                          std::move(mappedElements), expression.span));
+        return nir::blockValue(std::move(evaluation), expression.span);
+      }
+    }
     const frontend::AstExpression* tupleApplyReceiver = nullptr;
     if (callCallee.kind == AstExpressionKind::Select &&
         callCallee.children.size() == 1 &&

@@ -42,7 +42,7 @@ still use the selected preset normally. During work on the newest coverage, use:
 
 ```sh
 cmake --build build/debug --target cpp-smoke-tests -j2
-CPP_SCALANATIVE_SMOKE_TESTS13_ONLY=1 \
+CPP_SCALANATIVE_SMOKE_TESTS14_ONLY=1 \
   build/debug/cpp-tests/smoke/cpp-smoke-tests
 ```
 
@@ -174,6 +174,12 @@ build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
 # demand-driven TupleN value, handles `EmptyTuple` on either side, and evaluates
 # each operand exactly once. Abstract/non-tuple operands and results above the
 # current 22-element TupleN boundary receive focused compile-time diagnostics.
+# Closed tuples support Scala 3 `map` with named `PolyFunction` objects/classes
+# that define `apply[A](value: A)`. The compiler specializes that result for
+# every element, preserving identity results and applied results such as
+# `Box[A]`, and evaluates the receiver and mapper once before mapping elements
+# left-to-right. `EmptyTuple` evaluates the mapper but performs no applications;
+# polymorphic-function literal syntax remains a later language milestone.
 # Compiler-owned `scala.compiletime.requireConst(value)` accepts Boolean, Byte,
 # Short, Int, Long, Float, Double, Char, and String expressions and verifies
 # them after inline substitution and constant folding. Canonical, renamed, and
@@ -255,6 +261,10 @@ build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
 build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
   --output /tmp/tuple-concat \
   cpp-examples/TupleConcat.scala
+
+build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
+  --output /tmp/tuple-map \
+  cpp-examples/TupleMap.scala
 
 build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
   --output /tmp/compiletime-uninitialized \
