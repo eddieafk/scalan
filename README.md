@@ -42,7 +42,7 @@ still use the selected preset normally. During work on the newest coverage, use:
 
 ```sh
 cmake --build build/debug --target cpp-smoke-tests -j2
-CPP_SCALANATIVE_SMOKE_TESTS12_ONLY=1 \
+CPP_SCALANATIVE_SMOKE_TESTS13_ONLY=1 \
   build/debug/cpp-tests/smoke/cpp-smoke-tests
 ```
 
@@ -169,6 +169,11 @@ build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
 # Both operations evaluate their receiver exactly once; `EmptyTuple.init`,
 # `EmptyTuple.last`, and operations on an abstract `Tuple` receive focused
 # compile-time diagnostics.
+# Closed tuples support precise Scala 3 concatenation through `left ++ right`.
+# The result preserves all element types in left-to-right order, builds one flat
+# demand-driven TupleN value, handles `EmptyTuple` on either side, and evaluates
+# each operand exactly once. Abstract/non-tuple operands and results above the
+# current 22-element TupleN boundary receive focused compile-time diagnostics.
 # Compiler-owned `scala.compiletime.requireConst(value)` accepts Boolean, Byte,
 # Short, Int, Long, Float, Double, Char, and String expressions and verifies
 # them after inline substitution and constant folding. Canonical, renamed, and
@@ -246,6 +251,10 @@ build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
 build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
   --output /tmp/tuple-init-last \
   cpp-examples/TupleInitLast.scala
+
+build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
+  --output /tmp/tuple-concat \
+  cpp-examples/TupleConcat.scala
 
 build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
   --output /tmp/compiletime-uninitialized \

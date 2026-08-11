@@ -3987,6 +3987,69 @@ nir::Value valueFor(const frontend::AstExpression& expression,
     if (expression.children.size() != 2) {
       return nir::unknownValue("<malformed-binary>", expression.span);
     }
+    if (expression.text == support::StdNames::TupleConcat) {
+      const frontend::TypeInfo* resultType =
+          annotatedTypeFor(expression, context);
+      const frontend::TypeInfo* leftType =
+          annotatedTypeFor(expression.children[0], context);
+      const frontend::TypeInfo* rightType =
+          annotatedTypeFor(expression.children[1], context);
+      if (resultType == nullptr || leftType == nullptr || rightType == nullptr) {
+        return nir::unknownValue("<malformed-tuple-concat>", expression.span);
+      }
+
+      const bool emptyLeft =
+          runtimeTypeName(*leftType) == support::StdNames::ScalaEmptyTuple;
+      const bool emptyRight =
+          runtimeTypeName(*rightType) == support::StdNames::ScalaEmptyTuple;
+      const bool concreteLeft =
+          emptyLeft || isTupleClassName(runtimeTypeName(*leftType));
+      const bool concreteRight =
+          emptyRight || isTupleClassName(runtimeTypeName(*rightType));
+      const std::size_t leftArity = leftType->typeArguments.size();
+      const std::size_t rightArity = rightType->typeArguments.size();
+      if (!concreteLeft || !concreteRight || leftArity + rightArity > 22 ||
+          (leftArity + rightArity != 0 &&
+           !isTupleClassName(runtimeTypeName(*resultType)))) {
+        return nir::unknownValue("<malformed-tuple-concat>", expression.span);
+      }
+
+      const std::string leftName =
+          "tupleConcat$left$" + std::to_string(expression.span.start);
+      const std::string rightName =
+          "tupleConcat$right$" + std::to_string(expression.span.start);
+      std::vector<nir::Value> evaluation;
+      evaluation.push_back(nir::localLetValue(
+          leftName, runtimeTypeName(*leftType),
+          expressionValueFor(expression.children[0], context),
+          expression.children[0].span));
+      evaluation.push_back(nir::localLetValue(
+          rightName, runtimeTypeName(*rightType),
+          expressionValueFor(expression.children[1], context),
+          expression.children[1].span));
+
+      if (leftArity + rightArity == 0) {
+        evaluation.push_back(nir::localValue(
+            std::string(support::StdNames::ScalaEmptyTuple), expression.span));
+        return nir::blockValue(std::move(evaluation), expression.span);
+      }
+
+      std::vector<nir::Value> elements;
+      elements.reserve(leftArity + rightArity);
+      for (std::size_t index = 1; index <= leftArity; ++index) {
+        elements.push_back(nir::selectValue(
+            nir::localValue(leftName, expression.children[0].span),
+            "_" + std::to_string(index), expression.children[0].span));
+      }
+      for (std::size_t index = 1; index <= rightArity; ++index) {
+        elements.push_back(nir::selectValue(
+            nir::localValue(rightName, expression.children[1].span),
+            "_" + std::to_string(index), expression.children[1].span));
+      }
+      evaluation.push_back(nir::newValue(runtimeTypeName(*resultType),
+                                         std::move(elements), expression.span));
+      return nir::blockValue(std::move(evaluation), expression.span);
+    }
     if (expression.text == "*:") {
       const frontend::TypeInfo* resultType = annotatedTypeFor(expression, context);
       const frontend::TypeInfo* headType =

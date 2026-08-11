@@ -2545,7 +2545,7 @@ int Parser::precedence(const Token& token) const {
   if (token.text == "*" || token.text == "/" || token.text == "%") {
     return 7;
   }
-  if (token.text == "+" || token.text == "-") {
+  if (token.text == "+" || token.text == "-" || token.text == "++") {
     return 6;
   }
   if (token.text == "==" || token.text == "!=" || token.text == "<" ||

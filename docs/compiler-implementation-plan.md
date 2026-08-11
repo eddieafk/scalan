@@ -1275,8 +1275,21 @@ Current scaffold status:
   Tuple4-to-Tuple3-to-Tuple2-to-Tuple1-to-EmptyTuple prefixes, direct and
   cons-built receivers, evaluation count, demand-driven layout, diagnostics,
   and NIR erasure. `cpp-examples/TupleInitLast.scala` is the public example.
-  General operations including concatenation and mapping remain later tuple
-  milestones.
+  Closed tuples now support Scala 3's precise `left ++ right` concatenation.
+  Pre-typecheck discovery combines known operand arities recursively so inferred
+  and chained concatenations synthesize their exact result TupleN classes.
+  Typechecking accepts concrete `EmptyTuple` and TupleN operands, preserves the
+  complete left-then-right type sequence, treats `EmptyTuple` as an identity,
+  and diagnoses abstract/non-tuple operands and results beyond the current
+  22-element TupleN boundary. NIR binds the left operand before the right exactly
+  once, then copies their already-erased fields into one flat result TupleN;
+  the empty/empty case evaluates both operands and returns the stable
+  `EmptyTuple` module. `SmokeTests13.cpp` begins another compact partition and
+  covers native output, exact primitive/String/reference projections, both
+  empty identities, chained and cons-built operands, operand order and count,
+  demand-driven layouts, boundary diagnostics, and NIR erasure.
+  `cpp-examples/TupleConcat.scala` is the public example. General mapping and
+  higher-order tuple operations remain later milestones.
   Compiler-owned `scala.compiletime.requireConst(value)` accepts Boolean, Byte,
   Short, Int, Long, Float, Double, Char, and String arguments through canonical,
   renamed, or qualified calls. It reuses inline substitution and constant

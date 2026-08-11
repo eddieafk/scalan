@@ -1758,10 +1758,14 @@ standardDerivationDeclarations(const AstModule& module) {
           collectTupleType(typeArgument);
         }
         collectTupleType(expression.declaredType);
+        std::optional<std::size_t> leftArity;
         std::optional<std::size_t> rightArity;
         for (std::size_t index = 0; index < expression.children.size(); ++index) {
           const std::optional<std::size_t> childArity =
               collectTupleExpressions(expression.children[index]);
+          if (index == 0) {
+            leftArity = childArity;
+          }
           if (index == 1) {
             rightArity = childArity;
           }
@@ -1776,6 +1780,16 @@ standardDerivationDeclarations(const AstModule& module) {
           maximumUnknownTupleConsDepth =
               std::max(maximumUnknownTupleConsDepth, unknownDepth);
           return std::nullopt;
+        }
+        if (expression.kind == AstExpressionKind::Binary &&
+            expression.text == support::StdNames::TupleConcat &&
+            expression.children.size() == 2 && leftArity.has_value() &&
+            rightArity.has_value()) {
+          const std::size_t resultArity = *leftArity + *rightArity;
+          addTupleArity(resultArity);
+          return resultArity <= 22
+                     ? std::optional<std::size_t>{resultArity}
+                     : std::nullopt;
         }
         return knownArity;
       };
@@ -9570,6 +9584,81 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
     }
     TypeInfo lhs = inferExpressionType(expression.children[0], scope);
     TypeInfo rhs = inferExpressionType(expression.children[1], scope);
+    if (expression.text == support::StdNames::TupleConcat) {
+      const bool emptyLeft =
+          lhs.name == support::StdNames::ScalaEmptyTuple ||
+          lhs.runtimeName == support::StdNames::ScalaEmptyTuple;
+      const bool emptyRight =
+          rhs.name == support::StdNames::ScalaEmptyTuple ||
+          rhs.runtimeName == support::StdNames::ScalaEmptyTuple;
+      const std::string leftConstructor =
+          lhs.typeConstructorName.empty() ? lhs.runtimeName
+                                          : lhs.typeConstructorName;
+      const std::string rightConstructor =
+          rhs.typeConstructorName.empty() ? rhs.runtimeName
+                                          : rhs.typeConstructorName;
+      const std::optional<std::size_t> leftArity =
+          tupleArityForConstructor(leftConstructor);
+      const std::optional<std::size_t> rightArity =
+          tupleArityForConstructor(rightConstructor);
+      const bool validLeft =
+          emptyLeft ||
+          (leftArity.has_value() && lhs.typeArguments.size() == *leftArity);
+      const bool validRight =
+          emptyRight ||
+          (rightArity.has_value() && rhs.typeArguments.size() == *rightArity);
+      if (!validLeft) {
+        diagnostics_.error(expression.children[0].span,
+                           "++ left operand must be a concrete tuple");
+      }
+      if (!validRight) {
+        diagnostics_.error(expression.children[1].span,
+                           "++ right operand must be a concrete tuple");
+      }
+      if (!validLeft || !validRight) {
+        return TypeInfo{SimpleTypeKind::Unknown, "Unknown"};
+      }
+
+      const std::size_t resultArity =
+          lhs.typeArguments.size() + rhs.typeArguments.size();
+      if (resultArity > 22) {
+        diagnostics_.error(expression.span,
+                           "++ tuple concatenation supports at most 22 elements "
+                           "in this subset");
+        return TypeInfo{SimpleTypeKind::Unknown, "Unknown"};
+      }
+      if (resultArity == 0) {
+        auto empty = globalSymbols_.find(
+            std::string(support::StdNames::ScalaEmptyTuple));
+        if (empty == globalSymbols_.end()) {
+          diagnostics_.error(
+              expression.span,
+              "unresolved tuple ++ result: scala.EmptyTuple");
+          return TypeInfo{SimpleTypeKind::Unknown, "Unknown"};
+        }
+        return empty->second.type;
+      }
+
+      const std::string constructorName =
+          std::string(support::StdNames::ScalaTuple) +
+          std::to_string(resultArity);
+      auto constructor = globalSymbols_.find(constructorName);
+      if (constructor == globalSymbols_.end()) {
+        diagnostics_.error(expression.span,
+                           "unresolved tuple ++ constructor: " +
+                               constructorName);
+        return TypeInfo{SimpleTypeKind::Unknown, "Unknown"};
+      }
+      std::vector<TypeInfo> elementTypes;
+      elementTypes.reserve(resultArity);
+      elementTypes.insert(elementTypes.end(), lhs.typeArguments.begin(),
+                          lhs.typeArguments.end());
+      elementTypes.insert(elementTypes.end(), rhs.typeArguments.begin(),
+                          rhs.typeArguments.end());
+      return specializeResolvedTypeApplication(
+                 constructor->second, elementTypes, expression.span, true)
+          .type;
+    }
     if (expression.text == "*:") {
       const bool emptyTail =
           rhs.name == support::StdNames::ScalaEmptyTuple ||
