@@ -42,7 +42,7 @@ still use the selected preset normally. During work on the newest coverage, use:
 
 ```sh
 cmake --build build/debug --target cpp-smoke-tests -j2
-CPP_SCALANATIVE_SMOKE_TESTS11_ONLY=1 \
+CPP_SCALANATIVE_SMOKE_TESTS12_ONLY=1 \
   build/debug/cpp-tests/smoke/cpp-smoke-tests
 ```
 
@@ -163,6 +163,12 @@ build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
 # either `tuple(index)` or `tuple.apply(index)`. Receiver and index evaluation
 # order is preserved, invalid bounds are diagnosed at compile time, and ordinary
 # user-defined `apply` members retain normal call lowering.
+# Closed tuples support precise Scala 3 `init` and `last` as well. `init`
+# constructs the corresponding smaller flat prefix down to `EmptyTuple`, while
+# `last` restores the final element's primitive, String, or reference type.
+# Both operations evaluate their receiver exactly once; `EmptyTuple.init`,
+# `EmptyTuple.last`, and operations on an abstract `Tuple` receive focused
+# compile-time diagnostics.
 # Compiler-owned `scala.compiletime.requireConst(value)` accepts Boolean, Byte,
 # Short, Int, Long, Float, Double, Char, and String expressions and verifies
 # them after inline substitution and constant folding. Canonical, renamed, and
@@ -236,6 +242,10 @@ build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
 build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
   --output /tmp/tuple-apply \
   cpp-examples/TupleApply.scala
+
+build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
+  --output /tmp/tuple-init-last \
+  cpp-examples/TupleInitLast.scala
 
 build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
   --output /tmp/compiletime-uninitialized \

@@ -1260,8 +1260,22 @@ Current scaffold status:
   output, both call spellings, exact primitive/String/reference types, folded and
   stable indices, direct and cons-built receivers, evaluation count, diagnostic
   boundaries, NIR projections, and non-tuple `apply` preservation.
-  `cpp-examples/TupleApply.scala` is the public example. General operations
-  including `init`, `last`, concatenation, and mapping remain later tuple
+  `cpp-examples/TupleApply.scala` is the public example.
+  Closed tuples now additionally support Scala 3's precise `init` and `last`
+  operations. `init` computes the covariant TupleN prefix, copies erased `_1`
+  through `_(N - 1)` fields into a smaller flat runtime tuple, and returns the
+  stable `EmptyTuple` module for Tuple1. Nested and mixed `init`/`tail` selection
+  contributes to the downward arity-demand pass, so only reachable smaller tuple
+  classes are synthesized. `last` restores the final primitive, String, or
+  reference element type from erased `_N` storage. Both operations bind their
+  receiver exactly once before rebuilding or projection. `EmptyTuple.init`,
+  `EmptyTuple.last`, and operations whose receiver remains only the abstract
+  `Tuple` supertype receive focused compile-time diagnostics. `SmokeTests12.cpp`
+  starts a fresh compact partition covering native output, exact result types,
+  Tuple4-to-Tuple3-to-Tuple2-to-Tuple1-to-EmptyTuple prefixes, direct and
+  cons-built receivers, evaluation count, demand-driven layout, diagnostics,
+  and NIR erasure. `cpp-examples/TupleInitLast.scala` is the public example.
+  General operations including concatenation and mapping remain later tuple
   milestones.
   Compiler-owned `scala.compiletime.requireConst(value)` accepts Boolean, Byte,
   Short, Int, Long, Float, Double, Char, and String arguments through canonical,

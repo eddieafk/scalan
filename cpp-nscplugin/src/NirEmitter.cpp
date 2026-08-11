@@ -2715,6 +2715,8 @@ nir::Value valueFor(const frontend::AstExpression& expression,
     {
       const bool tupleOperation =
           expression.text == support::StdNames::TupleHead ||
+          expression.text == support::StdNames::TupleInit ||
+          expression.text == support::StdNames::TupleLast ||
           expression.text == support::StdNames::TupleTail ||
           expression.text == support::StdNames::TupleSize;
       if (tupleOperation) {
@@ -2746,40 +2748,55 @@ nir::Value valueFor(const frontend::AstExpression& expression,
                                                expression.span));
             return nir::blockValue(std::move(values), expression.span);
           }
-          if (expression.text == support::StdNames::TupleHead && arity != 0) {
-            nir::Value head = nir::selectValue(
-                nir::localValue(receiverName, receiverExpression.span), "_1",
-                expression.span);
+          const bool elementSelection =
+              expression.text == support::StdNames::TupleHead ||
+              expression.text == support::StdNames::TupleLast;
+          if (elementSelection && arity != 0) {
+            const std::size_t index =
+                expression.text == support::StdNames::TupleHead ? 1 : arity;
+            nir::Value element = nir::selectValue(
+                nir::localValue(receiverName, receiverExpression.span),
+                "_" + std::to_string(index), expression.span);
             const frontend::TypeInfo* resultType =
                 annotatedTypeFor(expression, context);
             if (resultType != nullptr) {
               if (const std::string boxed = boxedObjectTypeName(resultType->kind);
                   !boxed.empty()) {
-                head = nir::unboxValue(boxed, std::move(head), expression.span);
+                element =
+                    nir::unboxValue(boxed, std::move(element), expression.span);
               } else if (const std::string runtime = runtimeTypeName(*resultType);
                          runtime != "Object") {
-                head = nir::asInstanceOfValue(runtime, std::move(head),
-                                              expression.span);
+                element = nir::asInstanceOfValue(
+                    runtime, std::move(element), expression.span);
               }
             }
-            values.push_back(std::move(head));
+            values.push_back(std::move(element));
             return nir::blockValue(std::move(values), expression.span);
           }
-          if (expression.text == support::StdNames::TupleTail && arity == 1) {
+          const bool tupleShrink =
+              expression.text == support::StdNames::TupleTail ||
+              expression.text == support::StdNames::TupleInit;
+          if (tupleShrink && arity == 1) {
             values.push_back(nir::localValue(
                 std::string(support::StdNames::ScalaEmptyTuple), expression.span));
             return nir::blockValue(std::move(values), expression.span);
           }
-          if (expression.text == support::StdNames::TupleTail && arity > 1) {
+          if (tupleShrink && arity > 1) {
             const frontend::TypeInfo* resultType =
                 annotatedTypeFor(expression, context);
             if (resultType == nullptr ||
                 !isTupleClassName(runtimeTypeName(*resultType))) {
-              return nir::unknownValue("<malformed-tuple-tail>", expression.span);
+              return nir::unknownValue(
+                  "<malformed-tuple-" + expression.text + ">", expression.span);
             }
             std::vector<nir::Value> elements;
             elements.reserve(arity - 1);
-            for (std::size_t index = 2; index <= arity; ++index) {
+            const std::size_t firstIndex =
+                expression.text == support::StdNames::TupleTail ? 2 : 1;
+            const std::size_t lastIndex =
+                expression.text == support::StdNames::TupleTail ? arity
+                                                                 : arity - 1;
+            for (std::size_t index = firstIndex; index <= lastIndex; ++index) {
               elements.push_back(nir::selectValue(
                   nir::localValue(receiverName, receiverExpression.span),
                   "_" + std::to_string(index), expression.span));

@@ -1686,7 +1686,7 @@ standardDerivationDeclarations(const AstModule& module) {
 
   std::vector<std::size_t> tupleArities;
   std::size_t maximumUnknownTupleConsDepth = 0;
-  std::size_t maximumTupleTailDepth = 0;
+  std::size_t maximumTupleShrinkDepth = 0;
   const auto addTupleArity = [&](std::size_t arity) {
     if (arity >= 1 && arity <= 22 &&
         std::find(tupleArities.begin(), tupleArities.end(), arity) ==
@@ -1726,19 +1726,20 @@ standardDerivationDeclarations(const AstModule& module) {
                    ? 1 + tupleConsDepth(expression.children[1])
                    : 0;
       };
-  const std::function<std::size_t(const AstExpression&)> tupleTailDepth =
+  const std::function<std::size_t(const AstExpression&)> tupleShrinkDepth =
       [&](const AstExpression& expression) {
         return expression.kind == AstExpressionKind::Select &&
-                       expression.text == support::StdNames::TupleTail &&
+                       (expression.text == support::StdNames::TupleTail ||
+                        expression.text == support::StdNames::TupleInit) &&
                        expression.children.size() == 1
-                   ? 1 + tupleTailDepth(expression.children.front())
+                   ? 1 + tupleShrinkDepth(expression.children.front())
                    : 0;
       };
   const std::function<std::optional<std::size_t>(const AstExpression&)>
       collectTupleExpressions =
           [&](const AstExpression& expression) -> std::optional<std::size_t> {
-        maximumTupleTailDepth =
-            std::max(maximumTupleTailDepth, tupleTailDepth(expression));
+        maximumTupleShrinkDepth =
+            std::max(maximumTupleShrinkDepth, tupleShrinkDepth(expression));
         std::optional<std::size_t> knownArity;
         if (expression.kind == AstExpressionKind::TupleLiteral &&
             expression.children.size() >= 2 && expression.children.size() <= 22) {
@@ -1866,11 +1867,11 @@ standardDerivationDeclarations(const AstModule& module) {
       }
     }
   }
-  if (maximumTupleTailDepth != 0) {
+  if (maximumTupleShrinkDepth != 0) {
     const std::vector<std::size_t> baseArities = tupleArities;
     for (std::size_t base : baseArities) {
       for (std::size_t offset = 1;
-           offset <= maximumTupleTailDepth && offset < base; ++offset) {
+           offset <= maximumTupleShrinkDepth && offset < base; ++offset) {
         addTupleArity(base - offset);
       }
     }
@@ -10565,6 +10566,8 @@ TypeInfo Typechecker::inferSelectType(const AstExpression& expression, Scope& sc
 
   const bool tupleOperation =
       expression.text == support::StdNames::TupleHead ||
+      expression.text == support::StdNames::TupleInit ||
+      expression.text == support::StdNames::TupleLast ||
       expression.text == support::StdNames::TupleTail ||
       expression.text == support::StdNames::TupleSize;
   if (tupleOperation && expression.children.size() == 1) {
@@ -10604,29 +10607,40 @@ TypeInfo Typechecker::inferSelectType(const AstExpression& expression, Scope& sc
       if (expression.text == support::StdNames::TupleHead) {
         return receiver.typeArguments.front();
       }
+      if (expression.text == support::StdNames::TupleLast) {
+        return receiver.typeArguments.back();
+      }
       if (receiver.typeArguments.size() == 1) {
         auto empty = globalSymbols_.find(
             std::string(support::StdNames::ScalaEmptyTuple));
         if (empty == globalSymbols_.end()) {
-          diagnostics_.error(expression.span,
-                             "unresolved tuple tail result: scala.EmptyTuple");
+          diagnostics_.error(
+              expression.span,
+              "unresolved tuple " + expression.text +
+                  " result: scala.EmptyTuple");
           return TypeInfo{SimpleTypeKind::Unknown, "Unknown"};
         }
         return empty->second.type;
       }
-      const std::string tailConstructor =
+      const std::string resultConstructor =
           std::string(support::StdNames::ScalaTuple) +
           std::to_string(receiver.typeArguments.size() - 1);
-      auto tail = globalSymbols_.find(tailConstructor);
-      if (tail == globalSymbols_.end()) {
-        diagnostics_.error(expression.span,
-                           "unresolved tuple tail constructor: " + tailConstructor);
+      auto result = globalSymbols_.find(resultConstructor);
+      if (result == globalSymbols_.end()) {
+        diagnostics_.error(
+            expression.span, "unresolved tuple " + expression.text +
+                                 " constructor: " + resultConstructor);
         return TypeInfo{SimpleTypeKind::Unknown, "Unknown"};
       }
-      std::vector<TypeInfo> tailElements(std::next(receiver.typeArguments.begin()),
-                                         receiver.typeArguments.end());
+      const bool removesHead =
+          expression.text == support::StdNames::TupleTail;
+      std::vector<TypeInfo> resultElements(
+          removesHead ? std::next(receiver.typeArguments.begin())
+                      : receiver.typeArguments.begin(),
+          removesHead ? receiver.typeArguments.end()
+                      : std::prev(receiver.typeArguments.end()));
       return specializeResolvedTypeApplication(
-                 tail->second, tailElements, expression.span, true)
+                 result->second, resultElements, expression.span, true)
           .type;
     }
   }
