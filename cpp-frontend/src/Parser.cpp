@@ -1339,7 +1339,9 @@ AstExpression Parser::parseBinaryExpression(int minPrecedence) {
     }
 
     Token op = advance();
-    AstExpression right = parseBinaryExpression(currentPrecedence + 1);
+    const bool rightAssociative = !op.text.empty() && op.text.back() == ':';
+    AstExpression right =
+        parseBinaryExpression(currentPrecedence + (rightAssociative ? 0 : 1));
     AstExpression binary;
     binary.kind = AstExpressionKind::Binary;
     binary.text = op.text;

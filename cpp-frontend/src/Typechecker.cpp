@@ -1111,10 +1111,113 @@ parenthesizedTupleTypeElements(std::string_view typeName) {
   return result;
 }
 
+std::optional<std::vector<std::string>>
+consTupleTypeElements(std::string_view typeName) {
+  const std::string normalized = trim(typeName);
+  std::vector<std::string> heads;
+  std::size_t elementStart = 0;
+  std::size_t bracketDepth = 0;
+  std::size_t parenthesisDepth = 0;
+  char quote = '\0';
+  bool escaped = false;
+  for (std::size_t i = 0; i < normalized.size(); ++i) {
+    const char ch = normalized[i];
+    if (quote != '\0') {
+      if (escaped) {
+        escaped = false;
+      } else if (ch == '\\') {
+        escaped = true;
+      } else if (ch == quote) {
+        quote = '\0';
+      }
+      continue;
+    }
+    if (ch == '"' || ch == '\'') {
+      quote = ch;
+      continue;
+    }
+    if (ch == '[') {
+      ++bracketDepth;
+      continue;
+    }
+    if (ch == ']') {
+      if (bracketDepth == 0) {
+        return std::nullopt;
+      }
+      --bracketDepth;
+      continue;
+    }
+    if (ch == '(') {
+      ++parenthesisDepth;
+      continue;
+    }
+    if (ch == ')') {
+      if (parenthesisDepth == 0) {
+        return std::nullopt;
+      }
+      --parenthesisDepth;
+      continue;
+    }
+    if (ch != '*' || i + 1 >= normalized.size() || normalized[i + 1] != ':' ||
+        bracketDepth != 0 ||
+        parenthesisDepth != 0) {
+      continue;
+    }
+    const std::string head = trim(
+        std::string_view(normalized).substr(elementStart, i - elementStart));
+    if (head.empty()) {
+      return std::nullopt;
+    }
+    heads.push_back(head);
+    elementStart = i + 2;
+    ++i;
+  }
+  if (heads.empty() || bracketDepth != 0 || parenthesisDepth != 0 ||
+      quote != '\0') {
+    return std::nullopt;
+  }
+
+  const std::string tail =
+      trim(std::string_view(normalized).substr(elementStart));
+  if (tail.empty()) {
+    return std::nullopt;
+  }
+  const std::string compactTail = compactTypeName(tail);
+  if (compactTail == "EmptyTuple" ||
+      compactTail == support::StdNames::ScalaEmptyTuple) {
+    return heads;
+  }
+  if (const auto elements = parenthesizedTupleTypeElements(tail);
+      elements.has_value()) {
+    heads.insert(heads.end(), elements->begin(), elements->end());
+    return heads;
+  }
+  if (tail.size() >= 2 && tail.front() == '(' && tail.back() == ')') {
+    if (const auto elements = consTupleTypeElements(
+            std::string_view(tail).substr(1, tail.size() - 2));
+        elements.has_value()) {
+      heads.insert(heads.end(), elements->begin(), elements->end());
+      return heads;
+    }
+  }
+  const AppliedTypeSyntax applied = parseAppliedTypeSyntax(tail);
+  const std::optional<std::size_t> arity =
+      applied.malformed ? std::nullopt
+                        : tupleArityForConstructor(applied.constructor);
+  if (!arity.has_value() || applied.arguments.size() != *arity) {
+    return std::nullopt;
+  }
+  heads.insert(heads.end(), applied.arguments.begin(), applied.arguments.end());
+  return heads;
+}
+
 std::optional<std::vector<std::string>> tupleTypeElements(std::string_view typeName) {
   const std::string compact = compactTypeName(typeName);
   if (compact == "EmptyTuple" || compact == support::StdNames::ScalaEmptyTuple) {
     return std::vector<std::string>{};
+  }
+  if (const auto cons = consTupleTypeElements(typeName); cons.has_value()) {
+    return cons;
   }
   if (const auto parenthesized = parenthesizedTupleTypeElements(typeName);
       parenthesized.has_value()) {
@@ -1582,12 +1685,27 @@ standardDerivationDeclarations(const AstModule& module) {
   emptyTuple.parentTypes = {"scala.Tuple"};
 
   std::vector<std::size_t> tupleArities;
+  std::size_t maximumUnknownTupleConsDepth = 0;
   const auto addTupleArity = [&](std::size_t arity) {
-    if (arity != 0 && std::find(tupleArities.begin(), tupleArities.end(), arity) ==
-                          tupleArities.end()) {
+    if (arity >= 1 && arity <= 22 &&
+        std::find(tupleArities.begin(), tupleArities.end(), arity) ==
+            tupleArities.end()) {
       tupleArities.push_back(arity);
     }
   };
+  std::unordered_map<std::string, std::size_t> declaredTupleArities;
+  const std::function<void(const std::vector<AstDeclaration>&)>
+      collectDeclaredTupleArities =
+          [&](const std::vector<AstDeclaration>& declarations) {
+            for (const AstDeclaration& declaration : declarations) {
+              if (const auto elements = tupleTypeElements(declaration.declaredType);
+                  elements.has_value() && elements->size() <= 22) {
+                declaredTupleArities[declaration.name] = elements->size();
+              }
+              collectDeclaredTupleArities(declaration.members);
+            }
+          };
+  collectDeclaredTupleArities(module.declarations);
   const std::function<void(std::string_view)> collectTupleType =
       [&](std::string_view typeName) {
         const std::optional<std::vector<std::string>> elements =
@@ -1600,18 +1718,54 @@ standardDerivationDeclarations(const AstModule& module) {
           collectTupleType(element);
         }
       };
-  const std::function<void(const AstExpression&)> collectTupleExpressions =
+  const std::function<std::size_t(const AstExpression&)> tupleConsDepth =
       [&](const AstExpression& expression) {
+        return expression.kind == AstExpressionKind::Binary &&
+                       expression.text == "*:" && expression.children.size() == 2
+                   ? 1 + tupleConsDepth(expression.children[1])
+                   : 0;
+      };
+  const std::function<std::optional<std::size_t>(const AstExpression&)>
+      collectTupleExpressions =
+          [&](const AstExpression& expression) -> std::optional<std::size_t> {
+        std::optional<std::size_t> knownArity;
         if (expression.kind == AstExpressionKind::TupleLiteral &&
             expression.children.size() >= 2 && expression.children.size() <= 22) {
           addTupleArity(expression.children.size());
+          knownArity = expression.children.size();
+        } else if (expression.kind == AstExpressionKind::Identifier &&
+                   expression.text == "EmptyTuple") {
+          knownArity = 0;
+        } else if (expression.kind == AstExpressionKind::Identifier) {
+          if (auto declared = declaredTupleArities.find(expression.text);
+              declared != declaredTupleArities.end()) {
+            knownArity = declared->second;
+          }
         }
         for (const std::string& typeArgument : expression.typeArguments) {
           collectTupleType(typeArgument);
         }
-        for (const AstExpression& child : expression.children) {
-          collectTupleExpressions(child);
+        collectTupleType(expression.declaredType);
+        std::optional<std::size_t> rightArity;
+        for (std::size_t index = 0; index < expression.children.size(); ++index) {
+          const std::optional<std::size_t> childArity =
+              collectTupleExpressions(expression.children[index]);
+          if (index == 1) {
+            rightArity = childArity;
+          }
         }
+        if (expression.kind == AstExpressionKind::Binary &&
+            expression.text == "*:" && expression.children.size() == 2) {
+          if (rightArity.has_value() && *rightArity < 22) {
+            addTupleArity(*rightArity + 1);
+            return *rightArity + 1;
+          }
+          const std::size_t unknownDepth = tupleConsDepth(expression);
+          maximumUnknownTupleConsDepth =
+              std::max(maximumUnknownTupleConsDepth, unknownDepth);
+          return std::nullopt;
+        }
+        return knownArity;
       };
   const std::function<void(const std::vector<AstDeclaration>&)>
       collectTupleDeclarations =
@@ -1689,6 +1843,17 @@ standardDerivationDeclarations(const AstModule& module) {
       countNestedDirectChildren(candidate);
     }
     addTupleArity(childCount);
+  }
+  if (maximumUnknownTupleConsDepth != 0) {
+    std::vector<std::size_t> baseArities = tupleArities;
+    baseArities.push_back(0);
+    for (std::size_t base : baseArities) {
+      for (std::size_t offset = 1; offset <= maximumUnknownTupleConsDepth &&
+                                   base + offset <= 22;
+           ++offset) {
+        addTupleArity(base + offset);
+      }
+    }
   }
   std::sort(tupleArities.begin(), tupleArities.end());
 
@@ -9256,6 +9421,46 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
     }
     TypeInfo lhs = inferExpressionType(expression.children[0], scope);
     TypeInfo rhs = inferExpressionType(expression.children[1], scope);
+    if (expression.text == "*:") {
+      const bool emptyTail =
+          rhs.name == support::StdNames::ScalaEmptyTuple ||
+          rhs.runtimeName == support::StdNames::ScalaEmptyTuple;
+      const std::string tailConstructor =
+          rhs.typeConstructorName.empty() ? rhs.runtimeName
+                                          : rhs.typeConstructorName;
+      const std::optional<std::size_t> tailArity =
+          tupleArityForConstructor(tailConstructor);
+      if (!emptyTail &&
+          (!tailArity.has_value() || rhs.typeArguments.size() != *tailArity)) {
+        diagnostics_.error(expression.children[1].span,
+                           "*: right operand must be a concrete tuple");
+        return TypeInfo{SimpleTypeKind::Unknown, "Unknown"};
+      }
+      const std::size_t resultArity = rhs.typeArguments.size() + 1;
+      if (resultArity > 22) {
+        diagnostics_.error(expression.span,
+                           "*: tuple construction supports at most 22 elements in "
+                           "this subset");
+        return TypeInfo{SimpleTypeKind::Unknown, "Unknown"};
+      }
+      const std::string constructorName =
+          std::string(support::StdNames::ScalaTuple) +
+          std::to_string(resultArity);
+      auto constructor = globalSymbols_.find(constructorName);
+      if (constructor == globalSymbols_.end()) {
+        diagnostics_.error(expression.span,
+                           "unresolved tuple value constructor: " + constructorName);
+        return TypeInfo{SimpleTypeKind::Unknown, "Unknown"};
+      }
+      std::vector<TypeInfo> elementTypes;
+      elementTypes.reserve(resultArity);
+      elementTypes.push_back(std::move(lhs));
+      elementTypes.insert(elementTypes.end(), rhs.typeArguments.begin(),
+                          rhs.typeArguments.end());
+      return specializeResolvedTypeApplication(
+                 constructor->second, elementTypes, expression.span, true)
+          .type;
+    }
     if (expression.text == "==" || expression.text == "!=" || expression.text == "<" ||
         expression.text == ">" || expression.text == "<=" || expression.text == ">=") {
       return TypeInfo{SimpleTypeKind::Boolean, "Boolean"};
@@ -10077,9 +10282,18 @@ bool Typechecker::analyzeZoneExpression(
     }
     return false;
   case AstExpressionKind::Unary:
-  case AstExpressionKind::Binary:
     for (const AstExpression& child : expression.children) {
       (void)analyzeZoneExpression(child, arenaReferences, zoneLocals);
+    }
+    return false;
+  case AstExpressionKind::Binary:
+    for (const AstExpression& child : expression.children) {
+      const bool arenaReference =
+          analyzeZoneExpression(child, arenaReferences, zoneLocals);
+      if (expression.text == "*:" && arenaReference) {
+        diagnostics_.error(child.span,
+                           "Zone.scoped reference cannot be stored in a tuple");
+      }
     }
     return false;
   case AstExpressionKind::TupleLiteral:
@@ -12189,6 +12403,39 @@ TypeInfo Typechecker::typeFromDeclaredName(const std::string& name, const Scope*
   }
   if (normalized == "Null") {
     return TypeInfo{SimpleTypeKind::Null, "Null"};
+  }
+  if (const auto tupleElements = consTupleTypeElements(normalized);
+      tupleElements.has_value()) {
+    if (tupleElements->size() > 22) {
+      if (span != nullptr) {
+        diagnostics_.error(*span,
+                           "*: tuple types support at most 22 elements in this "
+                           "subset");
+      }
+      return TypeInfo{SimpleTypeKind::Unknown, normalized};
+    }
+    const std::string constructorName =
+        std::string(support::StdNames::ScalaTuple) +
+        std::to_string(tupleElements->size());
+    const SymbolInfo* constructor =
+        typeSymbolForDeclaredName(constructorName, scope);
+    if (constructor == nullptr) {
+      if (span != nullptr) {
+        diagnostics_.error(*span,
+                           "unresolved tuple type constructor: " + constructorName);
+      }
+      return TypeInfo{SimpleTypeKind::Unknown, normalized};
+    }
+    std::vector<TypeInfo> elementTypes;
+    elementTypes.reserve(tupleElements->size());
+    for (const std::string& element : *tupleElements) {
+      elementTypes.push_back(typeFromDeclaredName(element, scope, span));
+    }
+    return specializeResolvedTypeApplication(
+               *constructor, elementTypes,
+               span == nullptr ? support::SourceSpan::none() : *span,
+               span != nullptr)
+        .type;
   }
   if (const auto tupleElements = parenthesizedTupleTypeElements(normalized);
       tupleElements.has_value()) {

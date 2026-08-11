@@ -42,7 +42,7 @@ still use the selected preset normally. During work on the newest coverage, use:
 
 ```sh
 cmake --build build/debug --target cpp-smoke-tests -j2
-CPP_SCALANATIVE_SMOKE_TESTS7_ONLY=1 \
+CPP_SCALANATIVE_SMOKE_TESTS9_ONLY=1 \
   build/debug/cpp-tests/smoke/cpp-smoke-tests
 ```
 
@@ -146,8 +146,13 @@ build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
 # 22, including nested tuples and trailing commas. Element types are inferred in
 # order, primitive and String values are boxed into demand-driven `TupleN`
 # storage, and `_1` through `_N` projections restore their precise types.
-# Parenthesized single expressions remain grouping; `Tuple1`, `EmptyTuple`, and
-# `*:`-based tuple construction retain their explicit or later staged forms.
+# Parenthesized single expressions remain grouping; `Tuple1` and `EmptyTuple`
+# also remain available through their explicit forms.
+# Scala 3 `head *: tail` tuple construction is right-associative and accepts a
+# closed `TupleN` or `EmptyTuple` tail, including parenthesized and stored tails.
+# Closed cons types such as `Int *: String *: EmptyTuple` normalize to the same
+# precise tuple types, and construction preserves head-before-tail evaluation
+# while using the ordinary demand-driven Tuple1-through-Tuple22 representation.
 # Compiler-owned `scala.compiletime.requireConst(value)` accepts Boolean, Byte,
 # Short, Int, Long, Float, Double, Char, and String expressions and verifies
 # them after inline substitution and constant folding. Canonical, renamed, and
@@ -209,6 +214,10 @@ build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
 build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
   --output /tmp/tuple-values \
   cpp-examples/TupleValues.scala
+
+build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
+  --output /tmp/tuple-cons \
+  cpp-examples/TupleCons.scala
 
 build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
   --output /tmp/compiletime-uninitialized \

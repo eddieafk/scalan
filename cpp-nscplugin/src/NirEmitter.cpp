@@ -2476,6 +2476,14 @@ nir::Value valueFor(const frontend::AstExpression& expression,
       return nir::localValue(std::string(support::StdNames::RuntimePrintln),
                              expression.span);
     }
+    if (expression.text == "EmptyTuple") {
+      if (const frontend::TypeInfo* type = annotatedTypeFor(expression, context);
+          type != nullptr &&
+          runtimeTypeName(*type) == support::StdNames::ScalaEmptyTuple) {
+        return nir::localValue(std::string(support::StdNames::ScalaEmptyTuple),
+                               expression.span);
+      }
+    }
     if (expression.text == support::StdNames::GcCollect) {
       return nir::localValue(std::string(support::StdNames::RuntimeGcCollect),
                              expression.span);
@@ -3797,6 +3805,50 @@ nir::Value valueFor(const frontend::AstExpression& expression,
   case AstExpressionKind::Binary:
     if (expression.children.size() != 2) {
       return nir::unknownValue("<malformed-binary>", expression.span);
+    }
+    if (expression.text == "*:") {
+      const frontend::TypeInfo* resultType = annotatedTypeFor(expression, context);
+      const frontend::TypeInfo* headType =
+          annotatedTypeFor(expression.children[0], context);
+      const frontend::TypeInfo* tailType =
+          annotatedTypeFor(expression.children[1], context);
+      if (resultType == nullptr || headType == nullptr || tailType == nullptr ||
+          !isTupleClassName(runtimeTypeName(*resultType)) ||
+          resultType->typeArguments.empty()) {
+        return nir::unknownValue("<malformed-tuple-cons>", expression.span);
+      }
+
+      const std::string headName =
+          "tupleCons$head$" + std::to_string(expression.span.start);
+      const std::string tailName =
+          "tupleCons$tail$" + std::to_string(expression.span.start);
+      std::vector<nir::Value> evaluation;
+      evaluation.push_back(nir::localLetValue(
+          headName, runtimeTypeName(*headType),
+          expressionValueFor(expression.children[0], context),
+          expression.children[0].span));
+      evaluation.push_back(nir::localLetValue(
+          tailName, runtimeTypeName(*tailType),
+          expressionValueFor(expression.children[1], context),
+          expression.children[1].span));
+
+      std::vector<nir::Value> elements;
+      elements.reserve(resultType->typeArguments.size());
+      nir::Value head = nir::localValue(headName, expression.children[0].span);
+      if (const std::string boxed =
+              boxedObjectTypeName(resultType->typeArguments.front().kind);
+          !boxed.empty()) {
+        head = nir::boxValue(boxed, std::move(head), expression.children[0].span);
+      }
+      elements.push_back(std::move(head));
+      for (std::size_t index = 1; index < resultType->typeArguments.size(); ++index) {
+        elements.push_back(nir::selectValue(
+            nir::localValue(tailName, expression.children[1].span),
+            "_" + std::to_string(index), expression.children[1].span));
+      }
+      evaluation.push_back(nir::newValue(runtimeTypeName(*resultType),
+                                         std::move(elements), expression.span));
+      return nir::blockValue(std::move(evaluation), expression.span);
     }
     if (expression.text == "==" || expression.text == "!=") {
       if (hasObjectRuntimeType(expression.children[0], context) ||

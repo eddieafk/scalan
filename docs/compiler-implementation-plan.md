@@ -1202,9 +1202,30 @@ Current scaffold status:
   direct and stored values, mixed Tuple3 values, nesting, trailing commas,
   grouping, evaluation order, boundary diagnostics, demand-driven layout,
   boxing/unboxing, and NIR erasure. `cpp-examples/TupleValues.scala` is the public
-  example. `Tuple1` and `EmptyTuple` retain their explicit construction forms;
-  right-associative `*:` construction and general tuple algorithms remain the
-  next tuple milestones.
+  example. `Tuple1` and `EmptyTuple` retain their explicit construction forms.
+  Scala 3 `head *: tail` construction now parses all colon-ending binary
+  operators right-associatively and recognizes `*:` as the tuple prepend
+  operation. Its right operand must have a closed `EmptyTuple` or `TupleN` type,
+  and closed cons type syntax such as `Int *: String *: EmptyTuple` normalizes to
+  the same precise `TupleN` type as `(Int, String)`; grouped cons tails and
+  parenthesized or explicit `TupleN` tails are accepted as well.
+  Pre-typecheck discovery propagates exact arities through `EmptyTuple`, tuple
+  literals, declared tuple results, and nested cons expressions, falling back to
+  a bounded neighboring-arity expansion only for an opaque tail. Consequently,
+  a source needing Tuple1 through Tuple3 does not synthesize Tuple4 or the full
+  library family. Typechecking infers the head before the tail, enforces the
+  closed-tuple and 22-element boundaries, prepends the head type to the tail's
+  element types, and preserves precise `_N` projections.
+  NIR evaluates and binds the head before evaluating and binding the tail,
+  boxes the new head for Object storage, copies the tail's already-erased fields,
+  and constructs the corresponding flat `TupleN`, matching Scala 3's ordinary
+  runtime tuple representation rather than introducing cons-cell classes.
+  `SmokeTests9.cpp` starts a fresh fast-test partition and covers native output,
+  right association, singleton and multi-element chains, grouped types, stored
+  and literal tails, reference elements, head-before-tail evaluation, boundary
+  diagnostics, exact demand-driven layout, boxing/projections, and NIR erasure.
+  `cpp-examples/TupleCons.scala` is the public example. General tuple algorithms
+  such as statically typed `head`, `tail`, and `size` remain later milestones.
   Compiler-owned `scala.compiletime.requireConst(value)` accepts Boolean, Byte,
   Short, Int, Long, Float, Double, Char, and String arguments through canonical,
   renamed, or qualified calls. It reuses inline substitution and constant
