@@ -1224,8 +1224,29 @@ Current scaffold status:
   right association, singleton and multi-element chains, grouped types, stored
   and literal tails, reference elements, head-before-tail evaluation, boundary
   diagnostics, exact demand-driven layout, boxing/projections, and NIR erasure.
-  `cpp-examples/TupleCons.scala` is the public example. General tuple algorithms
-  such as statically typed `head`, `tail`, and `size` remain later milestones.
+  `cpp-examples/TupleCons.scala` is the public example.
+  Closed tuple values now support Scala 3's statically typed `head`, `tail`, and
+  `size` operations directly on parenthesized, explicit, stored, and cons-built
+  tuples. `head` selects erased `_1` storage and restores the exact primitive,
+  String, or reference element type. `tail` computes the covariant TupleN suffix,
+  copies erased `_2` through `_N` fields into a smaller flat runtime tuple, and
+  returns the stable `EmptyTuple` module for Tuple1. Nested tail selection feeds
+  a downward demand pass, so only the smaller arities actually reachable from
+  source operations are synthesized.
+  `size` produces the exact singleton Int type described by Scala's `Tuple.Size`
+  match type and lowers to that literal after receiver evaluation;
+  `EmptyTuple.size` is therefore the singleton `0`. All three operations bind
+  their receiver exactly once before selecting, rebuilding, or returning the
+  size constant, preserving side effects for direct and method-valued receivers.
+  `head` and `tail` on `EmptyTuple`, plus operations whose receiver remains only
+  the abstract `Tuple` supertype, receive focused compile-time diagnostics.
+  `SmokeTests10.cpp` starts another compact fast-test partition and covers native
+  output, exact head/reference types, Tuple3-to-Tuple2-to-Tuple1-to-EmptyTuple
+  tails, singleton sizes, cons-built and direct receivers, evaluation count,
+  demand-driven layout, diagnostics, and NIR erasure.
+  `cpp-examples/TupleOperations.scala` is the public example. General operations
+  including statically typed `apply`, `init`, `last`, concatenation, and mapping
+  remain later tuple milestones.
   Compiler-owned `scala.compiletime.requireConst(value)` accepts Boolean, Byte,
   Short, Int, Long, Float, Double, Char, and String arguments through canonical,
   renamed, or qualified calls. It reuses inline substitution and constant

@@ -42,7 +42,7 @@ still use the selected preset normally. During work on the newest coverage, use:
 
 ```sh
 cmake --build build/debug --target cpp-smoke-tests -j2
-CPP_SCALANATIVE_SMOKE_TESTS9_ONLY=1 \
+CPP_SCALANATIVE_SMOKE_TESTS10_ONLY=1 \
   build/debug/cpp-tests/smoke/cpp-smoke-tests
 ```
 
@@ -153,6 +153,11 @@ build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
 # Closed cons types such as `Int *: String *: EmptyTuple` normalize to the same
 # precise tuple types, and construction preserves head-before-tail evaluation
 # while using the ordinary demand-driven Tuple1-through-Tuple22 representation.
+# Closed tuples support Scala 3 `head`, `tail`, and `size`. `head` restores the
+# first element's precise type, `tail` constructs the corresponding smaller flat
+# tuple down to `EmptyTuple`, and `size` has its literal singleton Int type.
+# Every operation evaluates its receiver exactly once; `EmptyTuple.size` is `0`,
+# while `EmptyTuple.head` and `EmptyTuple.tail` receive compile-time diagnostics.
 # Compiler-owned `scala.compiletime.requireConst(value)` accepts Boolean, Byte,
 # Short, Int, Long, Float, Double, Char, and String expressions and verifies
 # them after inline substitution and constant folding. Canonical, renamed, and
@@ -218,6 +223,10 @@ build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
 build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
   --output /tmp/tuple-cons \
   cpp-examples/TupleCons.scala
+
+build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
+  --output /tmp/tuple-operations \
+  cpp-examples/TupleOperations.scala
 
 build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
   --output /tmp/compiletime-uninitialized \

@@ -21,6 +21,9 @@ struct StdNames final {
       "scala.compiletime.constValueTuple";
   inline static constexpr std::string_view ScalaTuple = "scala.Tuple";
   inline static constexpr std::string_view ScalaEmptyTuple = "scala.EmptyTuple";
+  inline static constexpr std::string_view TupleHead = "head";
+  inline static constexpr std::string_view TupleTail = "tail";
+  inline static constexpr std::string_view TupleSize = "size";
   inline static constexpr std::string_view ScalaOption = "scala.Option";
   inline static constexpr std::string_view ScalaSome = "scala.Some";
   inline static constexpr std::string_view ScalaNone = "scala.None";
