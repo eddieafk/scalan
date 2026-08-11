@@ -1758,6 +1758,7 @@ standardDerivationDeclarations(const AstModule& module) {
           [&](const AstExpression& expression) -> std::optional<std::size_t> {
         needsPolyFunction =
             needsPolyFunction ||
+            expression.kind == AstExpressionKind::PolymorphicFunction ||
             (expression.kind == AstExpressionKind::Select &&
              expression.text == support::StdNames::TupleMap);
         maximumTupleShrinkDepth =
@@ -2137,6 +2138,7 @@ TypedModule Typechecker::typecheck(const AstModule& module) {
   expressionTypes_.clear();
   contextApplications_.clear();
   inlineApplications_.clear();
+  polymorphicFunctionApplications_.clear();
   validatedInlineValueSymbols_.clear();
   directZoneReceiverEscapes_.clear();
   receiverMethodCallSites_.clear();
@@ -2232,6 +2234,7 @@ TypedModule Typechecker::typecheck(const AstModule& module) {
   typed.expressionTypes = expressionTypes_;
   typed.contextApplications = contextApplications_;
   typed.inlineApplications = inlineApplications_;
+  typed.polymorphicFunctionApplications = polymorphicFunctionApplications_;
   return typed;
 }
 
@@ -6204,6 +6207,8 @@ Typechecker::sourceCodeForExpression(const AstExpression& expression,
       return "(" + *elements + ")";
     }
     break;
+  case AstExpressionKind::PolymorphicFunction:
+    break;
   case AstExpressionKind::Call:
     if (!expression.children.empty()) {
       const std::optional<std::string> callee =
@@ -7210,6 +7215,18 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
                constructor->second, elementTypes, expression.span, true)
         .type;
   }
+  case AstExpressionKind::PolymorphicFunction: {
+    diagnostics_.error(
+        expression.span,
+        "polymorphic function literals are currently supported only as direct "
+        "Tuple.map arguments");
+    const SymbolInfo* polyFunction = typeSymbolForDeclaredName(
+        std::string(support::StdNames::ScalaPolyFunction), &scope);
+    return polyFunction == nullptr
+               ? TypeInfo{SimpleTypeKind::Object,
+                          std::string(support::StdNames::ScalaPolyFunction)}
+               : polyFunction->type;
+  }
   case AstExpressionKind::LocalDeclaration:
     if (expression.text.empty()) {
       diagnostics_.error(expression.span, "local declaration has no name");
@@ -7723,13 +7740,13 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
           receiver.name == support::StdNames::ScalaTuple ||
           receiver.runtimeName == support::StdNames::ScalaTuple;
       if (emptyTuple || arity.has_value() || abstractTuple) {
-        std::vector<TypeInfo> argumentTypes;
-        argumentTypes.reserve(expression.children.size() - 1);
-        for (std::size_t index = 1; index < expression.children.size(); ++index) {
-          argumentTypes.push_back(
-              inferExpressionType(expression.children[index], scope));
-        }
         if (expression.children.size() != 2) {
+          for (std::size_t index = 1; index < expression.children.size(); ++index) {
+            if (expression.children[index].kind !=
+                AstExpressionKind::PolymorphicFunction) {
+              (void)inferExpressionType(expression.children[index], scope);
+            }
+          }
           diagnostics_.error(
               expression.span,
               "tuple map requires exactly one polymorphic function");
@@ -7743,35 +7760,137 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
           return TypeInfo{SimpleTypeKind::Unknown, "Unknown"};
         }
 
-        const SymbolInfo* application = knownMemberForReceiverType(
-            argumentTypes.front(),
-            std::string(support::StdNames::TupleApply));
-        const SymbolInfo* polyFunction = typeSymbolForDeclaredName(
-            std::string(support::StdNames::ScalaPolyFunction), &scope);
-        const bool polymorphicUnaryApplication =
-            polyFunction != nullptr &&
-            isAssignable(polyFunction->type, argumentTypes.front()) &&
-            application != nullptr &&
-            application->kind == AstDeclarationKind::Def &&
-            application->typeParameters.size() == 1 &&
-            application->parameterTypes.size() == 1 &&
-            application->parameterClauseSizes.size() == 1 &&
-            application->parameterClauseSizes.front() == 1 &&
-            application->contextualParameters.size() == 1 &&
-            !application->contextualParameters.front() &&
-            application->typeParameters.front().upperBound.kind ==
-                SimpleTypeKind::Object &&
-            application->typeParameters.front().upperBound.name == "Object" &&
-            application->typeParameters.front().lowerBound.kind ==
-                SimpleTypeKind::Nothing &&
-            application->parameterTypes.front().typeParameter &&
-            application->parameterTypes.front().typeParameterSymbolName ==
-                application->typeParameters.front().symbolName;
-        if (!polymorphicUnaryApplication) {
-          diagnostics_.error(
-              expression.children[1].span,
-              "tuple map function must define apply[A](value: A)");
-          return TypeInfo{SimpleTypeKind::Unknown, "Unknown"};
+        const AstExpression& function = expression.children[1];
+        std::vector<TypeInfo> mappedElements;
+        if (function.kind == AstExpressionKind::PolymorphicFunction) {
+          const AstLocalMethod* method = function.localMethod.get();
+          const bool basicShape =
+              method != nullptr && method->typeParameters.size() == 1 &&
+              method->parameters.size() == 1 &&
+              method->contextualParameters.size() == 1 &&
+              !method->contextualParameters.front() && function.children.size() == 1 &&
+              method->typeParameters.front().variance == TypeVariance::Invariant &&
+              method->typeParameters.front().lowerBound.empty() &&
+              method->typeParameters.front().upperBound.empty() &&
+              method->typeParameters.front().contextBounds.empty();
+          if (!basicShape) {
+            diagnostics_.error(
+                function.span,
+                "tuple map polymorphic function literal must have the form "
+                "[A] => (value: A) => body");
+            return TypeInfo{SimpleTypeKind::Unknown, "Unknown"};
+          }
+
+          Scope functionScope = scope;
+          const std::string functionOwner = qualify(
+              currentPackageName_, "$poly$" + std::to_string(function.span.start));
+          const std::vector<TypeParameterInfo> typeParameters = resolvedTypeParameters(
+              method->typeParameters, functionOwner, functionScope);
+          const TypeInfo parameter =
+              parameterType(method->parameters.front(), &functionScope, &function.span);
+          const bool exactParameter =
+              typeParameters.size() == 1 && parameter.typeParameter &&
+              parameter.typeParameterSymbolName == typeParameters.front().symbolName;
+          if (!exactParameter) {
+            diagnostics_.error(
+                function.span,
+                "tuple map polymorphic function literal must have the form "
+                "[A] => (value: A) => body");
+            return TypeInfo{SimpleTypeKind::Unknown, "Unknown"};
+          }
+
+          SymbolInfo valueParameter;
+          valueParameter.kind = AstDeclarationKind::Val;
+          valueParameter.name = parameterName(method->parameters.front());
+          valueParameter.symbolName = qualify(functionOwner, valueParameter.name);
+          valueParameter.type = parameter;
+          valueParameter.isLexicalValue = true;
+          functionScope[valueParameter.name] = valueParameter;
+
+          std::vector<TypedExpressionInfo> outerExpressionTypes =
+              std::move(expressionTypes_);
+          std::vector<TypedContextApplication> outerContextApplications =
+              std::move(contextApplications_);
+          std::vector<TypedInlineApplication> outerInlineApplications =
+              std::move(inlineApplications_);
+          expressionTypes_.clear();
+          contextApplications_.clear();
+          inlineApplications_.clear();
+
+          const TypeInfo functionResult =
+              inferExpressionType(function.children.front(), functionScope);
+
+          TypedPolymorphicFunctionApplication literalApplication;
+          literalApplication.span = expression.span;
+          literalApplication.parameterName = valueParameter.name;
+          literalApplication.parameterType = parameter;
+          literalApplication.resultType = functionResult;
+          literalApplication.body = function.children.front();
+          literalApplication.expressionTypes = std::move(expressionTypes_);
+          literalApplication.contextApplications = std::move(contextApplications_);
+          literalApplication.inlineApplications = std::move(inlineApplications_);
+
+          expressionTypes_ = std::move(outerExpressionTypes);
+          contextApplications_ = std::move(outerContextApplications);
+          inlineApplications_ = std::move(outerInlineApplications);
+
+          mappedElements.reserve(receiver.typeArguments.size());
+          std::unordered_map<std::string, TypeInfo> substitutions;
+          for (const TypeInfo& element : receiver.typeArguments) {
+            substitutions[typeParameters.front().symbolName] = element;
+            mappedElements.push_back(
+                substituteTypeParameters(functionResult, substitutions));
+          }
+          literalApplication.mappedResultTypes = mappedElements;
+          const auto sameSpan =
+              [&](const TypedPolymorphicFunctionApplication& candidate) {
+                return candidate.span.source == expression.span.source &&
+                       candidate.span.start == expression.span.start &&
+                       candidate.span.length == expression.span.length;
+              };
+          auto existing =
+              std::find_if(polymorphicFunctionApplications_.begin(),
+                           polymorphicFunctionApplications_.end(), sameSpan);
+          if (existing == polymorphicFunctionApplications_.end()) {
+            polymorphicFunctionApplications_.push_back(std::move(literalApplication));
+          } else {
+            *existing = std::move(literalApplication);
+          }
+        } else {
+          const TypeInfo argumentType = inferExpressionType(function, scope);
+          const SymbolInfo* application = knownMemberForReceiverType(
+              argumentType, std::string(support::StdNames::TupleApply));
+          const SymbolInfo* polyFunction = typeSymbolForDeclaredName(
+              std::string(support::StdNames::ScalaPolyFunction), &scope);
+          const bool polymorphicUnaryApplication =
+              polyFunction != nullptr &&
+              isAssignable(polyFunction->type, argumentType) &&
+              application != nullptr && application->kind == AstDeclarationKind::Def &&
+              application->typeParameters.size() == 1 &&
+              application->parameterTypes.size() == 1 &&
+              application->parameterClauseSizes.size() == 1 &&
+              application->parameterClauseSizes.front() == 1 &&
+              application->contextualParameters.size() == 1 &&
+              !application->contextualParameters.front() &&
+              application->typeParameters.front().upperBound.kind ==
+                  SimpleTypeKind::Object &&
+              application->typeParameters.front().upperBound.name == "Object" &&
+              application->typeParameters.front().lowerBound.kind ==
+                  SimpleTypeKind::Nothing &&
+              application->parameterTypes.front().typeParameter &&
+              application->parameterTypes.front().typeParameterSymbolName ==
+                  application->typeParameters.front().symbolName;
+          if (!polymorphicUnaryApplication) {
+            diagnostics_.error(function.span,
+                               "tuple map function must define apply[A](value: A)");
+            return TypeInfo{SimpleTypeKind::Unknown, "Unknown"};
+          }
+          mappedElements.reserve(receiver.typeArguments.size());
+          for (const TypeInfo& element : receiver.typeArguments) {
+            mappedElements.push_back(specializeResolvedTypeApplication(
+                                         *application, {element}, expression.span, true)
+                                         .type);
+          }
         }
 
         if (emptyTuple) {
@@ -7786,14 +7905,6 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
           return empty->second.type;
         }
 
-        std::vector<TypeInfo> mappedElements;
-        mappedElements.reserve(receiver.typeArguments.size());
-        for (const TypeInfo& element : receiver.typeArguments) {
-          mappedElements.push_back(
-              specializeResolvedTypeApplication(*application, {element},
-                                                expression.span, true)
-                  .type);
-        }
         const std::string resultConstructor =
             std::string(support::StdNames::ScalaTuple) +
             std::to_string(mappedElements.size());
@@ -10169,6 +10280,7 @@ bool Typechecker::expressionDirectlyEscapesReceiver(
   case AstExpressionKind::While:
   case AstExpressionKind::Unary:
   case AstExpressionKind::Binary:
+  case AstExpressionKind::PolymorphicFunction:
   case AstExpressionKind::TupleLiteral: {
     bool result = false;
     for (const AstExpression& child : expression.children) {
@@ -10668,6 +10780,11 @@ bool Typechecker::analyzeZoneExpression(
         diagnostics_.error(child.span,
                            "Zone.scoped reference cannot be stored in a tuple");
       }
+    }
+    return false;
+  case AstExpressionKind::PolymorphicFunction:
+    for (const AstExpression& child : expression.children) {
+      (void)analyzeZoneExpression(child, arenaReferences, zoneLocals);
     }
     return false;
   }

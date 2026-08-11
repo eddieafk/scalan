@@ -442,6 +442,19 @@ bool AstValidator::validateExpression(const AstExpression& expression,
       ok = false;
     }
     break;
+  case AstExpressionKind::PolymorphicFunction:
+    if (expression.localMethod == nullptr || expression.children.size() != 1) {
+      diagnostics.error(
+          expression.span,
+          "polymorphic function must have type parameters, value parameters, and "
+          "one body");
+      ok = false;
+    } else {
+      ok = validateParameterNames(expression.localMethod->parameters, expression.span,
+                                  diagnostics) &&
+           ok;
+    }
+    break;
   case AstExpressionKind::Assign:
     if (expression.children.size() != 2) {
       diagnostics.error(expression.span,

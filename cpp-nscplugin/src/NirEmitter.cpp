@@ -32,6 +32,8 @@ struct ValueContext {
   const std::vector<frontend::TypedExpressionInfo>* expressionTypes = nullptr;
   const std::vector<frontend::TypedContextApplication>* contextApplications = nullptr;
   const std::vector<frontend::TypedInlineApplication>* inlineApplications = nullptr;
+  const std::vector<frontend::TypedPolymorphicFunctionApplication>*
+      polymorphicFunctionApplications = nullptr;
   std::unordered_set<std::string>* referenceArrayElementTypes = nullptr;
   std::map<std::string, std::string>* runtimeArrayDeclarations = nullptr;
   std::vector<std::string> superTypes;
@@ -708,6 +710,25 @@ inlineApplicationFor(const frontend::AstExpression& expression,
                candidate.span.length == expression.span.length;
       });
   return application == context.inlineApplications->rend() ? nullptr : &*application;
+}
+
+const frontend::TypedPolymorphicFunctionApplication*
+polymorphicFunctionApplicationFor(const frontend::AstExpression& expression,
+                                  const ValueContext& context) {
+  if (context.polymorphicFunctionApplications == nullptr ||
+      !expression.span.isValid()) {
+    return nullptr;
+  }
+  auto application =
+      std::find_if(context.polymorphicFunctionApplications->rbegin(),
+                   context.polymorphicFunctionApplications->rend(),
+                   [&](const frontend::TypedPolymorphicFunctionApplication& candidate) {
+                     return candidate.span.source == expression.span.source &&
+                            candidate.span.start == expression.span.start &&
+                            candidate.span.length == expression.span.length;
+                   });
+  return application == context.polymorphicFunctionApplications->rend() ? nullptr
+                                                                        : &*application;
 }
 
 std::unordered_set<std::string>
@@ -2601,6 +2622,8 @@ nir::Value valueFor(const frontend::AstExpression& expression,
     return nir::newValue(runtimeTypeName(*tuple), std::move(values),
                          expression.span);
   }
+  case AstExpressionKind::PolymorphicFunction:
+    return nir::unknownValue("<unlowered-polymorphic-function>", expression.span);
   case AstExpressionKind::LocalDeclaration:
     return nir::unitValue(expression.span);
   case AstExpressionKind::Return:
@@ -3272,6 +3295,76 @@ nir::Value valueFor(const frontend::AstExpression& expression,
       return inlineApplicationValueFor(*application, context);
     }
     const frontend::AstExpression& callCallee = expression.children.front();
+    if (callCallee.kind == AstExpressionKind::Select &&
+        callCallee.children.size() == 1 &&
+        callCallee.text == support::StdNames::TupleMap &&
+        expression.children.size() == 2 &&
+        expression.children[1].kind == AstExpressionKind::PolymorphicFunction) {
+      const frontend::TypedPolymorphicFunctionApplication* application =
+          polymorphicFunctionApplicationFor(expression, context);
+      const frontend::AstExpression& receiverExpression = callCallee.children.front();
+      const frontend::TypeInfo* receiverType =
+          annotatedTypeFor(receiverExpression, context);
+      const frontend::TypeInfo* resultType = annotatedTypeFor(expression, context);
+      const bool emptyTuple =
+          receiverType != nullptr &&
+          runtimeTypeName(*receiverType) == support::StdNames::ScalaEmptyTuple;
+      const bool concreteTuple = receiverType != nullptr &&
+                                 isTupleClassName(runtimeTypeName(*receiverType)) &&
+                                 !receiverType->typeArguments.empty();
+      if (application != nullptr && resultType != nullptr &&
+          (emptyTuple || concreteTuple)) {
+        const std::string receiverName =
+            "tupleMap$receiver$" + std::to_string(expression.span.start);
+        std::vector<nir::Value> evaluation;
+        evaluation.push_back(nir::localLetValue(
+            receiverName, runtimeTypeName(*receiverType),
+            expressionValueFor(receiverExpression, context), receiverExpression.span));
+        if (emptyTuple) {
+          evaluation.push_back(nir::localValue(
+              std::string(support::StdNames::ScalaEmptyTuple), expression.span));
+          return nir::blockValue(std::move(evaluation), expression.span);
+        }
+        if (!isTupleClassName(runtimeTypeName(*resultType)) ||
+            resultType->typeArguments.size() != receiverType->typeArguments.size() ||
+            application->mappedResultTypes.size() !=
+                receiverType->typeArguments.size()) {
+          return nir::unknownValue("<malformed-polymorphic-tuple-map>",
+                                   expression.span);
+        }
+
+        ValueContext functionContext = context;
+        functionContext.expressionTypes = &application->expressionTypes;
+        functionContext.contextApplications = &application->contextApplications;
+        functionContext.inlineApplications = &application->inlineApplications;
+        bindLocalName(functionContext, application->parameterName);
+
+        std::vector<nir::Value> mappedElements;
+        mappedElements.reserve(receiverType->typeArguments.size());
+        for (std::size_t index = 1; index <= receiverType->typeArguments.size();
+             ++index) {
+          nir::Value element =
+              nir::selectValue(nir::localValue(receiverName, receiverExpression.span),
+                               "_" + std::to_string(index), receiverExpression.span);
+          std::vector<nir::Value> invocation;
+          invocation.push_back(nir::localLetValue(
+              application->parameterName, runtimeTypeName(application->parameterType),
+              std::move(element), expression.children[1].span));
+          invocation.push_back(scopedBodyValueFor(application->body, functionContext));
+          nir::Value mapped =
+              nir::blockValue(std::move(invocation), application->body.span);
+          if (const std::string boxed =
+                  boxedObjectTypeName(application->resultType.kind);
+              !boxed.empty() && runtimeTypeName(application->resultType) != "Object") {
+            mapped = nir::boxValue(boxed, std::move(mapped), expression.span);
+          }
+          mappedElements.push_back(std::move(mapped));
+        }
+        evaluation.push_back(nir::newValue(runtimeTypeName(*resultType),
+                                           std::move(mappedElements), expression.span));
+        return nir::blockValue(std::move(evaluation), expression.span);
+      }
+    }
     if (callCallee.kind == AstExpressionKind::Select &&
         callCallee.children.size() == 1 &&
         callCallee.text == support::StdNames::TupleMap &&
@@ -5518,6 +5611,7 @@ void NirEmitter::emitDeclaration(
   context.expressionTypes = &module.expressionTypes;
   context.contextApplications = &module.contextApplications;
   context.inlineApplications = &module.inlineApplications;
+  context.polymorphicFunctionApplications = &module.polymorphicFunctionApplications;
   context.referenceArrayElementTypes = referenceArrayElementTypes;
   context.runtimeArrayDeclarations = runtimeArrayDeclarations;
   context.hasImplicitReceiver = hasImplicitReceiver;

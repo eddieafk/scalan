@@ -155,12 +155,25 @@ struct TypedInlineApplication {
   std::vector<TypedInlineApplication> inlineApplications;
 };
 
+struct TypedPolymorphicFunctionApplication {
+  support::SourceSpan span;
+  std::string parameterName;
+  TypeInfo parameterType;
+  TypeInfo resultType;
+  std::vector<TypeInfo> mappedResultTypes;
+  AstExpression body;
+  std::vector<TypedExpressionInfo> expressionTypes;
+  std::vector<TypedContextApplication> contextApplications;
+  std::vector<TypedInlineApplication> inlineApplications;
+};
+
 struct TypedModule {
   std::string packageName;
   std::vector<TypedDeclaration> declarations;
   std::vector<TypedExpressionInfo> expressionTypes;
   std::vector<TypedContextApplication> contextApplications;
   std::vector<TypedInlineApplication> inlineApplications;
+  std::vector<TypedPolymorphicFunctionApplication> polymorphicFunctionApplications;
 };
 
 struct SymbolInfo {
@@ -478,6 +491,7 @@ private:
   std::vector<TypedExpressionInfo> expressionTypes_;
   std::vector<TypedContextApplication> contextApplications_;
   std::vector<TypedInlineApplication> inlineApplications_;
+  std::vector<TypedPolymorphicFunctionApplication> polymorphicFunctionApplications_;
   std::unordered_set<std::string> validatedInlineValueSymbols_;
   std::unordered_set<std::string> directZoneReceiverEscapes_;
   std::unordered_map<std::string, std::vector<AstExpression>> receiverMethodCallSites_;

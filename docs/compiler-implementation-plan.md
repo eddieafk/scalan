@@ -1304,9 +1304,24 @@ Current scaffold status:
   `SmokeTests14.cpp` starts a new compact partition covering native output,
   identity/applied/constant result specialization, exact projections, effect and
   application order, empty behavior, demand-driven layout, diagnostics, and NIR
-  erasure. `cpp-examples/TupleMap.scala` is the public example. Polymorphic
-  function literals and general higher-kinded type-lambda application remain
-  later language milestones.
+  erasure. `cpp-examples/TupleMap.scala` is the named-mapper public example.
+  Direct `Tuple.map` arguments now also accept the explicitly typed Scala 3
+  polymorphic-function literal form `[A] => (value: A) => body`. The parser
+  retains its type and value parameters as a dedicated expression. Typechecking
+  validates the unary unbounded shape, checks the body once with abstract `A`,
+  and substitutes the generic body result independently for every tuple element;
+  this prevents element-specific operations from bypassing polymorphic body
+  checking while preserving identity, `Box[A]`, constant reference, and constant
+  primitive results. NIR binds the receiver once, binds each erased element to
+  the abstract parameter in its own invocation scope, evaluates captured-body
+  effects left-to-right, boxes results only when the generic body ABI requires
+  it, and elides body evaluation for `EmptyTuple`. `SmokeTests15.cpp` begins a
+  fresh compact partition for parser/type/result coverage, captures, native
+  output, exact projections, empty behavior, diagnostics, and NIR erasure;
+  `cpp-examples/PolymorphicTupleMap.scala` is the public example. Persisting or
+  invoking a polymorphic literal outside direct `Tuple.map`, general closure
+  objects, and higher-kinded type-lambda application remain later language
+  milestones.
   Compiler-owned `scala.compiletime.requireConst(value)` accepts Boolean, Byte,
   Short, Int, Long, Float, Double, Char, and String arguments through canonical,
   renamed, or qualified calls. It reuses inline substitution and constant

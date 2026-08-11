@@ -1499,6 +1499,9 @@ AstExpression Parser::parsePostfixExpression() {
 }
 
 AstExpression Parser::parsePrimaryExpression() {
+  if (check(TokenKind::LeftBracket)) {
+    return parsePolymorphicFunctionExpression();
+  }
   if (check(TokenKind::Identifier) && peek().text == "inline" &&
       current_ + 1 < tokens_.size() &&
       tokens_[current_ + 1].kind == TokenKind::KeywordIf) {
@@ -1650,6 +1653,24 @@ AstExpression Parser::parsePrimaryExpression() {
     advance();
   }
   return {};
+}
+
+AstExpression Parser::parsePolymorphicFunctionExpression() {
+  const Token start = peek();
+  AstExpression expression;
+  expression.kind = AstExpressionKind::PolymorphicFunction;
+  expression.span = start.span;
+  expression.localMethod = std::make_shared<AstLocalMethod>();
+  expression.localMethod->typeParameters = parseTypeParameterList();
+  consume(TokenKind::Arrow, "expected '=>' after polymorphic function type parameters");
+
+  bool contextualClause = false;
+  expression.localMethod->parameters = parseParameterList(false, &contextualClause);
+  expression.localMethod->contextualParameters.assign(
+      expression.localMethod->parameters.size(), contextualClause);
+  consume(TokenKind::Arrow, "expected '=>' after polymorphic function parameters");
+  expression.children.push_back(parseExpression());
+  return expression;
 }
 
 AstExpression Parser::parseBlockExpression() {

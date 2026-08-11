@@ -61,6 +61,7 @@ private:
   [[nodiscard]] AstExpression parseUnaryExpression();
   [[nodiscard]] AstExpression parsePostfixExpression();
   [[nodiscard]] AstExpression parsePrimaryExpression();
+  [[nodiscard]] AstExpression parsePolymorphicFunctionExpression();
   [[nodiscard]] AstExpression parseBlockExpression();
   [[nodiscard]] AstExpression parseInterpolatedStringExpression();
   [[nodiscard]] AstExpression parseReturnExpression(const Token& keyword);

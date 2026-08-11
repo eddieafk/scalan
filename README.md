@@ -42,7 +42,7 @@ still use the selected preset normally. During work on the newest coverage, use:
 
 ```sh
 cmake --build build/debug --target cpp-smoke-tests -j2
-CPP_SCALANATIVE_SMOKE_TESTS14_ONLY=1 \
+CPP_SCALANATIVE_SMOKE_TESTS15_ONLY=1 \
   build/debug/cpp-tests/smoke/cpp-smoke-tests
 ```
 
@@ -179,7 +179,12 @@ build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
 # every element, preserving identity results and applied results such as
 # `Box[A]`, and evaluates the receiver and mapper once before mapping elements
 # left-to-right. `EmptyTuple` evaluates the mapper but performs no applications;
-# polymorphic-function literal syntax remains a later language milestone.
+# the same operation accepts an explicitly typed Scala 3 polymorphic-function
+# literal such as `[A] => (value: A) => value`. Literal bodies are checked once
+# with abstract `A`, can capture surrounding locals, and specialize their result
+# for each element without allocating a runtime function object. Storing or
+# invoking such a literal outside a direct `Tuple.map` remains a later general
+# closure milestone.
 # Compiler-owned `scala.compiletime.requireConst(value)` accepts Boolean, Byte,
 # Short, Int, Long, Float, Double, Char, and String expressions and verifies
 # them after inline substitution and constant folding. Canonical, renamed, and
@@ -265,6 +270,10 @@ build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
 build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
   --output /tmp/tuple-map \
   cpp-examples/TupleMap.scala
+
+build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
+  --output /tmp/polymorphic-tuple-map \
+  cpp-examples/PolymorphicTupleMap.scala
 
 build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
   --output /tmp/compiletime-uninitialized \

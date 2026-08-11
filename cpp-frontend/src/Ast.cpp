@@ -231,6 +231,8 @@ const char* expressionKindName(AstExpressionKind kind) {
     return "block";
   case AstExpressionKind::TupleLiteral:
     return "tuple-literal";
+  case AstExpressionKind::PolymorphicFunction:
+    return "polymorphic-function";
   case AstExpressionKind::LocalDeclaration:
     return "local-declaration";
   case AstExpressionKind::Call:
