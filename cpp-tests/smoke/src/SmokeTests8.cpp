@@ -262,8 +262,187 @@ object Main {
               "', shadowed='" + std::string(shadowed) + "')");
 }
 
+int smokeTupleValues() {
+  constexpr const char* source = R"(package demo.tuplevalues
+
+class Box(val value: String)
+
+class Counter {
+  var count: Int = 0
+
+  def next(value: String): String = {
+    count = count + 1
+    value
+  }
+}
+
+object Values {
+  def directInt: Int = (42, "direct")._1
+  def directText: String = (42, "direct")._2
+
+  def pair: (Int, String) = (7, "stored")
+  def storedInt: Int = pair._1
+  def storedText: String = pair._2
+
+  def triple: (Boolean, Long, Box) =
+    (true, 9000000000L, new Box("boxed reference"))
+  def tripleLong: Long = triple._2
+  def tripleBox: Box = triple._3
+  def tripleText: String = tripleBox.value
+
+  def nested: ((Int, String), (Boolean, Char)) =
+    ((1, "nested"), (true, 'x'))
+  def nestedText: String = nested._1._2
+  def nestedChar: Char = nested._2._2
+
+  def trailingComma: String = (3, "trailing",)._2
+  def groupedArithmetic: Int = (1 + 2) * 3
+
+  def evaluationOrder: String = {
+    val counter = new Counter
+    val values = (counter.next("first"), counter.next("second"))
+    values._1 + ":" + values._2 + ":" + counter.count
+  }
+}
+
+object Main {
+  def main(args: Array[String]): Unit = {
+    println(Values.directInt)
+    println(Values.directText)
+    println(Values.storedInt)
+    println(Values.storedText)
+    println(Values.tripleLong)
+    println(Values.tripleText)
+    println(Values.nestedText)
+    println(Values.nestedChar)
+    println(Values.trailingComma)
+    println(Values.groupedArithmetic)
+    println(Values.evaluationOrder)
+  }
+}
+)";
+
+  constexpr const char* invalidSource = R"(package demo.invalidtuplevalues
+
+object Main {
+  val unary = (1,)
+  val tooLong =
+    (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12,
+     13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23)
+}
+)";
+
+  const std::filesystem::path temporary = std::filesystem::temp_directory_path();
+  const std::filesystem::path binary = temporary / "cpp-scalanative-smoke-tuple-values";
+  const std::filesystem::path output =
+      temporary / "cpp-scalanative-smoke-tuple-values.out";
+  std::error_code ignored;
+  std::filesystem::remove(binary, ignored);
+  std::filesystem::remove(output, ignored);
+
+  scalanative::tools::build::BuildDriver driver;
+  scalanative::tools::build::BuildOptions options;
+  options.action = scalanative::tools::build::BuildAction::BuildBinary;
+  options.optimize = true;
+  options.outputPath = binary;
+  scalanative::support::DiagnosticEngine diagnostics;
+  const scalanative::tools::build::BuildResult result =
+      driver.buildSource("TupleValues.scala", source, options, diagnostics);
+
+  scalanative::support::DiagnosticEngine invalidDiagnostics;
+  const scalanative::tools::build::BuildResult invalid = driver.buildSource(
+      "InvalidTupleValues.scala", invalidSource, {}, invalidDiagnostics);
+
+  if (!result.ok) {
+    if (contains(result.diagnosticsText, "clang toolchain not found")) {
+      return 0;
+    }
+    return fail("tuple-values native build failed: " + result.diagnosticsText);
+  }
+
+  const std::string command = binary.string() + " > " + output.string();
+  const int status = std::system(command.c_str());
+  const std::string outputText = readTextFile(output);
+  std::filesystem::remove(binary, ignored);
+  std::filesystem::remove(output, ignored);
+
+  const std::string_view directInt =
+      functionText(result.nirText, "demo.tuplevalues.Values.directInt");
+  const std::string_view directText =
+      functionText(result.nirText, "demo.tuplevalues.Values.directText");
+  const std::string_view pair =
+      functionText(result.nirText, "demo.tuplevalues.Values.pair");
+  const std::string_view storedInt =
+      functionText(result.nirText, "demo.tuplevalues.Values.storedInt");
+  const std::string_view triple =
+      functionText(result.nirText, "demo.tuplevalues.Values.triple");
+  const std::string_view nested =
+      functionText(result.nirText, "demo.tuplevalues.Values.nested");
+  const std::string_view trailing =
+      functionText(result.nirText, "demo.tuplevalues.Values.trailingComma");
+  const std::string_view grouped =
+      functionText(result.nirText, "demo.tuplevalues.Values.groupedArithmetic");
+  const std::string_view evaluationOrder =
+      functionText(result.nirText, "demo.tuplevalues.Values.evaluationOrder");
+
+  const bool runtimeShape =
+      contains(result.nirText, "trait @scala.Tuple : @java.lang.Object") &&
+      contains(result.nirText, "class @scala.Tuple2 : @scala.Tuple") &&
+      contains(result.nirText, "field @scala.Tuple2._1 : Object") &&
+      contains(result.nirText, "field @scala.Tuple2._2 : Object") &&
+      contains(result.nirText, "class @scala.Tuple3 : @scala.Tuple") &&
+      contains(result.nirText, "field @scala.Tuple3._3 : Object") &&
+      !contains(result.nirText, "scala.Tuple1") &&
+      !contains(result.nirText, "scala.Tuple4");
+  const bool lowered =
+      contains(directInt, "new scala.Tuple2") && contains(directInt, "box[Int](42)") &&
+      contains(directInt, "box[String](\"direct\")") &&
+      contains(directInt, "unbox[Int]") && contains(directText, "new scala.Tuple2") &&
+      contains(directText, "unbox[String]") && contains(pair, "new scala.Tuple2") &&
+      contains(pair, "box[Int](7)") && contains(pair, "box[String](\"stored\")") &&
+      contains(storedInt, "unbox[Int]") && contains(triple, "new scala.Tuple3") &&
+      contains(triple, "box[Boolean](true)") &&
+      contains(triple, "box[Long](9000000000L)") &&
+      contains(triple, "new demo.tuplevalues.Box(\"boxed reference\")") &&
+      contains(nested, "new scala.Tuple2(new scala.Tuple2(box[Int](1), "
+                       "box[String](\"nested\")), new scala.Tuple2(") &&
+      contains(trailing, "new scala.Tuple2") && contains(trailing, "unbox[String]") &&
+      !contains(grouped, "scala.Tuple") &&
+      contains(evaluationOrder, "new demo.tuplevalues.Counter") &&
+      contains(evaluationOrder, "\"first\"") &&
+      contains(evaluationOrder, "\"second\"") &&
+      !contains(result.nirText, "tuple-literal") &&
+      !contains(result.nirText, "<malformed-tuple-literal>");
+  const bool invalidDiagnosticsMatch =
+      !invalid.ok &&
+      contains(invalid.diagnosticsText,
+               "tuple literal requires at least two elements") &&
+      contains(invalid.diagnosticsText,
+               "tuple literals support at most 22 elements in this subset");
+
+  if (status == 0 &&
+      outputText == "42\ndirect\n7\nstored\n9000000000\nboxed reference\nnested\nx\n"
+                    "trailing\n9\nfirst:second:2\n" &&
+      runtimeShape && lowered && invalidDiagnosticsMatch) {
+    return 0;
+  }
+
+  return fail("tuple-values smoke test failed (status=" + std::to_string(status) +
+              ", output='" + outputText + "', diagnostics='" + result.diagnosticsText +
+              "', invalid='" + invalid.diagnosticsText + "', direct-int='" +
+              std::string(directInt) + "', direct-text='" + std::string(directText) +
+              "', pair='" + std::string(pair) + "', stored-int='" +
+              std::string(storedInt) + "', triple='" + std::string(triple) +
+              "', nested='" + std::string(nested) + "', trailing='" +
+              std::string(trailing) + "', grouped='" + std::string(grouped) +
+              "', order='" + std::string(evaluationOrder) + "')");
+}
+
 } // namespace
 
 int runSmokeTests8() {
-  return smokeCompiletimeSummonAll();
+  if (int code = smokeCompiletimeSummonAll()) {
+    return code;
+  }
+  return smokeTupleValues();
 }

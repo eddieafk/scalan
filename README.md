@@ -142,6 +142,12 @@ build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
 # givens into `TupleN`, including primitive boxing and companion-scope evidence;
 # `EmptyTuple` needs no evidence. Missing, ambiguous, non-tuple, malformed, and
 # unresolved non-inline requests receive compile-time diagnostics.
+# Ordinary tuple values support Scala 3 parenthesized syntax from arity 2 through
+# 22, including nested tuples and trailing commas. Element types are inferred in
+# order, primitive and String values are boxed into demand-driven `TupleN`
+# storage, and `_1` through `_N` projections restore their precise types.
+# Parenthesized single expressions remain grouping; `Tuple1`, `EmptyTuple`, and
+# `*:`-based tuple construction retain their explicit or later staged forms.
 # Compiler-owned `scala.compiletime.requireConst(value)` accepts Boolean, Byte,
 # Short, Int, Long, Float, Double, Char, and String expressions and verifies
 # them after inline substitution and constant folding. Canonical, renamed, and
@@ -199,6 +205,10 @@ build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
 build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
   --output /tmp/compiletime-summon-all \
   cpp-examples/CompiletimeSummonAll.scala
+
+build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
+  --output /tmp/tuple-values \
+  cpp-examples/TupleValues.scala
 
 build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
   --output /tmp/compiletime-uninitialized \

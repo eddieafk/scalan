@@ -1160,8 +1160,8 @@ Current scaffold status:
   `SmokeTests7.cpp` coverage checks Tuple2/Tuple3 and EmptyTuple layout, native
   output, imports, aliases, specialization, shadowing, diagnostics,
   boxing/unboxing, demand-driven arities, and NIR erasure. The public example is
-  `cpp-examples/CompiletimeConstValueTuple.scala`. General tuple algorithms,
-  tuple literals, and `*:`-based compile-time recursion remain later milestones.
+  `cpp-examples/CompiletimeConstValueTuple.scala`. General tuple algorithms and
+  `*:`-based compile-time recursion remain later milestones.
   Compiler-owned `scala.compiletime.summonAll[T]` now takes a tuple whose
   elements are the evidence types to resolve and returns that same static tuple
   type populated with contextual values. Parenthesized tuples, explicit
@@ -1184,6 +1184,27 @@ Current scaffold status:
   inline specialization, primitive and companion evidence, Tuple1/Tuple2/Tuple3
   layouts, `EmptyTuple`, shadowing, diagnostics, demand-driven arities, and NIR
   erasure. `cpp-examples/CompiletimeSummonAll.scala` provides the public example.
+  Ordinary tuple value literals now have their own AST node and accept Scala 3
+  parenthesized syntax with 2 through 22 elements. A single parenthesized
+  expression remains ordinary grouping, a trailing comma is accepted only once
+  at least two elements are present, and focused diagnostics reject unary and
+  over-22 literals in this bounded `TupleN` runtime. The pre-typecheck discovery
+  pass walks literal children recursively, so direct, nested, and annotation-free
+  values synthesize only the tuple arities they actually require.
+  Typechecking infers each element in left-to-right order and specializes the
+  corresponding covariant `scala.TupleN[T1, ..., TN]`; nested tuple element types
+  and `_1` through `_N` projections therefore remain precise. NIR evaluates
+  elements in source order, boxes primitive and String values for erased Object
+  fields, keeps reference and nested-tuple values directly, and constructs the
+  demanded runtime class. Existing construction-receiver hoisting supports a
+  projection directly from a literal, while stored and nested projections reuse
+  the normal specialized accessor path. `SmokeTests8.cpp` covers native output,
+  direct and stored values, mixed Tuple3 values, nesting, trailing commas,
+  grouping, evaluation order, boundary diagnostics, demand-driven layout,
+  boxing/unboxing, and NIR erasure. `cpp-examples/TupleValues.scala` is the public
+  example. `Tuple1` and `EmptyTuple` retain their explicit construction forms;
+  right-associative `*:` construction and general tuple algorithms remain the
+  next tuple milestones.
   Compiler-owned `scala.compiletime.requireConst(value)` accepts Boolean, Byte,
   Short, Int, Long, Float, Double, Char, and String arguments through canonical,
   renamed, or qualified calls. It reuses inline substitution and constant
@@ -1440,7 +1461,7 @@ Current scaffold status:
   evidence identity, `Of` compatibility, metadata, stored-given initialization,
   and focused diagnostics for unsealed sums, fixed arguments that are invalid
   under the parent's variance, and abstract children. Nested or otherwise
-  non-invertible generic parent mappings, general tuple-value operations,
+  non-invertible generic parent mappings, general tuple algorithms,
   compile-time tuple recursion, and higher-kinded derivation remain later derivation
   milestones.
   Deriving classes and sealed traits may themselves now be nested to arbitrary

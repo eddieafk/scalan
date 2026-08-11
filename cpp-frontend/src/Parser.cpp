@@ -1573,9 +1573,37 @@ AstExpression Parser::parsePrimaryExpression() {
     return parseBlockExpression();
   }
   if (match(TokenKind::LeftParen)) {
-    AstExpression expression = parseExpression();
-    consume(TokenKind::RightParen, "expected ')' after expression");
-    return expression;
+    const Token& start = previous();
+    consumeSeparators();
+    AstExpression first = parseExpression();
+    consumeSeparators();
+    if (!match(TokenKind::Comma)) {
+      consume(TokenKind::RightParen, "expected ')' after expression");
+      return first;
+    }
+
+    AstExpression tuple;
+    tuple.kind = AstExpressionKind::TupleLiteral;
+    tuple.span = start.span;
+    tuple.children.push_back(std::move(first));
+    do {
+      consumeSeparators();
+      if (check(TokenKind::RightParen)) {
+        if (tuple.children.size() == 1) {
+          diagnostics_.error(start.span,
+                             "tuple literal requires at least two elements");
+        }
+        break;
+      }
+      tuple.children.push_back(parseExpression());
+      consumeSeparators();
+    } while (match(TokenKind::Comma));
+    consume(TokenKind::RightParen, "expected ')' after tuple literal");
+    if (tuple.children.size() > 22) {
+      diagnostics_.error(start.span,
+                         "tuple literals support at most 22 elements in this subset");
+    }
+    return tuple;
   }
   if (match(TokenKind::KeywordReturn)) {
     return parseReturnExpression(previous());

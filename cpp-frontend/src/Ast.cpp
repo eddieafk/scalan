@@ -229,6 +229,8 @@ const char* expressionKindName(AstExpressionKind kind) {
     return "super";
   case AstExpressionKind::Block:
     return "block";
+  case AstExpressionKind::TupleLiteral:
+    return "tuple-literal";
   case AstExpressionKind::LocalDeclaration:
     return "local-declaration";
   case AstExpressionKind::Call:

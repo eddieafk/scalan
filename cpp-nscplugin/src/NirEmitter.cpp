@@ -2572,6 +2572,27 @@ nir::Value valueFor(const frontend::AstExpression& expression,
     return nir::superValue(context.superType, expression.span);
   case AstExpressionKind::New:
     return nir::newValue(qualifyTypeName(expression.text, context), expression.span);
+  case AstExpressionKind::TupleLiteral: {
+    const frontend::TypeInfo* tuple = annotatedTypeFor(expression, context);
+    if (tuple == nullptr || !isTupleClassName(runtimeTypeName(*tuple)) ||
+        tuple->typeArguments.size() != expression.children.size()) {
+      return nir::unknownValue("<malformed-tuple-literal>", expression.span);
+    }
+    std::vector<nir::Value> values;
+    values.reserve(expression.children.size());
+    for (std::size_t index = 0; index < expression.children.size(); ++index) {
+      nir::Value value = expressionValueFor(expression.children[index], context);
+      if (const std::string boxed =
+              boxedObjectTypeName(tuple->typeArguments[index].kind);
+          !boxed.empty()) {
+        value = nir::boxValue(boxed, std::move(value),
+                              expression.children[index].span);
+      }
+      values.push_back(std::move(value));
+    }
+    return nir::newValue(runtimeTypeName(*tuple), std::move(values),
+                         expression.span);
+  }
   case AstExpressionKind::LocalDeclaration:
     return nir::unitValue(expression.span);
   case AstExpressionKind::Return:
@@ -2916,7 +2937,7 @@ nir::Value valueFor(const frontend::AstExpression& expression,
         const std::string constructionType = construction->text;
         const bool tupleConstruction = isTupleClassName(construction->text);
         const std::string receiverName =
-            (tupleConstruction ? "constValueTuple$receiver$"
+            (tupleConstruction ? "tuple$receiver$"
                                : "constValueOpt$receiver$") +
             std::to_string(expression.span.start);
         std::vector<nir::Value> values;

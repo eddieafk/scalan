@@ -435,6 +435,13 @@ bool AstValidator::validateExpression(const AstExpression& expression,
       ok = false;
     }
     break;
+  case AstExpressionKind::TupleLiteral:
+    if (expression.children.size() < 2 || expression.children.size() > 22) {
+      diagnostics.error(expression.span,
+                        "tuple literal must contain between 2 and 22 elements");
+      ok = false;
+    }
+    break;
   case AstExpressionKind::Assign:
     if (expression.children.size() != 2) {
       diagnostics.error(expression.span,

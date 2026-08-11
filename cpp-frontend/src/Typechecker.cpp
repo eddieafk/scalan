@@ -1602,6 +1602,10 @@ standardDerivationDeclarations(const AstModule& module) {
       };
   const std::function<void(const AstExpression&)> collectTupleExpressions =
       [&](const AstExpression& expression) {
+        if (expression.kind == AstExpressionKind::TupleLiteral &&
+            expression.children.size() >= 2 && expression.children.size() <= 22) {
+          addTupleArity(expression.children.size());
+        }
         for (const std::string& typeArgument : expression.typeArguments) {
           collectTupleType(typeArgument);
         }
@@ -5970,6 +5974,11 @@ Typechecker::sourceCodeForExpression(const AstExpression& expression,
   case AstExpressionKind::Super:
     return expression.text.empty() ? std::optional<std::string>{"super"}
                                    : expression.text;
+  case AstExpressionKind::TupleLiteral:
+    if (const std::optional<std::string> elements = joinedChildren(0, ", ")) {
+      return "(" + *elements + ")";
+    }
+    break;
   case AstExpressionKind::Call:
     if (!expression.children.empty()) {
       const std::optional<std::string> callee =
@@ -6935,6 +6944,28 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
   }
   case AstExpressionKind::New:
     return inferNewType(expression, scope);
+  case AstExpressionKind::TupleLiteral: {
+    if (expression.children.size() < 2 || expression.children.size() > 22) {
+      return TypeInfo{SimpleTypeKind::Unknown, "Unknown"};
+    }
+    const std::string constructorName =
+        std::string(support::StdNames::ScalaTuple) +
+        std::to_string(expression.children.size());
+    auto constructor = globalSymbols_.find(constructorName);
+    if (constructor == globalSymbols_.end()) {
+      diagnostics_.error(expression.span,
+                         "unresolved tuple value constructor: " + constructorName);
+      return TypeInfo{SimpleTypeKind::Unknown, "Unknown"};
+    }
+    std::vector<TypeInfo> elementTypes;
+    elementTypes.reserve(expression.children.size());
+    for (const AstExpression& element : expression.children) {
+      elementTypes.push_back(inferExpressionType(element, scope));
+    }
+    return specializeResolvedTypeApplication(
+               constructor->second, elementTypes, expression.span, true)
+        .type;
+  }
   case AstExpressionKind::LocalDeclaration:
     if (expression.text.empty()) {
       diagnostics_.error(expression.span, "local declaration has no name");
@@ -9566,7 +9597,8 @@ bool Typechecker::expressionDirectlyEscapesReceiver(
   case AstExpressionKind::If:
   case AstExpressionKind::While:
   case AstExpressionKind::Unary:
-  case AstExpressionKind::Binary: {
+  case AstExpressionKind::Binary:
+  case AstExpressionKind::TupleLiteral: {
     bool result = false;
     for (const AstExpression& child : expression.children) {
       result = expressionDirectlyEscapesReceiver(child, receiverAliases, localNames,
@@ -10048,6 +10080,14 @@ bool Typechecker::analyzeZoneExpression(
   case AstExpressionKind::Binary:
     for (const AstExpression& child : expression.children) {
       (void)analyzeZoneExpression(child, arenaReferences, zoneLocals);
+    }
+    return false;
+  case AstExpressionKind::TupleLiteral:
+    for (const AstExpression& child : expression.children) {
+      if (analyzeZoneExpression(child, arenaReferences, zoneLocals)) {
+        diagnostics_.error(child.span,
+                           "Zone.scoped reference cannot be stored in a tuple");
+      }
     }
     return false;
   }

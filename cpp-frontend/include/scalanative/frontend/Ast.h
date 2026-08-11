@@ -61,6 +61,7 @@ enum class AstExpressionKind {
   This,
   Super,
   Block,
+  TupleLiteral,
   LocalDeclaration,
   Call,
   Select,
