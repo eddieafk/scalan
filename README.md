@@ -42,7 +42,7 @@ still use the selected preset normally. During work on the newest coverage, use:
 
 ```sh
 cmake --build build/debug --target cpp-smoke-tests -j2
-CPP_SCALANATIVE_SMOKE_TESTS15_ONLY=1 \
+CPP_SCALANATIVE_SMOKE_TESTS16_ONLY=1 \
   build/debug/cpp-tests/smoke/cpp-smoke-tests
 ```
 
@@ -183,8 +183,11 @@ build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
 # literal such as `[A] => (value: A) => value`. Literal bodies are checked once
 # with abstract `A`, can capture surrounding locals, and specialize their result
 # for each element without allocating a runtime function object. Storing or
-# invoking such a literal outside a direct `Tuple.map` remains a later general
-# closure milestone.
+# invoking a reusable polymorphic function value remains a later general closure
+# milestone. A literal can be invoked directly with one explicit type argument,
+# for example `([A] => (value: A) => value)[Int](42)`; the erased invocation ABI
+# boxes its argument once and restores the precise primitive, String, or reference
+# result without allocating a function object.
 # Compiler-owned `scala.compiletime.requireConst(value)` accepts Boolean, Byte,
 # Short, Int, Long, Float, Double, Char, and String expressions and verifies
 # them after inline substitution and constant folding. Canonical, renamed, and
@@ -274,6 +277,10 @@ build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
 build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
   --output /tmp/polymorphic-tuple-map \
   cpp-examples/PolymorphicTupleMap.scala
+
+build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
+  --output /tmp/polymorphic-function-invocation \
+  cpp-examples/PolymorphicFunctionInvocation.scala
 
 build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
   --output /tmp/compiletime-uninitialized \

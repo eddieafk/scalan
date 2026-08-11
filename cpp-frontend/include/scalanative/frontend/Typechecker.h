@@ -160,6 +160,7 @@ struct TypedPolymorphicFunctionApplication {
   std::string parameterName;
   TypeInfo parameterType;
   TypeInfo resultType;
+  std::vector<TypeInfo> typeArguments;
   std::vector<TypeInfo> mappedResultTypes;
   AstExpression body;
   std::vector<TypedExpressionInfo> expressionTypes;
@@ -281,6 +282,13 @@ private:
   [[nodiscard]] TypeInfo inferExpressionTypeImpl(const AstExpression& expression,
                                                  Scope& scope,
                                                  const TypeInfo* expectedType);
+  [[nodiscard]] std::optional<TypedPolymorphicFunctionApplication>
+  typecheckPolymorphicFunctionLiteral(const AstExpression& function,
+                                      const std::vector<TypeInfo>& typeArguments,
+                                      const support::SourceSpan& applicationSpan,
+                                      Scope& scope, const std::string& shapeDiagnostic);
+  void
+  recordPolymorphicFunctionApplication(TypedPolymorphicFunctionApplication application);
   [[nodiscard]] bool
   isSupportedInlineValueInitializer(const AstExpression& expression,
                                     const Scope& scope) const;

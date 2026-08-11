@@ -1318,10 +1318,22 @@ Current scaffold status:
   it, and elides body evaluation for `EmptyTuple`. `SmokeTests15.cpp` begins a
   fresh compact partition for parser/type/result coverage, captures, native
   output, exact projections, empty behavior, diagnostics, and NIR erasure;
-  `cpp-examples/PolymorphicTupleMap.scala` is the public example. Persisting or
-  invoking a polymorphic literal outside direct `Tuple.map`, general closure
-  objects, and higher-kinded type-lambda application remain later language
-  milestones.
+  `cpp-examples/PolymorphicTupleMap.scala` is the public example.
+  Explicit direct invocation of the same literal is now supported through one
+  type application and one value argument, for example
+  `([A] => (value: A) => value)[Int](42)`. Tuple mapping and direct invocation
+  share one abstract-body checker and specialization record, keeping malformed
+  shape and generic-body behavior consistent. Direct invocation checks argument
+  conformance against the explicit type, boxes the value once for the erased
+  abstract parameter, evaluates captured effects once, and restores an identity
+  result through primitive/String unboxing or a precise reference cast; constant
+  and applied-constructor results already have their final runtime form.
+  `SmokeTests16.cpp` starts another compact partition covering native behavior,
+  primitive and reference identity, applied and constant results, captures,
+  arity/shape/conformance diagnostics, demand-driven output, and NIR erasure.
+  `cpp-examples/PolymorphicFunctionInvocation.scala` is the public example.
+  Persisting and invoking reusable polymorphic function values, general closure
+  objects, and higher-kinded type-lambda application remain later milestones.
   Compiler-owned `scala.compiletime.requireConst(value)` accepts Boolean, Byte,
   Short, Int, Long, Float, Double, Char, and String arguments through canonical,
   renamed, or qualified calls. It reuses inline substitution and constant

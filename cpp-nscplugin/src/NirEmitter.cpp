@@ -3295,6 +3295,52 @@ nir::Value valueFor(const frontend::AstExpression& expression,
       return inlineApplicationValueFor(*application, context);
     }
     const frontend::AstExpression& callCallee = expression.children.front();
+    const frontend::AstExpression* invokedPolymorphicFunction = nullptr;
+    if (callCallee.kind == AstExpressionKind::PolymorphicFunction) {
+      invokedPolymorphicFunction = &callCallee;
+    } else if (callCallee.kind == AstExpressionKind::TypeApply &&
+               callCallee.children.size() == 1 &&
+               callCallee.children.front().kind ==
+                   AstExpressionKind::PolymorphicFunction) {
+      invokedPolymorphicFunction = &callCallee.children.front();
+    }
+    if (invokedPolymorphicFunction != nullptr && expression.children.size() == 2) {
+      const frontend::TypedPolymorphicFunctionApplication* application =
+          polymorphicFunctionApplicationFor(expression, context);
+      if (application != nullptr && application->typeArguments.size() == 1 &&
+          application->mappedResultTypes.size() == 1) {
+        ValueContext functionContext = context;
+        functionContext.expressionTypes = &application->expressionTypes;
+        functionContext.contextApplications = &application->contextApplications;
+        functionContext.inlineApplications = &application->inlineApplications;
+        bindLocalName(functionContext, application->parameterName);
+
+        nir::Value argument = expressionValueFor(expression.children[1], context);
+        argument = boxForObjectStorage(std::move(argument),
+                                       runtimeTypeName(application->parameterType),
+                                       expression.children[1], context);
+        std::vector<nir::Value> invocation;
+        invocation.push_back(nir::localLetValue(
+            application->parameterName, runtimeTypeName(application->parameterType),
+            std::move(argument), expression.children[1].span));
+        invocation.push_back(scopedBodyValueFor(application->body, functionContext));
+        nir::Value result = nir::blockValue(std::move(invocation), expression.span);
+
+        const frontend::TypeInfo& specializedResult =
+            application->mappedResultTypes.front();
+        if (runtimeTypeName(application->resultType) == "Object" &&
+            runtimeTypeName(specializedResult) != "Object") {
+          if (const std::string boxed = boxedObjectTypeName(specializedResult.kind);
+              !boxed.empty()) {
+            result = nir::unboxValue(boxed, std::move(result), expression.span);
+          } else {
+            result = nir::asInstanceOfValue(runtimeTypeName(specializedResult),
+                                            std::move(result), expression.span);
+          }
+        }
+        return result;
+      }
+    }
     if (callCallee.kind == AstExpressionKind::Select &&
         callCallee.children.size() == 1 &&
         callCallee.text == support::StdNames::TupleMap &&
