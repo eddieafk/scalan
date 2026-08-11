@@ -1332,8 +1332,21 @@ Current scaffold status:
   primitive and reference identity, applied and constant results, captures,
   arity/shape/conformance diagnostics, demand-driven output, and NIR erasure.
   `cpp-examples/PolymorphicFunctionInvocation.scala` is the public example.
-  Persisting and invoking reusable polymorphic function values, general closure
-  objects, and higher-kinded type-lambda application remain later milestones.
+  Immutable local, object, and class `val` declarations can now retain the same
+  unary literal and invoke it repeatedly with explicit type arguments. The
+  literal body is checked once at its definition, while each call substitutes
+  the requested result type without rechecking the body. Lowering erases the
+  compiler-known backing local or field, evaluates an explicit class receiver
+  and value argument once in source order, binds captured locals or `this`, and
+  uses the same erased argument and precise-result restoration ABI as direct
+  invocation. Raw escape, aliasing, mutable storage, and malformed invocation
+  receive focused diagnostics instead of leaking an unlowered function value.
+  `SmokeTests17.cpp` covers repeated heterogeneous calls, mutable local captures,
+  object/class values, implicit and effectful selected receivers, applied
+  results, native output, storage/NIR erasure, and the new diagnostics;
+  `cpp-examples/StoredPolymorphicFunction.scala` is the public example. Passing or
+  returning polymorphic function values, general runtime closure objects, and
+  higher-kinded type-lambda application remain later milestones.
   Compiler-owned `scala.compiletime.requireConst(value)` accepts Boolean, Byte,
   Short, Int, Long, Float, Double, Char, and String arguments through canonical,
   renamed, or qualified calls. It reuses inline substitution and constant

@@ -1142,7 +1142,9 @@ bool isClassStoredField(const frontend::TypedDeclaration& declaration,
   return ownerKind == frontend::AstDeclarationKind::Class &&
          (declaration.kind == frontend::AstDeclarationKind::Val ||
           declaration.kind == frontend::AstDeclarationKind::Var) &&
-         declaration.hasInitializer;
+         declaration.hasInitializer &&
+         declaration.initializer.kind !=
+             frontend::AstExpressionKind::PolymorphicFunction;
 }
 
 bool isModuleStoredField(const frontend::TypedDeclaration& declaration,
@@ -1150,7 +1152,9 @@ bool isModuleStoredField(const frontend::TypedDeclaration& declaration,
   return ownerKind == frontend::AstDeclarationKind::Object &&
          (declaration.kind == frontend::AstDeclarationKind::Val ||
           declaration.kind == frontend::AstDeclarationKind::Var) &&
-         declaration.hasInitializer;
+         declaration.hasInitializer &&
+         declaration.initializer.kind !=
+             frontend::AstExpressionKind::PolymorphicFunction;
 }
 
 std::string storedFieldName(const frontend::TypedDeclaration& declaration) {
@@ -1763,7 +1767,9 @@ std::vector<MaterializedTraitValue> materializedTraitValuesForClass(
         for (const frontend::TypedDeclaration& member : inheritedOwner->members) {
           if ((member.kind == frontend::AstDeclarationKind::Val ||
                member.kind == frontend::AstDeclarationKind::Var) &&
-              member.hasInitializer) {
+              member.hasInitializer &&
+              member.initializer.kind !=
+                  frontend::AstExpressionKind::PolymorphicFunction) {
             inheritedValueKeys.insert(inheritedOwner->symbolName + "." + member.name);
           }
         }
@@ -1783,6 +1789,7 @@ std::vector<MaterializedTraitValue> materializedTraitValuesForClass(
       if ((member.kind == frontend::AstDeclarationKind::Val ||
            member.kind == frontend::AstDeclarationKind::Var) &&
           member.hasInitializer &&
+          member.initializer.kind != frontend::AstExpressionKind::PolymorphicFunction &&
           !inheritedValueKeys.contains(owner->symbolName + "." + member.name)) {
         values.push_back(MaterializedTraitValue{owner, &member, effective});
       }
@@ -2188,6 +2195,12 @@ nir::Value scopedBodyValueFor(const frontend::AstExpression& expression,
       values.push_back(nir::unitValue(child.span));
       continue;
     }
+    if (!child.mutableLocal && child.children.size() == 1 &&
+        child.children.front().kind == AstExpressionKind::PolymorphicFunction) {
+      values.push_back(nir::unitValue(child.span));
+      bindLocalName(blockContext, child.text);
+      continue;
+    }
     if (hasReducedInlineMatch && child.text.starts_with("$match") &&
         child.children.size() == 1 &&
         (isConstValueExpression(child.children.front(), blockContext) ||
@@ -2345,6 +2358,11 @@ void appendExpressionSetup(const frontend::AstExpression& expression,
         if (child.localMethod != nullptr) {
           continue;
         }
+        if (!child.mutableLocal && child.children.size() == 1 &&
+            child.children.front().kind == AstExpressionKind::PolymorphicFunction) {
+          bindLocalName(blockContext, child.text);
+          continue;
+        }
         const std::string declaredType = localTypeName(child, blockContext);
         if (!child.children.empty()) {
           appendExpressionSetup(child.children.front(), body, blockContext);
@@ -2387,6 +2405,10 @@ void appendExpressionSetup(const frontend::AstExpression& expression,
 
   if (expression.kind == AstExpressionKind::LocalDeclaration) {
     if (expression.localMethod != nullptr) {
+      return;
+    }
+    if (!expression.mutableLocal && expression.children.size() == 1 &&
+        expression.children.front().kind == AstExpressionKind::PolymorphicFunction) {
       return;
     }
     const std::string declaredType = localTypeName(expression, context);
@@ -3295,51 +3317,65 @@ nir::Value valueFor(const frontend::AstExpression& expression,
       return inlineApplicationValueFor(*application, context);
     }
     const frontend::AstExpression& callCallee = expression.children.front();
-    const frontend::AstExpression* invokedPolymorphicFunction = nullptr;
-    if (callCallee.kind == AstExpressionKind::PolymorphicFunction) {
-      invokedPolymorphicFunction = &callCallee;
-    } else if (callCallee.kind == AstExpressionKind::TypeApply &&
-               callCallee.children.size() == 1 &&
-               callCallee.children.front().kind ==
-                   AstExpressionKind::PolymorphicFunction) {
-      invokedPolymorphicFunction = &callCallee.children.front();
-    }
-    if (invokedPolymorphicFunction != nullptr && expression.children.size() == 2) {
-      const frontend::TypedPolymorphicFunctionApplication* application =
-          polymorphicFunctionApplicationFor(expression, context);
-      if (application != nullptr && application->typeArguments.size() == 1 &&
-          application->mappedResultTypes.size() == 1) {
-        ValueContext functionContext = context;
-        functionContext.expressionTypes = &application->expressionTypes;
-        functionContext.contextApplications = &application->contextApplications;
-        functionContext.inlineApplications = &application->inlineApplications;
-        bindLocalName(functionContext, application->parameterName);
-
-        nir::Value argument = expressionValueFor(expression.children[1], context);
-        argument = boxForObjectStorage(std::move(argument),
-                                       runtimeTypeName(application->parameterType),
-                                       expression.children[1], context);
-        std::vector<nir::Value> invocation;
-        invocation.push_back(nir::localLetValue(
-            application->parameterName, runtimeTypeName(application->parameterType),
-            std::move(argument), expression.children[1].span));
-        invocation.push_back(scopedBodyValueFor(application->body, functionContext));
-        nir::Value result = nir::blockValue(std::move(invocation), expression.span);
-
-        const frontend::TypeInfo& specializedResult =
-            application->mappedResultTypes.front();
-        if (runtimeTypeName(application->resultType) == "Object" &&
-            runtimeTypeName(specializedResult) != "Object") {
-          if (const std::string boxed = boxedObjectTypeName(specializedResult.kind);
-              !boxed.empty()) {
-            result = nir::unboxValue(boxed, std::move(result), expression.span);
-          } else {
-            result = nir::asInstanceOfValue(runtimeTypeName(specializedResult),
-                                            std::move(result), expression.span);
-          }
-        }
-        return result;
+    if (const frontend::TypedPolymorphicFunctionApplication* application =
+            polymorphicFunctionApplicationFor(expression, context);
+        application != nullptr && application->isInvocation &&
+        application->typeArguments.size() == 1 &&
+        application->mappedResultTypes.size() == 1 && expression.children.size() == 2) {
+      ValueContext functionContext = context;
+      functionContext.expressionTypes = &application->expressionTypes;
+      functionContext.contextApplications = &application->contextApplications;
+      functionContext.inlineApplications = &application->inlineApplications;
+      if (!application->definitionOwnerName.empty()) {
+        functionContext.currentOwner = application->definitionOwnerName;
       }
+      if (application->hasReceiver) {
+        functionContext.hasImplicitReceiver = true;
+        functionContext.implicitThisMembers =
+            context.declarations == nullptr
+                ? std::unordered_set<std::string>{}
+                : implicitThisMembersFor(*context.declarations,
+                                         application->definitionOwnerName);
+        functionContext.stackableSuper = false;
+        functionContext.superTypes.clear();
+        functionContext.superType.clear();
+      }
+      bindLocalName(functionContext, application->parameterName);
+
+      std::vector<nir::Value> invocation;
+      invocation.reserve(application->hasReceiver ? 3 : 2);
+      if (application->hasReceiver) {
+        nir::Value receiver = expressionValueFor(application->receiver, context);
+        receiver = narrowCompositeValue(std::move(receiver), application->receiverType,
+                                        application->receiver, context);
+        invocation.push_back(
+            nir::localLetValue("this", runtimeTypeName(application->receiverType),
+                               std::move(receiver), application->receiver.span));
+        bindLocalName(functionContext, "this");
+      }
+      nir::Value argument = expressionValueFor(expression.children[1], context);
+      argument = boxForObjectStorage(std::move(argument),
+                                     runtimeTypeName(application->parameterType),
+                                     expression.children[1], context);
+      invocation.push_back(nir::localLetValue(
+          application->parameterName, runtimeTypeName(application->parameterType),
+          std::move(argument), expression.children[1].span));
+      invocation.push_back(scopedBodyValueFor(application->body, functionContext));
+      nir::Value result = nir::blockValue(std::move(invocation), expression.span);
+
+      const frontend::TypeInfo& specializedResult =
+          application->mappedResultTypes.front();
+      if (runtimeTypeName(application->resultType) == "Object" &&
+          runtimeTypeName(specializedResult) != "Object") {
+        if (const std::string boxed = boxedObjectTypeName(specializedResult.kind);
+            !boxed.empty()) {
+          result = nir::unboxValue(boxed, std::move(result), expression.span);
+        } else {
+          result = nir::asInstanceOfValue(runtimeTypeName(specializedResult),
+                                          std::move(result), expression.span);
+        }
+      }
+      return result;
     }
     if (callCallee.kind == AstExpressionKind::Select &&
         callCallee.children.size() == 1 &&
@@ -5634,6 +5670,12 @@ void NirEmitter::emitDeclaration(
     frontend::AstDeclarationKind ownerKind,
     std::unordered_set<std::string>* referenceArrayElementTypes,
     std::map<std::string, std::string>* runtimeArrayDeclarations) {
+  if (declaration.kind == frontend::AstDeclarationKind::Val &&
+      declaration.hasInitializer &&
+      declaration.initializer.kind ==
+          frontend::AstExpressionKind::PolymorphicFunction) {
+    return;
+  }
   if (declaration.kind == frontend::AstDeclarationKind::Package ||
       declaration.kind == frontend::AstDeclarationKind::Import ||
       (declaration.kind == frontend::AstDeclarationKind::Type &&

@@ -124,7 +124,7 @@ object Values {
   val wrongParameter = (1, "x").map([A] => (value: Int) => value)
   val bounded = (1, "x").map([A <: Object] => (value: A) => value)
   val nonGenericBody = (1, "x").map([A] => (value: A) => value % 2)
-  val stored = [A] => (value: A) => value
+  var mutable = [A] => (value: A) => value
   def open(value: Tuple): Tuple =
     value.map([A] => (element: A) => element)
 }
@@ -214,7 +214,8 @@ object Values {
                "remainder operator % requires numeric operands") &&
       contains(invalid.diagnosticsText,
                "polymorphic function literals are currently supported only as "
-               "direct Tuple.map arguments") &&
+               "direct Tuple.map arguments, direct invocations, or immutable val "
+               "initializers") &&
       contains(invalid.diagnosticsText, "map requires a concrete tuple receiver");
 
   if (status == 0 &&

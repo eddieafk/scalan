@@ -42,7 +42,7 @@ still use the selected preset normally. During work on the newest coverage, use:
 
 ```sh
 cmake --build build/debug --target cpp-smoke-tests -j2
-CPP_SCALANATIVE_SMOKE_TESTS16_ONLY=1 \
+CPP_SCALANATIVE_SMOKE_TESTS17_ONLY=1 \
   build/debug/cpp-tests/smoke/cpp-smoke-tests
 ```
 
@@ -182,12 +182,16 @@ build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
 # the same operation accepts an explicitly typed Scala 3 polymorphic-function
 # literal such as `[A] => (value: A) => value`. Literal bodies are checked once
 # with abstract `A`, can capture surrounding locals, and specialize their result
-# for each element without allocating a runtime function object. Storing or
-# invoking a reusable polymorphic function value remains a later general closure
-# milestone. A literal can be invoked directly with one explicit type argument,
+# for each element without allocating a runtime function object. A literal can
+# be invoked directly with one explicit type argument,
 # for example `([A] => (value: A) => value)[Int](42)`; the erased invocation ABI
 # boxes its argument once and restores the precise primitive, String, or reference
-# result without allocating a function object.
+# result without allocating a function object. Immutable local, object, and class
+# values can retain the same literal and be invoked repeatedly, such as
+# `val identity = [A] => (value: A) => value; identity[Int](42)`. Their body is
+# checked once, their captures and selected receiver are preserved at each call,
+# and compiler-known backing storage is erased. Aliasing, passing, or returning
+# these values still awaits the general runtime closure-object milestone.
 # Compiler-owned `scala.compiletime.requireConst(value)` accepts Boolean, Byte,
 # Short, Int, Long, Float, Double, Char, and String expressions and verifies
 # them after inline substitution and constant folding. Canonical, renamed, and
@@ -281,6 +285,10 @@ build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
 build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
   --output /tmp/polymorphic-function-invocation \
   cpp-examples/PolymorphicFunctionInvocation.scala
+
+build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
+  --output /tmp/stored-polymorphic-function \
+  cpp-examples/StoredPolymorphicFunction.scala
 
 build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
   --output /tmp/compiletime-uninitialized \

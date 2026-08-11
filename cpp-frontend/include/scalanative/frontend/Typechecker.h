@@ -5,6 +5,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <optional>
 #include <string>
 #include <unordered_map>
@@ -157,11 +158,16 @@ struct TypedInlineApplication {
 
 struct TypedPolymorphicFunctionApplication {
   support::SourceSpan span;
+  std::string definitionOwnerName;
   std::string parameterName;
   TypeInfo parameterType;
   TypeInfo resultType;
   std::vector<TypeInfo> typeArguments;
   std::vector<TypeInfo> mappedResultTypes;
+  bool isInvocation = false;
+  bool hasReceiver = false;
+  AstExpression receiver;
+  TypeInfo receiverType;
   AstExpression body;
   std::vector<TypedExpressionInfo> expressionTypes;
   std::vector<TypedContextApplication> contextApplications;
@@ -217,6 +223,7 @@ struct SymbolInfo {
   std::optional<TypeInfo> specializedStaticType;
   std::optional<std::string> specializedCode;
   AstExpression inlineBody;
+  std::shared_ptr<TypedPolymorphicFunctionApplication> polymorphicFunctionValue;
 };
 
 class Typechecker {
