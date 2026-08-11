@@ -291,6 +291,10 @@ build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
   cpp-examples/StoredPolymorphicFunction.scala
 
 build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
+  --output /tmp/polymorphic-function-aliases \
+  cpp-examples/PolymorphicFunctionAliases.scala
+
+build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
   --output /tmp/compiletime-uninitialized \
   cpp-examples/CompiletimeUninitialized.scala
 

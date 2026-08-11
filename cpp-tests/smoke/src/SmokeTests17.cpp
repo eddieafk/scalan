@@ -119,7 +119,7 @@ object Values {
   val wrongShape = [A] => (value: Int) => value
   var mutable = [A] => (value: A) => value
 
-  val alias = escaped
+  def rawEscape = escaped
   val selectedEscape = new Holder().identity
   val missingType = escaped(1)
   val twoTypes = escaped[Int, String](1)

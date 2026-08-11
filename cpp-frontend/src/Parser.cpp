@@ -1225,6 +1225,15 @@ std::string Parser::parseTypeName(bool stopAtUpperBound, bool stopAtRightBracket
     } else if (check(TokenKind::LeftParen) || check(TokenKind::RightParen)) {
       return type;
     }
+    if (allowParenthesized && check(TokenKind::Arrow)) {
+      if (!type.empty() && !previousWasTypeJoiner) {
+        type += ' ';
+      }
+      type += "=>";
+      previousWasTypeJoiner = false;
+      advance();
+      continue;
+    }
     switch (peek().kind) {
     case TokenKind::Equals:
     case TokenKind::Comma:

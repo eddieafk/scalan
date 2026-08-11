@@ -61,6 +61,7 @@ struct TypeInfo {
   bool pathDependent = false;
   bool typeProjection = false;
   bool typeParameter = false;
+  bool polymorphicFunctionType = false;
   bool stringSingleton = false;
   bool softUnion = false;
 };
@@ -106,6 +107,7 @@ struct TypedDeclaration {
   bool isAnonymousGiven = false;
   bool hasInitializer = false;
   bool needsAccessor = false;
+  bool isCompilerKnownPolymorphicFunctionValue = false;
   AstExpression initializer;
   std::vector<TypedDeclaration> members;
   std::vector<AstExpression> constructorBody;
@@ -165,6 +167,7 @@ struct TypedPolymorphicFunctionApplication {
   std::vector<TypeInfo> typeArguments;
   std::vector<TypeInfo> mappedResultTypes;
   bool isInvocation = false;
+  bool isTupleMap = false;
   bool hasReceiver = false;
   AstExpression receiver;
   TypeInfo receiverType;
@@ -181,6 +184,7 @@ struct TypedModule {
   std::vector<TypedContextApplication> contextApplications;
   std::vector<TypedInlineApplication> inlineApplications;
   std::vector<TypedPolymorphicFunctionApplication> polymorphicFunctionApplications;
+  std::vector<support::SourceSpan> polymorphicFunctionValueDeclarations;
 };
 
 struct SymbolInfo {
@@ -294,6 +298,11 @@ private:
                                       const std::vector<TypeInfo>& typeArguments,
                                       const support::SourceSpan& applicationSpan,
                                       Scope& scope, const std::string& shapeDiagnostic);
+  [[nodiscard]] std::optional<TypedPolymorphicFunctionApplication>
+  polymorphicFunctionAlias(const AstExpression& expression, const Scope& scope) const;
+  [[nodiscard]] bool polymorphicFunctionMatchesDeclaredType(
+      const TypeInfo& declared,
+      const TypedPolymorphicFunctionApplication& function) const;
   void
   recordPolymorphicFunctionApplication(TypedPolymorphicFunctionApplication application);
   [[nodiscard]] bool
@@ -507,6 +516,7 @@ private:
   std::vector<TypedContextApplication> contextApplications_;
   std::vector<TypedInlineApplication> inlineApplications_;
   std::vector<TypedPolymorphicFunctionApplication> polymorphicFunctionApplications_;
+  std::vector<support::SourceSpan> polymorphicFunctionValueDeclarations_;
   std::unordered_set<std::string> validatedInlineValueSymbols_;
   std::unordered_set<std::string> directZoneReceiverEscapes_;
   std::unordered_map<std::string, std::vector<AstExpression>> receiverMethodCallSites_;

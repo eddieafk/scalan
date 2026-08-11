@@ -1347,6 +1347,21 @@ Current scaffold status:
   `cpp-examples/StoredPolymorphicFunction.scala` is the public example. Passing or
   returning polymorphic function values, general runtime closure objects, and
   higher-kinded type-lambda application remain later milestones.
+  Declared unary Scala 3 polymorphic-function types such as
+  `[A] => A => A` now parse without consuming a match or catch arrow and resolve
+  to the demand-driven `scala.PolyFunction` runtime marker. Immutable identifier
+  aliases of compiler-known literals retain their specialization metadata across
+  object, class, and local alias chains without materializing a backing field or
+  local. Those stored or aliased values can also serve as `Tuple.map` mappers:
+  each concrete element type specializes the original abstract body, class
+  receivers are bound once after the tuple receiver, and an effectful selected
+  receiver is still evaluated once for `EmptyTuple`. Mutable and selected-value
+  aliases remain runtime-storage boundaries, while declared polymorphic
+  parameters receive a focused closure-object-lowering diagnostic when invoked.
+  `SmokeTests18.cpp` provides a fresh compact partition for parsing, declared
+  types, alias chains, precise mapped results, selected/implicit receiver order,
+  empty behavior, diagnostics, and storage/NIR erasure;
+  `cpp-examples/PolymorphicFunctionAliases.scala` is the public example.
   Compiler-owned `scala.compiletime.requireConst(value)` accepts Boolean, Byte,
   Short, Int, Long, Float, Double, Char, and String arguments through canonical,
   renamed, or qualified calls. It reuses inline substitution and constant

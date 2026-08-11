@@ -13154,8 +13154,12 @@ int runSmokeTests14();
 int runSmokeTests15();
 int runSmokeTests16();
 int runSmokeTests17();
+int runSmokeTests18();
 
 int main() {
+  if (std::getenv("CPP_SCALANATIVE_SMOKE_TESTS18_ONLY") != nullptr) {
+    return runSmokeTests18();
+  }
   if (std::getenv("CPP_SCALANATIVE_SMOKE_TESTS17_ONLY") != nullptr) {
     return runSmokeTests17();
   }
@@ -13244,6 +13248,9 @@ int main() {
     return code;
   }
   if (int code = runSmokeTests17()) {
+    return code;
+  }
+  if (int code = runSmokeTests18()) {
     return code;
   }
   if (int code = smokeBuildConfigurationJson()) {
