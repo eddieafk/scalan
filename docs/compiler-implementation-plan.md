@@ -1244,9 +1244,25 @@ Current scaffold status:
   output, exact head/reference types, Tuple3-to-Tuple2-to-Tuple1-to-EmptyTuple
   tails, singleton sizes, cons-built and direct receivers, evaluation count,
   demand-driven layout, diagnostics, and NIR erasure.
-  `cpp-examples/TupleOperations.scala` is the public example. General operations
-  including statically typed `apply`, `init`, `last`, concatenation, and mapping
-  remain later tuple milestones.
+  `cpp-examples/TupleOperations.scala` is the public example.
+  Closed tuple values now also support Scala 3's statically typed `apply(n)`
+  contract and its shorthand `tuple(n)` spelling. Literal, constant-folded, and
+  stable singleton Int indices reduce `Tuple.Elem[This, n.type]` to the exact
+  element type, then lower directly to erased `_1` through `_N` storage with the
+  required primitive unboxing or reference cast. Receiver evaluation precedes
+  index evaluation and each occurs exactly once. Empty, negative, out-of-range,
+  non-Int, dynamic, malformed-arity, and abstract `Tuple` applications receive
+  focused compile-time diagnostics in this closed-tuple subset; explicit
+  user-defined `apply` methods continue through ordinary member resolution.
+  Matching integer literals now retain an expected singleton Int or Long type,
+  allowing stable indices such as `val index: 1 = 1` to drive dependent
+  selection. `SmokeTests11.cpp` starts a fresh compact partition covering native
+  output, both call spellings, exact primitive/String/reference types, folded and
+  stable indices, direct and cons-built receivers, evaluation count, diagnostic
+  boundaries, NIR projections, and non-tuple `apply` preservation.
+  `cpp-examples/TupleApply.scala` is the public example. General operations
+  including `init`, `last`, concatenation, and mapping remain later tuple
+  milestones.
   Compiler-owned `scala.compiletime.requireConst(value)` accepts Boolean, Byte,
   Short, Int, Long, Float, Double, Char, and String arguments through canonical,
   renamed, or qualified calls. It reuses inline substitution and constant

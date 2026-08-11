@@ -3254,6 +3254,93 @@ nir::Value valueFor(const frontend::AstExpression& expression,
             inlineApplicationFor(expression, context)) {
       return inlineApplicationValueFor(*application, context);
     }
+    const frontend::AstExpression& callCallee = expression.children.front();
+    const frontend::AstExpression* tupleApplyReceiver = nullptr;
+    if (callCallee.kind == AstExpressionKind::Select &&
+        callCallee.children.size() == 1 &&
+        callCallee.text == support::StdNames::TupleApply) {
+      tupleApplyReceiver = &callCallee.children.front();
+    } else {
+      bool callableDeclaration = false;
+      if (callCallee.kind == AstExpressionKind::Identifier) {
+        const frontend::TypedDeclaration* declaration =
+            declarationForExpression(callCallee, context);
+        callableDeclaration =
+            declaration != nullptr &&
+            ((declaration->kind == frontend::AstDeclarationKind::Def &&
+              (!declaration->typeParameters.empty() ||
+               !declaration->parameterTypes.empty() ||
+               !declaration->parameterClauseSizes.empty())) ||
+             declaration->kind == frontend::AstDeclarationKind::Class);
+      } else if (callCallee.kind == AstExpressionKind::Select) {
+        callableDeclaration = true;
+      } else if (callCallee.kind == AstExpressionKind::Call ||
+                 callCallee.kind == AstExpressionKind::New ||
+                 callCallee.kind == AstExpressionKind::TypeApply) {
+        callableDeclaration = true;
+      }
+      if (!callableDeclaration) {
+        tupleApplyReceiver = &callCallee;
+      }
+    }
+    if (tupleApplyReceiver != nullptr && expression.children.size() == 2) {
+      const frontend::TypeInfo* receiverType =
+          annotatedTypeFor(*tupleApplyReceiver, context);
+      const frontend::TypeInfo* indexType =
+          annotatedTypeFor(expression.children[1], context);
+      const bool concreteTuple =
+          receiverType != nullptr &&
+          isTupleClassName(runtimeTypeName(*receiverType)) &&
+          !receiverType->typeArguments.empty();
+      std::optional<std::size_t> tupleIndex;
+      if (indexType != nullptr && !indexType->singletonLiteral.empty()) {
+        std::size_t parsed = 0;
+        bool valid = true;
+        for (char ch : indexType->singletonLiteral) {
+          if (ch < '0' || ch > '9') {
+            valid = false;
+            break;
+          }
+          parsed = parsed * 10 + static_cast<std::size_t>(ch - '0');
+        }
+        if (valid) {
+          tupleIndex = parsed;
+        }
+      }
+      if (concreteTuple && tupleIndex.has_value() &&
+          *tupleIndex < receiverType->typeArguments.size()) {
+        const std::string receiverName =
+            "tupleApply$receiver$" + std::to_string(expression.span.start);
+        const std::string indexName =
+            "tupleApply$index$" + std::to_string(expression.span.start);
+        std::vector<nir::Value> values;
+        values.push_back(nir::localLetValue(
+            receiverName, runtimeTypeName(*receiverType),
+            expressionValueFor(*tupleApplyReceiver, context),
+            tupleApplyReceiver->span));
+        values.push_back(nir::localLetValue(
+            indexName, "Int",
+            expressionValueFor(expression.children[1], context),
+            expression.children[1].span));
+        nir::Value element = nir::selectValue(
+            nir::localValue(receiverName, tupleApplyReceiver->span),
+            "_" + std::to_string(*tupleIndex + 1), expression.span);
+        if (const frontend::TypeInfo* resultType =
+                annotatedTypeFor(expression, context)) {
+          if (const std::string boxed = boxedObjectTypeName(resultType->kind);
+              !boxed.empty()) {
+            element =
+                nir::unboxValue(boxed, std::move(element), expression.span);
+          } else if (const std::string runtime = runtimeTypeName(*resultType);
+                     runtime != "Object") {
+            element = nir::asInstanceOfValue(runtime, std::move(element),
+                                             expression.span);
+          }
+        }
+        values.push_back(std::move(element));
+        return nir::blockValue(std::move(values), expression.span);
+      }
+    }
     if (isCodeOfCallee(expression.children.front(), context)) {
       const frontend::TypeInfo* code = annotatedTypeFor(expression, context);
       if (code != nullptr && !code->singletonLiteral.empty()) {

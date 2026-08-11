@@ -42,7 +42,7 @@ still use the selected preset normally. During work on the newest coverage, use:
 
 ```sh
 cmake --build build/debug --target cpp-smoke-tests -j2
-CPP_SCALANATIVE_SMOKE_TESTS10_ONLY=1 \
+CPP_SCALANATIVE_SMOKE_TESTS11_ONLY=1 \
   build/debug/cpp-tests/smoke/cpp-smoke-tests
 ```
 
@@ -158,6 +158,11 @@ build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
 # tuple down to `EmptyTuple`, and `size` has its literal singleton Int type.
 # Every operation evaluates its receiver exactly once; `EmptyTuple.size` is `0`,
 # while `EmptyTuple.head` and `EmptyTuple.tail` receive compile-time diagnostics.
+# Closed tuples also support Scala 3's precise `apply`: literal, folded, and
+# stable singleton Int indices select the exact `Tuple.Elem` result type through
+# either `tuple(index)` or `tuple.apply(index)`. Receiver and index evaluation
+# order is preserved, invalid bounds are diagnosed at compile time, and ordinary
+# user-defined `apply` members retain normal call lowering.
 # Compiler-owned `scala.compiletime.requireConst(value)` accepts Boolean, Byte,
 # Short, Int, Long, Float, Double, Char, and String expressions and verifies
 # them after inline substitution and constant folding. Canonical, renamed, and
@@ -227,6 +232,10 @@ build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
 build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
   --output /tmp/tuple-operations \
   cpp-examples/TupleOperations.scala
+
+build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
+  --output /tmp/tuple-apply \
+  cpp-examples/TupleApply.scala
 
 build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
   --output /tmp/compiletime-uninitialized \

@@ -6534,7 +6534,13 @@ Typechecker::constantIntegerValue(const AstExpression& expression,
   }
   case AstExpressionKind::Identifier:
     if (auto symbol = scope.find(expression.text); symbol != scope.end()) {
-      return symbol->second.specializedIntegerValue;
+      if (symbol->second.specializedIntegerValue.has_value()) {
+        return symbol->second.specializedIntegerValue;
+      }
+      const std::optional<std::int64_t> singleton =
+          parseIntegerConstant(symbol->second.type.singletonLiteral);
+      return singleton.has_value() && fitsType(*singleton) ? singleton
+                                                           : std::nullopt;
     }
     return std::nullopt;
   case AstExpressionKind::Select:
@@ -7073,12 +7079,25 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
   switch (expression.kind) {
   case AstExpressionKind::Empty:
     return TypeInfo{SimpleTypeKind::Unknown, "Unknown"};
-  case AstExpressionKind::IntegerLiteral:
-    if (!expression.text.empty() &&
-        (expression.text.back() == 'l' || expression.text.back() == 'L')) {
-      return TypeInfo{SimpleTypeKind::Long, "Long"};
+  case AstExpressionKind::IntegerLiteral: {
+    const SimpleTypeKind kind =
+        !expression.text.empty() &&
+                (expression.text.back() == 'l' || expression.text.back() == 'L')
+            ? SimpleTypeKind::Long
+            : SimpleTypeKind::Int;
+    if (expectedType != nullptr && expectedType->kind == kind &&
+        !expectedType->singletonLiteral.empty()) {
+      const std::optional<std::int64_t> literal =
+          parseIntegerConstant(expression.text);
+      const std::optional<std::int64_t> expectedLiteral =
+          parseIntegerConstant(expectedType->singletonLiteral);
+      if (literal.has_value() && expectedLiteral.has_value() &&
+          *literal == *expectedLiteral) {
+        return *expectedType;
+      }
     }
-    return TypeInfo{SimpleTypeKind::Int, "Int"};
+    return TypeInfo{kind, kind == SimpleTypeKind::Long ? "Long" : "Int"};
+  }
   case AstExpressionKind::FloatingLiteral:
     if (!expression.text.empty() &&
         (expression.text.back() == 'f' || expression.text.back() == 'F')) {
@@ -7645,6 +7664,115 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
       diagnostics_.error(expression.span,
                          "uninitialized must be used without an argument list");
       return TypeInfo{SimpleTypeKind::Nothing, "Nothing"};
+    }
+    const AstExpression& callCallee = expression.children.front();
+    const AstExpression* tupleApplyReceiver = nullptr;
+    std::optional<TypeInfo> tupleApplyReceiverType;
+    if (callCallee.kind == AstExpressionKind::Select &&
+        callCallee.children.size() == 1 &&
+        callCallee.text == support::StdNames::TupleApply) {
+      tupleApplyReceiver = &callCallee.children.front();
+    } else {
+      bool callableDeclaration = false;
+      if (callCallee.kind == AstExpressionKind::Identifier) {
+        if (auto symbol = scope.find(callCallee.text); symbol != scope.end()) {
+          callableDeclaration =
+              (symbol->second.kind == AstDeclarationKind::Def &&
+               (!symbol->second.typeParameters.empty() ||
+                !symbol->second.parameterTypes.empty() ||
+                !symbol->second.parameterClauseSizes.empty())) ||
+              symbol->second.kind == AstDeclarationKind::Class;
+        } else {
+          callableDeclaration = true;
+        }
+      } else if (callCallee.kind == AstExpressionKind::Select &&
+                 callCallee.children.size() == 1) {
+        callableDeclaration = true;
+      } else if (callCallee.kind == AstExpressionKind::Call ||
+                 callCallee.kind == AstExpressionKind::New ||
+                 callCallee.kind == AstExpressionKind::TypeApply) {
+        callableDeclaration = true;
+      }
+      if (!callableDeclaration) {
+        tupleApplyReceiver = &callCallee;
+      }
+    }
+    if (tupleApplyReceiver != nullptr) {
+      tupleApplyReceiverType =
+          inferExpressionType(*tupleApplyReceiver, scope);
+      const bool emptyTuple =
+          tupleApplyReceiverType->name == support::StdNames::ScalaEmptyTuple ||
+          tupleApplyReceiverType->runtimeName ==
+              support::StdNames::ScalaEmptyTuple;
+      const std::string constructor =
+          tupleApplyReceiverType->typeConstructorName.empty()
+              ? tupleApplyReceiverType->runtimeName
+              : tupleApplyReceiverType->typeConstructorName;
+      const std::optional<std::size_t> arity =
+          tupleArityForConstructor(constructor);
+      const bool abstractTuple =
+          tupleApplyReceiverType->name == support::StdNames::ScalaTuple ||
+          tupleApplyReceiverType->runtimeName == support::StdNames::ScalaTuple;
+      if (emptyTuple || arity.has_value() || abstractTuple) {
+        std::vector<TypeInfo> argumentTypes;
+        argumentTypes.reserve(expression.children.size() - 1);
+        for (std::size_t index = 1; index < expression.children.size(); ++index) {
+          argumentTypes.push_back(
+              inferExpressionType(expression.children[index], scope));
+        }
+        if (expression.children.size() != 2) {
+          diagnostics_.error(expression.span,
+                             "tuple apply requires exactly one Int index");
+          return TypeInfo{SimpleTypeKind::Unknown, "Unknown"};
+        }
+        if (abstractTuple ||
+            (!emptyTuple &&
+             (!arity.has_value() ||
+              tupleApplyReceiverType->typeArguments.size() != *arity))) {
+          diagnostics_.error(expression.span,
+                             "apply requires a concrete tuple receiver");
+          return TypeInfo{SimpleTypeKind::Unknown, "Unknown"};
+        }
+        const TypeInfo& indexType = argumentTypes.front();
+        if (indexType.kind != SimpleTypeKind::Int &&
+            indexType.kind != SimpleTypeKind::Unknown) {
+          diagnostics_.error(expression.children[1].span,
+                             "tuple apply index must have type Int");
+          return TypeInfo{SimpleTypeKind::Unknown, "Unknown"};
+        }
+        const std::optional<std::int64_t> index =
+            constantIntegerValue(expression.children[1], scope);
+        if (!index.has_value()) {
+          diagnostics_.error(
+              expression.children[1].span,
+              "tuple apply index must be a compile-time constant Int in this "
+              "subset");
+          return TypeInfo{SimpleTypeKind::Unknown, "Unknown"};
+        }
+        const std::size_t tupleSize =
+            emptyTuple ? 0 : tupleApplyReceiverType->typeArguments.size();
+        if (*index < 0 || static_cast<std::uint64_t>(*index) >= tupleSize) {
+          diagnostics_.error(
+              expression.children[1].span,
+              "tuple apply index " + std::to_string(*index) +
+                  " is outside tuple bounds [0, " +
+                  std::to_string(tupleSize) + ")");
+          return TypeInfo{SimpleTypeKind::Unknown, "Unknown"};
+        }
+
+        const std::string indexLiteral = std::to_string(*index);
+        for (auto info = expressionTypes_.rbegin();
+             info != expressionTypes_.rend(); ++info) {
+          if (info->span.source == expression.children[1].span.source &&
+              info->span.start == expression.children[1].span.start &&
+              info->span.length == expression.children[1].span.length) {
+            info->type.singletonLiteral = indexLiteral;
+            break;
+          }
+        }
+        return tupleApplyReceiverType->typeArguments[
+            static_cast<std::size_t>(*index)];
+      }
     }
     if (isCodeOfCallee(expression.children.front(), scope)) {
       TypeInfo result{SimpleTypeKind::String, "String"};
