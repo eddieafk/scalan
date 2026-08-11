@@ -37,6 +37,9 @@ struct StdNames final {
   inline static constexpr std::string_view SummonInline = "summonInline";
   inline static constexpr std::string_view ScalaCompiletimeSummonInline =
       "scala.compiletime.summonInline";
+  inline static constexpr std::string_view SummonAll = "summonAll";
+  inline static constexpr std::string_view ScalaCompiletimeSummonAll =
+      "scala.compiletime.summonAll";
   inline static constexpr std::string_view SummonFrom = "summonFrom";
   inline static constexpr std::string_view ScalaCompiletimeSummonFrom =
       "scala.compiletime.summonFrom";

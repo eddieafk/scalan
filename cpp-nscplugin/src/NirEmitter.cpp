@@ -931,6 +931,12 @@ bool isSummonInlineCallee(const frontend::AstExpression& expression,
                              support::StdNames::ScalaCompiletimeSummonInline);
 }
 
+bool isSummonAllCallee(const frontend::AstExpression& expression,
+                       const ValueContext& context) {
+  return isCompiletimeCallee(expression, context,
+                             support::StdNames::ScalaCompiletimeSummonAll);
+}
+
 bool isErasedValueExpression(const frontend::AstExpression& expression,
                              const ValueContext& context) {
   return expression.kind == frontend::AstExpressionKind::TypeApply &&
@@ -3017,6 +3023,36 @@ nir::Value valueFor(const frontend::AstExpression& expression,
       return materializeContextArgument(application->arguments.front(), expression,
                                         context);
     }
+    if (isSummonAllCallee(callee, context)) {
+      const frontend::TypeInfo* tuple = annotatedTypeFor(expression, context);
+      if (tuple == nullptr ||
+          runtimeTypeName(*tuple) == support::StdNames::ScalaEmptyTuple) {
+        return nir::localValue(std::string(support::StdNames::ScalaEmptyTuple),
+                               expression.span);
+      }
+      const std::string tupleType = runtimeTypeName(*tuple);
+      const frontend::TypedContextApplication* application =
+          contextApplicationFor(expression, context);
+      if (!isTupleClassName(tupleType) || tuple->typeArguments.empty() ||
+          application == nullptr ||
+          application->arguments.size() != tuple->typeArguments.size()) {
+        return nir::localValue(std::string(support::StdNames::ScalaEmptyTuple),
+                               expression.span);
+      }
+      std::vector<nir::Value> values;
+      values.reserve(application->arguments.size());
+      for (std::size_t index = 0; index < application->arguments.size(); ++index) {
+        nir::Value value = materializeContextArgument(
+            application->arguments[index], expression, context);
+        if (const std::string boxed =
+                boxedObjectTypeName(tuple->typeArguments[index].kind);
+            !boxed.empty()) {
+          value = nir::boxValue(boxed, std::move(value), expression.span);
+        }
+        values.push_back(std::move(value));
+      }
+      return nir::newValue(tupleType, std::move(values), expression.span);
+    }
     const bool isArrayEmpty =
         callee.kind == AstExpressionKind::Select && callee.children.size() == 1 &&
         callee.text == support::StdNames::ArrayEmpty &&
@@ -3055,6 +3091,7 @@ nir::Value valueFor(const frontend::AstExpression& expression,
     if (callee.kind != AstExpressionKind::Select || callee.children.size() != 1) {
       if (callee.kind == AstExpressionKind::Identifier &&
           (callee.text == support::StdNames::SummonInline ||
+           callee.text == support::StdNames::SummonAll ||
            callee.text == support::StdNames::ConstValueOpt ||
            callee.text == support::StdNames::ConstValueTuple)) {
         if (const frontend::TypedDeclaration* shadow = findMemberDeclaration(

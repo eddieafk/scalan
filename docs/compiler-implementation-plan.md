@@ -1161,8 +1161,29 @@ Current scaffold status:
   output, imports, aliases, specialization, shadowing, diagnostics,
   boxing/unboxing, demand-driven arities, and NIR erasure. The public example is
   `cpp-examples/CompiletimeConstValueTuple.scala`. General tuple algorithms,
-  tuple literals, and `*:`-based compile-time recursion remain later milestones;
-  this runtime foundation is intended to support `summonAll` next.
+  tuple literals, and `*:`-based compile-time recursion remain later milestones.
+  Compiler-owned `scala.compiletime.summonAll[T]` now takes a tuple whose
+  elements are the evidence types to resolve and returns that same static tuple
+  type populated with contextual values. Parenthesized tuples, explicit
+  `TupleN[...]`, tuple aliases, and `EmptyTuple` reuse the tuple normalization
+  and demand-driven runtime classes established for `constValueTuple`. Exact
+  imports, renamed imports, the qualified spelling, and an abstract `T <: Tuple`
+  inside an inline definition are recognized; generic searches are delayed
+  until call-site specialization supplies concrete element types. Non-tuple
+  requests, unresolved non-inline tuple parameters, and malformed type-argument
+  arity receive focused intrinsic diagnostics.
+  Each concrete element is resolved independently through the existing Scala 3
+  contextual ranking and recursive materialization path, retaining local/context
+  parameter precedence, imported and companion givens, and missing, ambiguous,
+  unsupported, or diverging diagnostics. NIR materializes the selected values
+  into a demanded `TupleN`, boxes primitive evidence for erased fields, restores
+  precise projection types, and leaves no callable `summonAll` intrinsic in
+  successful callers; `EmptyTuple` lowers directly to its stable module. The
+  compact `SmokeTests8.cpp` translation unit starts a new fast-test partition
+  and covers native output, canonical/renamed/qualified calls, tuple aliases,
+  inline specialization, primitive and companion evidence, Tuple1/Tuple2/Tuple3
+  layouts, `EmptyTuple`, shadowing, diagnostics, demand-driven arities, and NIR
+  erasure. `cpp-examples/CompiletimeSummonAll.scala` provides the public example.
   Compiler-owned `scala.compiletime.requireConst(value)` accepts Boolean, Byte,
   Short, Int, Long, Float, Double, Char, and String arguments through canonical,
   renamed, or qualified calls. It reuses inline substitution and constant

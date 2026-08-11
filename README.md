@@ -136,6 +136,12 @@ build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
 # Canonical, renamed, qualified, type-aliased, and specialized-inline calls
 # leave no runtime intrinsic; general tuple algorithms and `*:` recursion remain
 # later tuple-library milestones.
+# Compiler-owned `scala.compiletime.summonAll[T]` accepts a tuple of evidence
+# types and performs one contextual search per element. Canonical, renamed,
+# qualified, type-aliased, and specialized-inline calls materialize the selected
+# givens into `TupleN`, including primitive boxing and companion-scope evidence;
+# `EmptyTuple` needs no evidence. Missing, ambiguous, non-tuple, malformed, and
+# unresolved non-inline requests receive compile-time diagnostics.
 # Compiler-owned `scala.compiletime.requireConst(value)` accepts Boolean, Byte,
 # Short, Int, Long, Float, Double, Char, and String expressions and verifies
 # them after inline substitution and constant folding. Canonical, renamed, and
@@ -189,6 +195,10 @@ build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
 build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
   --output /tmp/compiletime-const-value-tuple \
   cpp-examples/CompiletimeConstValueTuple.scala
+
+build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
+  --output /tmp/compiletime-summon-all \
+  cpp-examples/CompiletimeSummonAll.scala
 
 build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
   --output /tmp/compiletime-uninitialized \

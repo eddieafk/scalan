@@ -2949,6 +2949,26 @@ void Typechecker::addRuntimeBuiltins(Scope& scope) {
   summonInline.typeParameters.push_back(std::move(summonedType));
   globalSymbols_[summonInline.symbolName] = std::move(summonInline);
 
+  SymbolInfo summonAll;
+  summonAll.kind = AstDeclarationKind::Def;
+  summonAll.name = std::string(support::StdNames::SummonAll);
+  summonAll.symbolName =
+      std::string(support::StdNames::ScalaCompiletimeSummonAll);
+  TypeParameterInfo summonedTupleType;
+  summonedTupleType.name = "T";
+  summonedTupleType.symbolName = summonAll.symbolName + ".T";
+  summonedTupleType.lowerBound = TypeInfo{SimpleTypeKind::Nothing, "Nothing"};
+  summonedTupleType.upperBound = TypeInfo{
+      SimpleTypeKind::Object, std::string(support::StdNames::ScalaTuple)};
+  summonedTupleType.upperBound.runtimeName =
+      std::string(support::StdNames::ScalaTuple);
+  summonAll.typeParameters.push_back(summonedTupleType);
+  summonAll.type = TypeInfo{SimpleTypeKind::Object, "T"};
+  summonAll.type.runtimeName = "Object";
+  summonAll.type.typeParameter = true;
+  summonAll.type.typeParameterSymbolName = summonedTupleType.symbolName;
+  globalSymbols_[summonAll.symbolName] = std::move(summonAll);
+
   SymbolInfo summonFrom;
   summonFrom.kind = AstDeclarationKind::Def;
   summonFrom.name = std::string(support::StdNames::SummonFrom);
@@ -5539,6 +5559,36 @@ bool Typechecker::isSummonInlineCallee(const AstExpression& expression,
          *path == support::StdNames::ScalaCompiletimeSummonInline;
 }
 
+bool Typechecker::isSummonAllCallee(const AstExpression& expression,
+                                    const Scope& scope) const {
+  if (expression.kind == AstExpressionKind::Identifier) {
+    const auto symbol = scope.find(expression.text);
+    return symbol != scope.end() &&
+           symbol->second.symbolName ==
+               support::StdNames::ScalaCompiletimeSummonAll;
+  }
+
+  std::function<std::optional<std::string>(const AstExpression&)> qualifiedPath;
+  qualifiedPath = [&](const AstExpression& candidate)
+      -> std::optional<std::string> {
+    if (candidate.kind == AstExpressionKind::Identifier) {
+      return candidate.text;
+    }
+    if (candidate.kind != AstExpressionKind::Select ||
+        candidate.children.size() != 1) {
+      return std::nullopt;
+    }
+    std::optional<std::string> receiver =
+        qualifiedPath(candidate.children.front());
+    return receiver.has_value()
+               ? std::optional<std::string>(*receiver + "." + candidate.text)
+               : std::nullopt;
+  };
+  const std::optional<std::string> path = qualifiedPath(expression);
+  return path.has_value() &&
+         *path == support::StdNames::ScalaCompiletimeSummonAll;
+}
+
 std::optional<bool>
 Typechecker::constantBooleanValue(const AstExpression& expression,
                                   const Scope& scope) const {
@@ -7004,6 +7054,7 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
     const bool isConstValueTuple = isConstValueTupleCallee(callee, scope);
     const bool isErasedValue = isErasedValueCallee(callee, scope);
     const bool isSummonInline = isSummonInlineCallee(callee, scope);
+    const bool isSummonAll = isSummonAllCallee(callee, scope);
     const bool isSummon =
         callee.kind == AstExpressionKind::Identifier &&
         (callee.text == SummonName || callee.text == ImplicitlyName);
@@ -7133,6 +7184,53 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
           resolveContextArguments(request, 0, scope, expression.span);
       recordContextApplication(expression.span, std::move(arguments));
       return requested;
+    }
+    if (isSummonAll) {
+      if (typeArguments.size() != 1) {
+        diagnostics_.error(expression.span,
+                           "summonAll requires exactly one type argument");
+        return TypeInfo{SimpleTypeKind::Unknown, "Unknown"};
+      }
+      const TypeInfo tuple =
+          typeFromDeclaredName(expression.declaredType, &scope, &expression.span);
+      if (tuple.typeParameter) {
+        if (inlineDefinitionDepth_ != 0 &&
+            tuple.runtimeName == support::StdNames::ScalaTuple) {
+          return tuple;
+        }
+        diagnostics_.error(expression.span,
+                           "summonAll requires a concrete tuple type");
+        return TypeInfo{SimpleTypeKind::Unknown, "Unknown"};
+      }
+      const std::string constructor =
+          tuple.typeConstructorName.empty() ? tuple.runtimeName
+                                            : tuple.typeConstructorName;
+      const bool emptyTuple =
+          tuple.name == support::StdNames::ScalaEmptyTuple ||
+          tuple.runtimeName == support::StdNames::ScalaEmptyTuple;
+      const std::optional<std::size_t> tupleArity =
+          tupleArityForConstructor(constructor);
+      if (!emptyTuple &&
+          (!tupleArity.has_value() || tuple.typeArguments.size() != *tupleArity)) {
+        diagnostics_.error(expression.span, "summonAll requires a tuple type");
+        return TypeInfo{SimpleTypeKind::Unknown, "Unknown"};
+      }
+
+      SymbolInfo request;
+      request.kind = AstDeclarationKind::Def;
+      request.name = std::string(support::StdNames::SummonAll);
+      request.type = tuple;
+      for (std::size_t index = 0; index < tuple.typeArguments.size(); ++index) {
+        const TypeInfo& element = tuple.typeArguments[index];
+        request.parameters.push_back("element" + std::to_string(index + 1) +
+                                     ": " + element.name);
+        request.parameterTypes.push_back(element);
+        request.contextualParameters.push_back(true);
+      }
+      std::vector<TypedContextArgument> arguments =
+          resolveContextArguments(request, 0, scope, expression.span);
+      recordContextApplication(expression.span, std::move(arguments));
+      return tuple;
     }
     if (isSizeOf) {
       if (typeArguments.size() != 1) {
