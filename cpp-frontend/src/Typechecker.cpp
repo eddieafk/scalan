@@ -1012,6 +1012,124 @@ AppliedTypeSyntax parseAppliedTypeSyntax(std::string_view typeName) {
   return parsed;
 }
 
+std::optional<std::size_t> tupleArityForConstructor(std::string_view constructor) {
+  constexpr std::string_view scalaPrefix = "scala.";
+  if (constructor.starts_with(scalaPrefix)) {
+    constructor.remove_prefix(scalaPrefix.size());
+  }
+  constexpr std::string_view tuplePrefix = "Tuple";
+  if (!constructor.starts_with(tuplePrefix)) {
+    return std::nullopt;
+  }
+  constructor.remove_prefix(tuplePrefix.size());
+  if (constructor.empty()) {
+    return std::nullopt;
+  }
+  std::size_t arity = 0;
+  for (char ch : constructor) {
+    if (ch < '0' || ch > '9') {
+      return std::nullopt;
+    }
+    arity = arity * 10 + static_cast<std::size_t>(ch - '0');
+  }
+  return arity >= 1 && arity <= 22 ? std::optional<std::size_t>{arity}
+                                   : std::nullopt;
+}
+
+std::optional<std::vector<std::string>>
+parenthesizedTupleTypeElements(std::string_view typeName) {
+  const std::string normalized = trim(typeName);
+  if (normalized.size() < 5 || normalized.front() != '(' ||
+      normalized.back() != ')') {
+    return std::nullopt;
+  }
+
+  const std::string_view elements(normalized.data() + 1, normalized.size() - 2);
+  std::vector<std::string> result;
+  std::size_t elementStart = 0;
+  std::size_t bracketDepth = 0;
+  std::size_t parenthesisDepth = 0;
+  char quote = '\0';
+  bool escaped = false;
+  bool sawComma = false;
+  for (std::size_t i = 0; i < elements.size(); ++i) {
+    const char ch = elements[i];
+    if (quote != '\0') {
+      if (escaped) {
+        escaped = false;
+      } else if (ch == '\\') {
+        escaped = true;
+      } else if (ch == quote) {
+        quote = '\0';
+      }
+      continue;
+    }
+    if (ch == '"' || ch == '\'') {
+      quote = ch;
+      continue;
+    }
+    if (ch == '[') {
+      ++bracketDepth;
+      continue;
+    }
+    if (ch == ']') {
+      if (bracketDepth == 0) {
+        return std::nullopt;
+      }
+      --bracketDepth;
+      continue;
+    }
+    if (ch == '(') {
+      ++parenthesisDepth;
+      continue;
+    }
+    if (ch == ')') {
+      if (parenthesisDepth == 0) {
+        return std::nullopt;
+      }
+      --parenthesisDepth;
+      continue;
+    }
+    if (ch == ',' && bracketDepth == 0 && parenthesisDepth == 0) {
+      const std::string element = trim(elements.substr(elementStart, i - elementStart));
+      if (element.empty()) {
+        return std::nullopt;
+      }
+      result.push_back(element);
+      elementStart = i + 1;
+      sawComma = true;
+    }
+  }
+  if (!sawComma || bracketDepth != 0 || parenthesisDepth != 0 || quote != '\0') {
+    return std::nullopt;
+  }
+  const std::string last = trim(elements.substr(elementStart));
+  if (last.empty()) {
+    return std::nullopt;
+  }
+  result.push_back(last);
+  return result;
+}
+
+std::optional<std::vector<std::string>> tupleTypeElements(std::string_view typeName) {
+  const std::string compact = compactTypeName(typeName);
+  if (compact == "EmptyTuple" || compact == support::StdNames::ScalaEmptyTuple) {
+    return std::vector<std::string>{};
+  }
+  if (const auto parenthesized = parenthesizedTupleTypeElements(typeName);
+      parenthesized.has_value()) {
+    return parenthesized;
+  }
+  const AppliedTypeSyntax applied = parseAppliedTypeSyntax(typeName);
+  const std::optional<std::size_t> arity =
+      applied.malformed ? std::nullopt
+                        : tupleArityForConstructor(applied.constructor);
+  if (!arity.has_value() || applied.arguments.size() != *arity) {
+    return std::nullopt;
+  }
+  return applied.arguments;
+}
+
 std::vector<std::string> typeArgumentsFor(const AstExpression& expression) {
   if (!expression.typeArguments.empty()) {
     return expression.typeArguments;
@@ -1458,7 +1576,7 @@ standardDerivationDeclarations(const AstModule& module) {
   tuple.span = noSpan;
 
   AstDeclaration emptyTuple;
-  emptyTuple.kind = AstDeclarationKind::Trait;
+  emptyTuple.kind = AstDeclarationKind::Object;
   emptyTuple.name = "EmptyTuple";
   emptyTuple.span = noSpan;
   emptyTuple.parentTypes = {"scala.Tuple"};
@@ -1470,6 +1588,45 @@ standardDerivationDeclarations(const AstModule& module) {
       tupleArities.push_back(arity);
     }
   };
+  const std::function<void(std::string_view)> collectTupleType =
+      [&](std::string_view typeName) {
+        const std::optional<std::vector<std::string>> elements =
+            tupleTypeElements(typeName);
+        if (!elements.has_value()) {
+          return;
+        }
+        addTupleArity(elements->size());
+        for (const std::string& element : *elements) {
+          collectTupleType(element);
+        }
+      };
+  const std::function<void(const AstExpression&)> collectTupleExpressions =
+      [&](const AstExpression& expression) {
+        for (const std::string& typeArgument : expression.typeArguments) {
+          collectTupleType(typeArgument);
+        }
+        for (const AstExpression& child : expression.children) {
+          collectTupleExpressions(child);
+        }
+      };
+  const std::function<void(const std::vector<AstDeclaration>&)>
+      collectTupleDeclarations =
+          [&](const std::vector<AstDeclaration>& declarations) {
+            for (const AstDeclaration& declaration : declarations) {
+              collectTupleType(declaration.declaredType);
+              if (declaration.hasInitializer) {
+                collectTupleExpressions(declaration.initializer);
+              }
+              for (const AstExpression& argument : declaration.parentArguments) {
+                collectTupleExpressions(argument);
+              }
+              for (const AstExpression& expression : declaration.constructorBody) {
+                collectTupleExpressions(expression);
+              }
+              collectTupleDeclarations(declaration.members);
+            }
+          };
+  collectTupleDeclarations(module.declarations);
   std::vector<const AstDeclaration*> derivationCandidates;
   const std::function<void(const std::vector<AstDeclaration>&)>
       collectDerivationCandidates =
@@ -1535,7 +1692,7 @@ standardDerivationDeclarations(const AstModule& module) {
   tupleTypes.reserve(tupleArities.size());
   for (std::size_t arity : tupleArities) {
     AstDeclaration tupleType;
-    tupleType.kind = AstDeclarationKind::Trait;
+    tupleType.kind = AstDeclarationKind::Class;
     tupleType.name = "Tuple" + std::to_string(arity);
     tupleType.span = noSpan;
     tupleType.parentTypes = {"scala.Tuple"};
@@ -1545,6 +1702,8 @@ standardDerivationDeclarations(const AstModule& module) {
       element.span = noSpan;
       element.variance = TypeVariance::Covariant;
       tupleType.typeParameters.push_back(std::move(element));
+      tupleType.parameters.push_back("val _" + std::to_string(index) + ": T" +
+                                     std::to_string(index));
     }
     tupleTypes.push_back(std::move(tupleType));
   }
@@ -2741,6 +2900,26 @@ void Typechecker::addRuntimeBuiltins(Scope& scope) {
   constValueOpt.type.typeArguments = {optionalArgument};
   constValueOpt.isTransparent = true;
   globalSymbols_[constValueOpt.symbolName] = std::move(constValueOpt);
+
+  SymbolInfo constValueTuple;
+  constValueTuple.kind = AstDeclarationKind::Def;
+  constValueTuple.name = std::string(support::StdNames::ConstValueTuple);
+  constValueTuple.symbolName =
+      std::string(support::StdNames::ScalaCompiletimeConstValueTuple);
+  TypeParameterInfo tupleType;
+  tupleType.name = "T";
+  tupleType.symbolName = constValueTuple.symbolName + ".T";
+  tupleType.lowerBound = TypeInfo{SimpleTypeKind::Nothing, "Nothing"};
+  tupleType.upperBound = TypeInfo{SimpleTypeKind::Object,
+                                  std::string(support::StdNames::ScalaTuple)};
+  tupleType.upperBound.runtimeName = std::string(support::StdNames::ScalaTuple);
+  constValueTuple.typeParameters.push_back(tupleType);
+  constValueTuple.type = TypeInfo{SimpleTypeKind::Object, "T"};
+  constValueTuple.type.runtimeName = "Object";
+  constValueTuple.type.typeParameter = true;
+  constValueTuple.type.typeParameterSymbolName = tupleType.symbolName;
+  constValueTuple.isTransparent = true;
+  globalSymbols_[constValueTuple.symbolName] = std::move(constValueTuple);
 
   SymbolInfo erasedValue;
   erasedValue.kind = AstDeclarationKind::Def;
@@ -5182,6 +5361,36 @@ bool Typechecker::isConstValueOptCallee(const AstExpression& expression,
          *path == support::StdNames::ScalaCompiletimeConstValueOpt;
 }
 
+bool Typechecker::isConstValueTupleCallee(const AstExpression& expression,
+                                          const Scope& scope) const {
+  if (expression.kind == AstExpressionKind::Identifier) {
+    const auto symbol = scope.find(expression.text);
+    return symbol != scope.end() &&
+           symbol->second.symbolName ==
+               support::StdNames::ScalaCompiletimeConstValueTuple;
+  }
+
+  std::function<std::optional<std::string>(const AstExpression&)> qualifiedPath;
+  qualifiedPath = [&](const AstExpression& candidate)
+      -> std::optional<std::string> {
+    if (candidate.kind == AstExpressionKind::Identifier) {
+      return candidate.text;
+    }
+    if (candidate.kind != AstExpressionKind::Select ||
+        candidate.children.size() != 1) {
+      return std::nullopt;
+    }
+    std::optional<std::string> receiver =
+        qualifiedPath(candidate.children.front());
+    return receiver.has_value()
+               ? std::optional<std::string>(*receiver + "." + candidate.text)
+               : std::nullopt;
+  };
+  const std::optional<std::string> path = qualifiedPath(expression);
+  return path.has_value() &&
+         *path == support::StdNames::ScalaCompiletimeConstValueTuple;
+}
+
 bool Typechecker::isCompiletimeErrorCallee(const AstExpression& expression,
                                            const Scope& scope) const {
   if (expression.kind == AstExpressionKind::Identifier) {
@@ -6792,6 +7001,7 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
                           callee.text == support::StdNames::SizeOf;
     const bool isConstValue = isConstValueCallee(callee, scope);
     const bool isConstValueOpt = isConstValueOptCallee(callee, scope);
+    const bool isConstValueTuple = isConstValueTupleCallee(callee, scope);
     const bool isErasedValue = isErasedValueCallee(callee, scope);
     const bool isSummonInline = isSummonInlineCallee(callee, scope);
     const bool isSummon =
@@ -6843,6 +7053,48 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
       optionType.typeConstructorName = std::string(support::StdNames::ScalaOption);
       optionType.typeArguments = {argument};
       return optionType;
+    }
+    if (isConstValueTuple) {
+      if (typeArguments.size() != 1) {
+        diagnostics_.error(expression.span,
+                           "constValueTuple requires exactly one type argument");
+        return TypeInfo{SimpleTypeKind::Unknown, "Unknown"};
+      }
+      const TypeInfo tuple =
+          typeFromDeclaredName(expression.declaredType, &scope, &expression.span);
+      if (tuple.typeParameter) {
+        if (inlineDefinitionDepth_ != 0 &&
+            tuple.runtimeName == support::StdNames::ScalaTuple) {
+          return tuple;
+        }
+        diagnostics_.error(expression.span,
+                           "constValueTuple requires a concrete tuple type");
+        return TypeInfo{SimpleTypeKind::Unknown, "Unknown"};
+      }
+      const std::string constructor =
+          tuple.typeConstructorName.empty() ? tuple.runtimeName
+                                            : tuple.typeConstructorName;
+      const bool emptyTuple =
+          tuple.name == support::StdNames::ScalaEmptyTuple ||
+          tuple.runtimeName == support::StdNames::ScalaEmptyTuple;
+      const std::optional<std::size_t> tupleArity =
+          tupleArityForConstructor(constructor);
+      if (!emptyTuple &&
+          (!tupleArity.has_value() || tuple.typeArguments.size() != *tupleArity)) {
+        diagnostics_.error(expression.span,
+                           "constValueTuple requires a tuple type");
+        return TypeInfo{SimpleTypeKind::Unknown, "Unknown"};
+      }
+      const bool constantElements = std::all_of(
+          tuple.typeArguments.begin(), tuple.typeArguments.end(),
+          [](const TypeInfo& element) { return !element.singletonLiteral.empty(); });
+      if (!constantElements) {
+        diagnostics_.error(
+            expression.span,
+            "constValueTuple requires constant singleton element types");
+        return TypeInfo{SimpleTypeKind::Unknown, "Unknown"};
+      }
+      return tuple;
     }
     if (isErasedValue) {
       if (typeArguments.size() != 1) {
@@ -11799,6 +12051,31 @@ TypeInfo Typechecker::typeFromDeclaredName(const std::string& name, const Scope*
   }
   if (normalized == "Null") {
     return TypeInfo{SimpleTypeKind::Null, "Null"};
+  }
+  if (const auto tupleElements = parenthesizedTupleTypeElements(normalized);
+      tupleElements.has_value()) {
+    const std::string constructorName =
+        std::string(support::StdNames::ScalaTuple) +
+        std::to_string(tupleElements->size());
+    const SymbolInfo* constructor =
+        typeSymbolForDeclaredName(constructorName, scope);
+    if (constructor == nullptr) {
+      if (span != nullptr) {
+        diagnostics_.error(*span,
+                           "unresolved tuple type constructor: " + constructorName);
+      }
+      return TypeInfo{SimpleTypeKind::Unknown, normalized};
+    }
+    std::vector<TypeInfo> elementTypes;
+    elementTypes.reserve(tupleElements->size());
+    for (const std::string& element : *tupleElements) {
+      elementTypes.push_back(typeFromDeclaredName(element, scope, span));
+    }
+    return specializeResolvedTypeApplication(
+               *constructor, elementTypes,
+               span == nullptr ? support::SourceSpan::none() : *span,
+               span != nullptr)
+        .type;
   }
 
   bool malformedComposite = false;

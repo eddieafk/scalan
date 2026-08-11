@@ -6052,7 +6052,7 @@ object Labels {
           contains(result.nirText, "trait @scala.Product : @java.lang.Object") &&
           contains(result.nirText, "declare @scala.Product.productElement : "
                                    "(scala.Product,Int)Object") &&
-          contains(result.nirText, "trait @scala.Tuple3 : @scala.Tuple") &&
+          contains(result.nirText, "class @scala.Tuple3 : @scala.Tuple") &&
           contains(result.nirText,
                    "trait @scala.deriving.Mirror : @java.lang.Object") &&
           contains(result.nirText, "trait @scala.deriving.Mirror.Of : "

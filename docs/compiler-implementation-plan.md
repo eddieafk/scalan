@@ -1142,6 +1142,27 @@ Current scaffold status:
   `cpp-examples/CompiletimeConstValueOpt.scala` provides the public example.
   General `Option` collection methods and companion construction remain part of
   the staged standard-library surface rather than this compiler intrinsic.
+  Compiler-owned `scala.compiletime.constValueTuple[T]` now materializes the
+  tuple value prescribed by Scala 3 for a parenthesized tuple type whose element
+  types are constant singletons. Parenthesized source syntax normalizes to the
+  existing `scala.TupleN[...]` metadata representation without losing escaped
+  or spaced String singleton text; a type alias to that tuple retains the same
+  element types. Exact imports, renamed imports, the qualified spelling, and an
+  abstract `T <: Tuple` inside a transparent inline definition all specialize
+  at the call site. Non-tuple types, non-constant or nested-tuple elements,
+  unresolved non-inline tuple parameters, and malformed arity receive focused
+  diagnostics.
+  Tuple arities discovered in source or deriving metadata are synthesized on
+  demand as covariant runtime classes with erased constructor fields and typed
+  `_1` through `_N` accessors; `EmptyTuple` is a stable module. NIR boxes each
+  constant for field storage, unboxes projections to their precise scalar or
+  String result, and contains no callable `constValueTuple` intrinsic. Compact
+  `SmokeTests7.cpp` coverage checks Tuple2/Tuple3 and EmptyTuple layout, native
+  output, imports, aliases, specialization, shadowing, diagnostics,
+  boxing/unboxing, demand-driven arities, and NIR erasure. The public example is
+  `cpp-examples/CompiletimeConstValueTuple.scala`. General tuple algorithms,
+  tuple literals, and `*:`-based compile-time recursion remain later milestones;
+  this runtime foundation is intended to support `summonAll` next.
   Compiler-owned `scala.compiletime.requireConst(value)` accepts Boolean, Byte,
   Short, Int, Long, Float, Double, Char, and String arguments through canonical,
   renamed, or qualified calls. It reuses inline substitution and constant
@@ -1345,9 +1366,10 @@ Current scaffold status:
   monomorphic types to `T`; each generated product implementation records
   constructor element types in declaration order, the unqualified product name
   as a string singleton, and constructor parameter names as an ordered tuple of
-  string singletons. Tuple constructors are synthesized only for arities used by
-  deriving products in the current module, while `EmptyTuple` represents a
-  zero-field product. Generic path-dependent selection specializes aliases
+  string singletons. Tuple runtime classes are synthesized only for arities used
+  by deriving metadata or compile-time tuple materialization in the current
+  module, while the `EmptyTuple` module represents a zero-field product. Generic
+  path-dependent selection specializes aliases
   through receivers such as `ProductOf[A]`, allowing declarations whose result
   is `mirror.MirroredMonoType`; bounded abstract metadata erases to its runtime
   upper bound. NIR verification recognizes the erased nominal parents of
@@ -1397,8 +1419,8 @@ Current scaffold status:
   evidence identity, `Of` compatibility, metadata, stored-given initialization,
   and focused diagnostics for unsealed sums, fixed arguments that are invalid
   under the parent's variance, and abstract children. Nested or otherwise
-  non-invertible generic parent mappings, tuple-value operations, compile-time
-  tuple recursion, and higher-kinded derivation remain later derivation
+  non-invertible generic parent mappings, general tuple-value operations,
+  compile-time tuple recursion, and higher-kinded derivation remain later derivation
   milestones.
   Deriving classes and sealed traits may themselves now be nested to arbitrary
   depth beneath stable objects. Companion discovery preserves distinct nested

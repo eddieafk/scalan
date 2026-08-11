@@ -129,6 +129,13 @@ build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
 # calls lower without a runtime intrinsic; the current compiler-owned
 # `Option`/`Some`/`None` shape supplies `Some.value` and identity with `None`
 # while broader collection-library operations remain a later library milestone.
+# Compiler-owned `scala.compiletime.constValueTuple[T]` accepts parenthesized
+# tuple types whose elements are constant singleton types, plus `EmptyTuple`.
+# It materializes demand-driven covariant `TupleN` runtime classes with boxed
+# constructor storage and statically typed `_1` through `_N` projections.
+# Canonical, renamed, qualified, type-aliased, and specialized-inline calls
+# leave no runtime intrinsic; general tuple algorithms and `*:` recursion remain
+# later tuple-library milestones.
 # Compiler-owned `scala.compiletime.requireConst(value)` accepts Boolean, Byte,
 # Short, Int, Long, Float, Double, Char, and String expressions and verifies
 # them after inline substitution and constant folding. Canonical, renamed, and
@@ -178,6 +185,10 @@ build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
 build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
   --output /tmp/compiletime-const-value-opt \
   cpp-examples/CompiletimeConstValueOpt.scala
+
+build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
+  --output /tmp/compiletime-const-value-tuple \
+  cpp-examples/CompiletimeConstValueTuple.scala
 
 build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
   --output /tmp/compiletime-uninitialized \

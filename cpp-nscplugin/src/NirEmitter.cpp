@@ -512,6 +512,19 @@ bool isBuiltinTypeName(const std::string& name) {
          isArrayTypeName(name);
 }
 
+bool isTupleClassName(std::string_view name) {
+  constexpr std::string_view prefix = "scala.Tuple";
+  if (!name.starts_with(prefix) || name.size() == prefix.size()) {
+    return false;
+  }
+  for (char ch : name.substr(prefix.size())) {
+    if (ch < '0' || ch > '9') {
+      return false;
+    }
+  }
+  return true;
+}
+
 const frontend::TypedDeclaration*
 findDeclarationBySymbol(const std::vector<frontend::TypedDeclaration>& declarations,
                         const std::string& symbolName);
@@ -538,6 +551,16 @@ std::string qualifyTypeName(const std::string& name, const ValueContext& context
   }
   if (name == "NotImplementedError") {
     return std::string(support::StdNames::ScalaNotImplementedError);
+  }
+  if (name == "Tuple" || name == support::StdNames::ScalaTuple) {
+    return std::string(support::StdNames::ScalaTuple);
+  }
+  if (name == "EmptyTuple" || name == support::StdNames::ScalaEmptyTuple) {
+    return std::string(support::StdNames::ScalaEmptyTuple);
+  }
+  if (name.starts_with("Tuple") &&
+      isTupleClassName(std::string(support::StdNames::ScalaPackage) + "." + name)) {
+    return std::string(support::StdNames::ScalaPackage) + "." + name;
   }
   if (name == "Option" || name == support::StdNames::ScalaOption) {
     return std::string(support::StdNames::ScalaOption);
@@ -857,6 +880,12 @@ bool isConstValueOptCallee(const frontend::AstExpression& expression,
                            const ValueContext& context) {
   return isCompiletimeCallee(
       expression, context, support::StdNames::ScalaCompiletimeConstValueOpt);
+}
+
+bool isConstValueTupleCallee(const frontend::AstExpression& expression,
+                             const ValueContext& context) {
+  return isCompiletimeCallee(
+      expression, context, support::StdNames::ScalaCompiletimeConstValueTuple);
 }
 
 bool isCodeOfCallee(const frontend::AstExpression& expression,
@@ -2865,19 +2894,28 @@ nir::Value valueFor(const frontend::AstExpression& expression,
       nir::Value receiver = expressionValueFor(expression.children.front(), context);
       const frontend::TypeInfo* receiverType =
           annotatedTypeFor(expression.children.front(), context);
-      const bool isSomeConstruction =
-          (receiver.kind == nir::ValueKind::New &&
-           receiver.text == support::StdNames::ScalaSome) ||
-          (receiver.kind == nir::ValueKind::AsInstanceOf &&
-           receiver.operands.size() == 1 &&
-           receiver.operands.front().kind == nir::ValueKind::New &&
-           receiver.operands.front().text == support::StdNames::ScalaSome);
-      if (isSomeConstruction) {
+      const nir::Value* construction =
+          receiver.kind == nir::ValueKind::New
+              ? &receiver
+              : receiver.kind == nir::ValueKind::AsInstanceOf &&
+                        receiver.operands.size() == 1 &&
+                        receiver.operands.front().kind == nir::ValueKind::New
+                    ? &receiver.operands.front()
+                    : nullptr;
+      const bool materializeConstruction =
+          construction != nullptr &&
+          (construction->text == support::StdNames::ScalaSome ||
+           isTupleClassName(construction->text));
+      if (materializeConstruction) {
+        const std::string constructionType = construction->text;
+        const bool tupleConstruction = isTupleClassName(construction->text);
         const std::string receiverName =
-            "constValueOpt$receiver$" + std::to_string(expression.span.start);
+            (tupleConstruction ? "constValueTuple$receiver$"
+                               : "constValueOpt$receiver$") +
+            std::to_string(expression.span.start);
         std::vector<nir::Value> values;
         values.push_back(nir::localLetValue(
-            receiverName, std::string(support::StdNames::ScalaSome),
+            receiverName, constructionType,
             std::move(receiver), expression.span));
         values.push_back(adaptSelectedValue(nir::selectValue(
             nir::localValue(receiverName, expression.span), expression.text,
@@ -2928,6 +2966,35 @@ nir::Value valueFor(const frontend::AstExpression& expression,
       }
       return nir::newValue(std::string(support::StdNames::ScalaSome),
                            {std::move(value)}, expression.span);
+    }
+    if (isConstValueTupleCallee(callee, context)) {
+      const frontend::TypeInfo* tuple = annotatedTypeFor(expression, context);
+      if (tuple == nullptr ||
+          runtimeTypeName(*tuple) == support::StdNames::ScalaEmptyTuple) {
+        return nir::localValue(std::string(support::StdNames::ScalaEmptyTuple),
+                               expression.span);
+      }
+      const std::string tupleType = runtimeTypeName(*tuple);
+      if (!isTupleClassName(tupleType) || tuple->typeArguments.empty()) {
+        return nir::localValue(std::string(support::StdNames::ScalaEmptyTuple),
+                               expression.span);
+      }
+      std::vector<nir::Value> values;
+      values.reserve(tuple->typeArguments.size());
+      for (const frontend::TypeInfo& element : tuple->typeArguments) {
+        if (element.singletonLiteral.empty()) {
+          return nir::localValue(std::string(support::StdNames::ScalaEmptyTuple),
+                                 expression.span);
+        }
+        nir::Value value = nir::literalValue(
+            element.singletonLiteral, runtimeTypeName(element), expression.span);
+        if (const std::string boxed = boxedObjectTypeName(element.kind);
+            !boxed.empty()) {
+          value = nir::boxValue(boxed, std::move(value), expression.span);
+        }
+        values.push_back(std::move(value));
+      }
+      return nir::newValue(tupleType, std::move(values), expression.span);
     }
     if (isErasedValueCallee(callee, context)) {
       return nir::literalValue("null", "Object", expression.span);
@@ -2988,7 +3055,8 @@ nir::Value valueFor(const frontend::AstExpression& expression,
     if (callee.kind != AstExpressionKind::Select || callee.children.size() != 1) {
       if (callee.kind == AstExpressionKind::Identifier &&
           (callee.text == support::StdNames::SummonInline ||
-           callee.text == support::StdNames::ConstValueOpt)) {
+           callee.text == support::StdNames::ConstValueOpt ||
+           callee.text == support::StdNames::ConstValueTuple)) {
         if (const frontend::TypedDeclaration* shadow = findMemberDeclaration(
                 context, context.currentOwner, callee.text);
             shadow != nullptr && shadow->kind == frontend::AstDeclarationKind::Def) {

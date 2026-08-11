@@ -281,6 +281,8 @@ private:
                                             const Scope& scope) const;
   [[nodiscard]] bool isConstValueOptCallee(const AstExpression& expression,
                                            const Scope& scope) const;
+  [[nodiscard]] bool isConstValueTupleCallee(const AstExpression& expression,
+                                             const Scope& scope) const;
   [[nodiscard]] bool isCodeOfCallee(const AstExpression& expression,
                                     const Scope& scope) const;
   [[nodiscard]] bool isUninitializedExpression(
