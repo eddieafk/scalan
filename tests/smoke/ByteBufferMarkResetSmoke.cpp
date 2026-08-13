@@ -41,10 +41,9 @@ int byteBufferMarkResetLowering() {
       scalanative::testing::contains(
           result.llvmIr, "define internal ptr @__scalanative_byte_buffer_reset") &&
       scalanative::testing::contains(
-          result.llvmIr,
-          "call void @__scalanative_throw_byte_buffer_invalid_mark()") &&
+          result.llvmIr, "call void @__scalanative_throw_byte_buffer_invalid_mark()") &&
       scalanative::testing::contains(result.llvmIr,
-                                     "Runtime ABI = 'scalanative-runtime-58'");
+                                     "Runtime ABI = 'scalanative-runtime-59'");
   if (!stateNir || !stateLlvm) {
     return scalanative::testing::fail(
         TestName, "ByteBuffer mark/reset was not lowered as expected:\n" +

@@ -483,6 +483,8 @@ bool isByteBufferOperationName(std::string_view operation) {
          operation == support::StdNames::ByteBufferHasRemaining ||
          operation == support::StdNames::ByteBufferGet ||
          operation == support::StdNames::ByteBufferPut ||
+         operation == support::StdNames::ByteBufferGetShort ||
+         operation == support::StdNames::ByteBufferPutShort ||
          operation == support::StdNames::ByteBufferClear ||
          operation == support::StdNames::ByteBufferFlip ||
          operation == support::StdNames::ByteBufferRewind ||
@@ -9206,10 +9208,14 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
               selected.text == support::StdNames::ByteBufferLimit;
           const bool get = selected.text == support::StdNames::ByteBufferGet;
           const bool put = selected.text == support::StdNames::ByteBufferPut;
+          const bool getShort = selected.text == support::StdNames::ByteBufferGetShort;
+          const bool putShort = selected.text == support::StdNames::ByteBufferPutShort;
           const bool validArity =
               (positionOrLimit && argumentCount <= 1) || (get && argumentCount <= 1) ||
               (put && (argumentCount == 1 || argumentCount == 2)) ||
-              (!positionOrLimit && !get && !put && argumentCount == 0);
+              (getShort && argumentCount == 0) || (putShort && argumentCount == 1) ||
+              (!positionOrLimit && !get && !put && !getShort && !putShort &&
+               argumentCount == 0);
           if (!validArity) {
             std::string argumentContract;
             if (positionOrLimit || get) {
@@ -9217,6 +9223,8 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
             } else if (put) {
               argumentContract =
                   " requires one Byte argument or an Int index and Byte value";
+            } else if (putShort) {
+              argumentContract = " requires one Short argument";
             } else {
               argumentContract = " does not accept arguments";
             }
@@ -9255,6 +9263,13 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
               diagnostics_.error(expression.children[valueIndex].span,
                                  "put value must have type Byte");
             }
+          } else if (putShort) {
+            const TypeInfo value = inferExpressionType(expression.children[1], scope);
+            if (value.kind != SimpleTypeKind::Short &&
+                value.kind != SimpleTypeKind::Unknown) {
+              diagnostics_.error(expression.children[1].span,
+                                 "putShort value must have type Short");
+            }
           }
 
           const bool returnsInt =
@@ -9271,6 +9286,9 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
           }
           if (selected.text == support::StdNames::ByteBufferGet) {
             return TypeInfo{SimpleTypeKind::Byte, "Byte"};
+          }
+          if (selected.text == support::StdNames::ByteBufferGetShort) {
+            return TypeInfo{SimpleTypeKind::Short, "Short"};
           }
           return TypeInfo{SimpleTypeKind::Object,
                           std::string(support::StdNames::JavaNioByteBuffer)};
@@ -11528,6 +11546,7 @@ bool Typechecker::analyzeZoneExpression(
         }
         const bool returnsBuffer =
             selected.text == support::StdNames::ByteBufferPut ||
+            selected.text == support::StdNames::ByteBufferPutShort ||
             selected.text == support::StdNames::ByteBufferClear ||
             selected.text == support::StdNames::ByteBufferFlip ||
             selected.text == support::StdNames::ByteBufferRewind ||

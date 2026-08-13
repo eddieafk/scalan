@@ -3689,8 +3689,24 @@ Current scaffold status:
   both position and mark. Frontend typing, NIR mutation verification, linker
   reachability, and LLVM lowering all share the two explicit runtime intrinsics.
 
-  Byte-order state, relative and absolute multibyte access, slicing,
+  Byte-order state, additional relative and absolute multibyte access, slicing,
   duplication, read-only views, and bulk transfer remain later slices.
+- Runtime ABI 59 adds the first multibyte buffer operations with the standard
+  big-endian `ByteBuffer.getShort(): Short` and
+  `putShort(value): ByteBuffer`. Each operation requires at least two remaining
+  bytes, accesses the pair as one validated unit, and advances position by
+  exactly two only after a successful access. Put remains fluent and returns the
+  same buffer.
+
+  Reads and writes reuse ABI 54's portable byte-composition helpers, avoiding
+  unaligned native loads and host-byte-order dependencies. A failed read throws
+  `BufferUnderflowException`; a failed write throws `BufferOverflowException`.
+  Both retain the existing concise messages and leave position and backing bytes
+  unchanged. Increasing position continues to preserve a valid mark, so reset
+  can restore the position recorded before relative Short access.
+
+  Byte-order selection, indexed Short access, additional primitive widths,
+  slicing, duplication, read-only views, and bulk transfer remain later slices.
 - The frontend seeds a tiny runtime builtin, `println(value): Unit`, for the
   currently supported literal/value subset.
 - `nscplugin` emits `scala.scalanative.runtime.println : (Unknown)Unit` as a

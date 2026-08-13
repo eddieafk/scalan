@@ -1293,6 +1293,59 @@ void emitRuntimeTypeHelpers(std::ostringstream& out,
   out << "  unreachable\n";
   out << "}\n\n";
 
+  out << "define internal i16 @__scalanative_byte_buffer_get_short(ptr %buffer) {\n";
+  out << "entry:\n";
+  out << "  call void @__scalanative_byte_buffer_require(ptr %buffer)\n";
+  out << "  %position_slot = getelementptr i8, ptr %buffer, i64 "
+      << ByteBufferPositionOffset << "\n";
+  out << "  %limit_slot = getelementptr i8, ptr %buffer, i64 " << ByteBufferLimitOffset
+      << "\n";
+  out << "  %position = load i32, ptr %position_slot\n";
+  out << "  %limit = load i32, ptr %limit_slot\n";
+  out << "  %remaining = sub i32 %limit, %position\n";
+  out << "  %has_short = icmp sge i32 %remaining, 2\n";
+  out << "  br i1 %has_short, label %read, label %underflow\n";
+  out << "read:\n";
+  out << "  %backing_slot = getelementptr i8, ptr %buffer, i64 "
+      << ByteBufferBackingOffset << "\n";
+  out << "  %array = load ptr, ptr %backing_slot\n";
+  out << "  %value = call i16 @__scalanative_native_bytes_get_short(ptr %array, i32 "
+         "%position, i1 false)\n";
+  out << "  %next_position = add i32 %position, 2\n";
+  out << "  store i32 %next_position, ptr %position_slot\n";
+  out << "  ret i16 %value\n";
+  out << "underflow:\n";
+  out << "  call void @__scalanative_throw_byte_buffer_underflow()\n";
+  out << "  unreachable\n";
+  out << "}\n\n";
+
+  out << "define internal ptr @__scalanative_byte_buffer_put_short(ptr %buffer, i16 "
+         "%value) {\n";
+  out << "entry:\n";
+  out << "  call void @__scalanative_byte_buffer_require(ptr %buffer)\n";
+  out << "  %position_slot = getelementptr i8, ptr %buffer, i64 "
+      << ByteBufferPositionOffset << "\n";
+  out << "  %limit_slot = getelementptr i8, ptr %buffer, i64 " << ByteBufferLimitOffset
+      << "\n";
+  out << "  %position = load i32, ptr %position_slot\n";
+  out << "  %limit = load i32, ptr %limit_slot\n";
+  out << "  %remaining = sub i32 %limit, %position\n";
+  out << "  %has_short = icmp sge i32 %remaining, 2\n";
+  out << "  br i1 %has_short, label %write, label %overflow\n";
+  out << "write:\n";
+  out << "  %backing_slot = getelementptr i8, ptr %buffer, i64 "
+      << ByteBufferBackingOffset << "\n";
+  out << "  %array = load ptr, ptr %backing_slot\n";
+  out << "  call void @__scalanative_native_bytes_put_short(ptr %array, i32 "
+         "%position, i16 %value, i1 false)\n";
+  out << "  %next_position = add i32 %position, 2\n";
+  out << "  store i32 %next_position, ptr %position_slot\n";
+  out << "  ret ptr %buffer\n";
+  out << "overflow:\n";
+  out << "  call void @__scalanative_throw_byte_buffer_overflow()\n";
+  out << "  unreachable\n";
+  out << "}\n\n";
+
   out << "define internal i8 @__scalanative_byte_buffer_get_at(ptr %buffer, i32 "
          "%index) {\n";
   out << "entry:\n";
@@ -6327,6 +6380,10 @@ std::string lowerCall(const nir::Value& value, const std::string& expectedType,
   const bool isRuntimeByteBufferPut = target == support::StdNames::RuntimeByteBufferPut;
   const bool isRuntimeByteBufferPutAt =
       target == support::StdNames::RuntimeByteBufferPutAt;
+  const bool isRuntimeByteBufferGetShort =
+      target == support::StdNames::RuntimeByteBufferGetShort;
+  const bool isRuntimeByteBufferPutShort =
+      target == support::StdNames::RuntimeByteBufferPutShort;
   const bool isRuntimeByteBufferClear =
       target == support::StdNames::RuntimeByteBufferClear;
   const bool isRuntimeByteBufferFlip =
@@ -6343,6 +6400,7 @@ std::string lowerCall(const nir::Value& value, const std::string& expectedType,
       isRuntimeByteBufferSetLimit || isRuntimeByteBufferRemaining ||
       isRuntimeByteBufferHasRemaining || isRuntimeByteBufferGet ||
       isRuntimeByteBufferGetAt || isRuntimeByteBufferPut || isRuntimeByteBufferPutAt ||
+      isRuntimeByteBufferGetShort || isRuntimeByteBufferPutShort ||
       isRuntimeByteBufferClear || isRuntimeByteBufferFlip ||
       isRuntimeByteBufferRewind || isRuntimeByteBufferMark || isRuntimeByteBufferReset;
   const bool isRuntimeArrayAlloc = target == support::StdNames::RuntimeArrayAlloc;
@@ -7384,10 +7442,12 @@ std::string lowerCall(const nir::Value& value, const std::string& expectedType,
     const bool returnsBuffer = isRuntimeByteBufferSetPosition ||
                                isRuntimeByteBufferSetLimit || isRuntimeByteBufferPut ||
                                isRuntimeByteBufferPutAt || isRuntimeByteBufferClear ||
-                               isRuntimeByteBufferFlip || isRuntimeByteBufferRewind ||
-                               isRuntimeByteBufferMark || isRuntimeByteBufferReset;
+                               isRuntimeByteBufferPutShort || isRuntimeByteBufferFlip ||
+                               isRuntimeByteBufferRewind || isRuntimeByteBufferMark ||
+                               isRuntimeByteBufferReset;
     const bool returnsBoolean = isRuntimeByteBufferHasRemaining;
     const bool returnsByte = isRuntimeByteBufferGet || isRuntimeByteBufferGetAt;
+    const bool returnsShort = isRuntimeByteBufferGetShort;
     std::vector<std::string> expectedParameters{
         std::string(support::StdNames::JavaNioByteBuffer)};
     if (isRuntimeByteBufferSetPosition || isRuntimeByteBufferSetLimit ||
@@ -7398,10 +7458,15 @@ std::string lowerCall(const nir::Value& value, const std::string& expectedType,
     } else if (isRuntimeByteBufferPutAt) {
       expectedParameters.push_back("Int");
       expectedParameters.push_back("Byte");
+    } else if (isRuntimeByteBufferPutShort) {
+      expectedParameters.push_back("Short");
     }
     const std::string expectedReturn =
-        returnsBuffer ? std::string(support::StdNames::JavaNioByteBuffer)
-                      : (returnsBoolean ? "Boolean" : (returnsByte ? "Byte" : "Int"));
+        returnsBuffer
+            ? std::string(support::StdNames::JavaNioByteBuffer)
+            : (returnsBoolean
+                   ? "Boolean"
+                   : (returnsByte ? "Byte" : (returnsShort ? "Short" : "Int")));
     if (value.operands.size() != expectedParameters.size() + 1 ||
         signature->parameterTypes != expectedParameters ||
         signature->returnType != expectedReturn || expectedType != expectedReturn) {
@@ -7440,6 +7505,10 @@ std::string lowerCall(const nir::Value& value, const std::string& expectedType,
       helper = "__scalanative_byte_buffer_put";
     } else if (isRuntimeByteBufferPutAt) {
       helper = "__scalanative_byte_buffer_put_at";
+    } else if (isRuntimeByteBufferGetShort) {
+      helper = "__scalanative_byte_buffer_get_short";
+    } else if (isRuntimeByteBufferPutShort) {
+      helper = "__scalanative_byte_buffer_put_short";
     } else if (isRuntimeByteBufferClear) {
       helper = "__scalanative_byte_buffer_clear";
     } else if (isRuntimeByteBufferFlip) {
@@ -7466,7 +7535,10 @@ std::string lowerCall(const nir::Value& value, const std::string& expectedType,
     }
     const std::string result = nextTemporary(state);
     const std::string llvmReturn =
-        returnsBuffer ? "ptr" : (returnsBoolean ? "i1" : (returnsByte ? "i8" : "i32"));
+        returnsBuffer
+            ? "ptr"
+            : (returnsBoolean ? "i1"
+                              : (returnsByte ? "i8" : (returnsShort ? "i16" : "i32")));
     out << "  %" << result << " = call " << llvmReturn << " @" << helper << "(ptr "
         << buffer;
     for (std::size_t index = 0; index < extraArguments.size(); ++index) {
