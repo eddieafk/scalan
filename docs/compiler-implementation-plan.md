@@ -3705,8 +3705,22 @@ Current scaffold status:
   unchanged. Increasing position continues to preserve a valid mark, so reset
   can restore the position recorded before relative Short access.
 
-  Byte-order selection, indexed Short access, additional primitive widths,
-  slicing, duplication, read-only views, and bulk transfer remain later slices.
+  Byte-order selection, additional primitive widths, slicing, duplication,
+  read-only views, and bulk transfer remain later slices.
+- Runtime ABI 60 completes the initial Short surface with
+  `ByteBuffer.getShort(index): Short` and
+  `putShort(index, value): ByteBuffer`. Both operations require
+  `0 <= index <= limit - 2`, access two bytes in the buffer's default big-endian
+  order, and leave position and mark unchanged. Indexed put remains fluent.
+
+  Invalid ranges throw the existing catchable `IndexOutOfBoundsException` with
+  `ByteBuffer index is out of bounds`. Validation covers the complete two-byte
+  range before either byte is touched, so rejected writes preserve the backing
+  storage as well as buffer state. The overflow-safe `limit - 2` formulation
+  also handles limits below two without computing an overflowing end index.
+
+  Byte-order selection, additional primitive widths, slicing, duplication,
+  read-only views, and bulk transfer remain later slices.
 - The frontend seeds a tiny runtime builtin, `println(value): Unit`, for the
   currently supported literal/value subset.
 - `nscplugin` emits `scala.scalanative.runtime.println : (Unknown)Unit` as a

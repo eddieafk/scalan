@@ -224,6 +224,10 @@ struct StdNames final {
       "scala.scalanative.runtime.byteBufferGetShort";
   inline static constexpr std::string_view RuntimeByteBufferPutShort =
       "scala.scalanative.runtime.byteBufferPutShort";
+  inline static constexpr std::string_view RuntimeByteBufferGetShortAt =
+      "scala.scalanative.runtime.byteBufferGetShortAt";
+  inline static constexpr std::string_view RuntimeByteBufferPutShortAt =
+      "scala.scalanative.runtime.byteBufferPutShortAt";
   inline static constexpr std::string_view RuntimeByteBufferClear =
       "scala.scalanative.runtime.byteBufferClear";
   inline static constexpr std::string_view RuntimeByteBufferFlip =
