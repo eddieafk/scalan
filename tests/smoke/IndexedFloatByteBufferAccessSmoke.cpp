@@ -42,15 +42,16 @@ int indexedFloatByteBufferLowering() {
           "define internal ptr @__scalanative_byte_buffer_put_float_at") &&
       scalanative::testing::contains(
           result.llvmIr,
-          "call float @__scalanative_native_bytes_get_float(ptr %array, i32 %index)") &&
+          "call float @__scalanative_native_bytes_get_float(ptr %array, i32 %index, "
+          "i1 %little_endian)") &&
       scalanative::testing::contains(
           result.llvmIr,
           "call void @__scalanative_native_bytes_put_float(ptr %array, i32 %index, "
-          "float %value)") &&
+          "float %value, i1 %little_endian)") &&
       scalanative::testing::contains(
           result.llvmIr, "call void @__scalanative_throw_byte_buffer_index()") &&
       scalanative::testing::contains(result.llvmIr,
-                                     "Runtime ABI = 'scalanative-runtime-68'");
+                                     "Runtime ABI = 'scalanative-runtime-69'");
   if (!indexedFloatNir || !indexedFloatLlvm) {
     return scalanative::testing::fail(
         TestName, "indexed Float ByteBuffer access was not lowered as expected:\n" +

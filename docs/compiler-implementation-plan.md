@@ -3819,6 +3819,21 @@ Current scaffold status:
 
   Byte-order selection, slicing, duplication, read-only views, and bulk
   transfer remain later slices.
+- Runtime ABI 69 adds `ByteBuffer.order()` and `order(ByteOrder)` with the
+  standard `ByteOrder.BIG_ENDIAN` and `ByteOrder.LITTLE_ENDIAN` singleton
+  choices. Wrapped buffers begin in big-endian order, the setter remains
+  fluent, and changing order preserves position, limit, mark, and backing
+  storage. The two source-level singleton values use a compact Boolean runtime
+  encoding rather than allocated objects.
+
+  The selected order applies uniformly to relative and indexed Short, Int,
+  Long, Float, and Double reads and writes. LLVM retains portable byte-wise
+  Short access, uses byte-swap intrinsics for wider integral payloads, and
+  preserves Float and Double bit patterns through their existing integer
+  bitcasts. ByteBuffer state grows from 32 to 40 aligned bytes to store the
+  order flag.
+
+  Slicing, duplication, read-only views, and bulk transfer remain later slices.
 - Runtime ABI 60 completes the initial Short surface with
   `ByteBuffer.getShort(index): Short` and
   `putShort(index, value): ByteBuffer`. Both operations require

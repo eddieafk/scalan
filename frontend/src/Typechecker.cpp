@@ -475,6 +475,27 @@ bool isByteBufferWrapCall(const AstExpression& expression) {
          callee.children.front().text == support::StdNames::ByteBuffer;
 }
 
+bool isByteOrderConstant(const AstExpression& expression) {
+  return expression.kind == AstExpressionKind::Select &&
+         expression.children.size() == 1 &&
+         expression.children.front().kind == AstExpressionKind::Identifier &&
+         expression.children.front().text == support::StdNames::ByteOrder &&
+         (expression.text == support::StdNames::ByteOrderBigEndian ||
+          expression.text == support::StdNames::ByteOrderLittleEndian);
+}
+
+TypeInfo byteOrderType() {
+  TypeInfo type{SimpleTypeKind::Boolean,
+                std::string(support::StdNames::JavaNioByteOrder)};
+  type.runtimeName = "Boolean";
+  return type;
+}
+
+bool isByteOrderType(const TypeInfo& type) {
+  return type.kind == SimpleTypeKind::Boolean &&
+         type.name == support::StdNames::JavaNioByteOrder;
+}
+
 bool isByteBufferOperationName(std::string_view operation) {
   return operation == support::StdNames::ByteBufferCapacity ||
          operation == support::StdNames::ByteBufferPosition ||
@@ -497,7 +518,8 @@ bool isByteBufferOperationName(std::string_view operation) {
          operation == support::StdNames::ByteBufferFlip ||
          operation == support::StdNames::ByteBufferRewind ||
          operation == support::StdNames::ByteBufferMark ||
-         operation == support::StdNames::ByteBufferReset;
+         operation == support::StdNames::ByteBufferReset ||
+         operation == support::StdNames::ByteBufferOrder;
 }
 
 bool isByteBufferType(const TypeInfo& type) {
@@ -9228,6 +9250,7 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
               selected.text == support::StdNames::ByteBufferGetDouble;
           const bool putDouble =
               selected.text == support::StdNames::ByteBufferPutDouble;
+          const bool order = selected.text == support::StdNames::ByteBufferOrder;
           const bool validArity =
               (positionOrLimit && argumentCount <= 1) || (get && argumentCount <= 1) ||
               (put && (argumentCount == 1 || argumentCount == 2)) ||
@@ -9241,9 +9264,10 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
               (putFloat && (argumentCount == 1 || argumentCount == 2)) ||
               (getDouble && argumentCount <= 1) ||
               (putDouble && (argumentCount == 1 || argumentCount == 2)) ||
+              (order && argumentCount <= 1) ||
               (!positionOrLimit && !get && !put && !getShort && !putShort && !getInt &&
                !putInt && !getLong && !putLong && !getFloat && !putFloat &&
-               !getDouble && !putDouble && argumentCount == 0);
+               !getDouble && !putDouble && !order && argumentCount == 0);
           if (!validArity) {
             std::string argumentContract;
             if (positionOrLimit || get) {
@@ -9276,6 +9300,8 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
             } else if (putDouble) {
               argumentContract =
                   " requires one Double value or an Int index and Double value";
+            } else if (order) {
+              argumentContract = " accepts zero or one ByteOrder argument";
             } else {
               argumentContract = " does not accept arguments";
             }
@@ -9434,6 +9460,12 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
               diagnostics_.error(expression.children[valueIndex].span,
                                  "putDouble value must have type Double");
             }
+          } else if (order && argumentCount == 1) {
+            const TypeInfo value = inferExpressionType(expression.children[1], scope);
+            if (!isByteOrderType(value) && value.kind != SimpleTypeKind::Unknown) {
+              diagnostics_.error(expression.children[1].span,
+                                 "order value must have type ByteOrder");
+            }
           }
 
           const bool returnsInt =
@@ -9465,6 +9497,9 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
           }
           if (selected.text == support::StdNames::ByteBufferGetDouble) {
             return TypeInfo{SimpleTypeKind::Double, "Double"};
+          }
+          if (order && argumentCount == 0) {
+            return byteOrderType();
           }
           return TypeInfo{SimpleTypeKind::Object,
                           std::string(support::StdNames::JavaNioByteBuffer)};
@@ -11732,6 +11767,8 @@ bool Typechecker::analyzeZoneExpression(
             selected.text == support::StdNames::ByteBufferRewind ||
             selected.text == support::StdNames::ByteBufferMark ||
             selected.text == support::StdNames::ByteBufferReset ||
+            (selected.text == support::StdNames::ByteBufferOrder &&
+             expression.children.size() == 2) ||
             ((selected.text == support::StdNames::ByteBufferPosition ||
               selected.text == support::StdNames::ByteBufferLimit) &&
              expression.children.size() == 2);
@@ -11944,6 +11981,9 @@ TypeInfo Typechecker::inferNewType(const AstExpression& expression, Scope& scope
 }
 
 TypeInfo Typechecker::inferSelectType(const AstExpression& expression, Scope& scope) {
+  if (isByteOrderConstant(expression)) {
+    return byteOrderType();
+  }
   if (expression.text == support::StdNames::StringLength &&
       expression.children.size() == 1) {
     const TypeInfo receiver = inferExpressionType(expression.children.front(), scope);
@@ -14135,6 +14175,10 @@ TypeInfo Typechecker::typeFromDeclaredName(const std::string& name, const Scope*
       normalized == support::StdNames::JavaNioByteBuffer) {
     return TypeInfo{SimpleTypeKind::Object,
                     std::string(support::StdNames::JavaNioByteBuffer)};
+  }
+  if (normalized == support::StdNames::ByteOrder ||
+      normalized == support::StdNames::JavaNioByteOrder) {
+    return byteOrderType();
   }
   if (normalized == "Char") {
     return TypeInfo{SimpleTypeKind::Char, "Char"};

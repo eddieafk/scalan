@@ -108,6 +108,16 @@ bool isByteBufferWrapCall(const frontend::AstExpression& expression) {
          callee.children.front().text == support::StdNames::ByteBuffer;
 }
 
+bool isByteOrderConstant(const frontend::AstExpression& expression) {
+  using frontend::AstExpressionKind;
+  return expression.kind == AstExpressionKind::Select &&
+         expression.children.size() == 1 &&
+         expression.children.front().kind == AstExpressionKind::Identifier &&
+         expression.children.front().text == support::StdNames::ByteOrder &&
+         (expression.text == support::StdNames::ByteOrderBigEndian ||
+          expression.text == support::StdNames::ByteOrderLittleEndian);
+}
+
 std::string_view nativeBytesOperation(const frontend::AstExpression& expression) {
   using frontend::AstExpressionKind;
   if (expression.kind != AstExpressionKind::Call || expression.children.empty()) {
@@ -640,6 +650,10 @@ std::string qualifyTypeName(const std::string& name, const ValueContext& context
       name == support::StdNames::JavaNioByteBuffer) {
     return std::string(support::StdNames::JavaNioByteBuffer);
   }
+  if (name == support::StdNames::ByteOrder ||
+      name == support::StdNames::JavaNioByteOrder) {
+    return std::string(support::StdNames::JavaNioByteOrder);
+  }
   if (name.empty()) {
     return name;
   }
@@ -917,6 +931,11 @@ std::string byteBufferRuntimeName(const frontend::AstExpression& expression,
     return std::string(expression.children.size() == 2
                            ? support::StdNames::RuntimeByteBufferPutDouble
                            : support::StdNames::RuntimeByteBufferPutDoubleAt);
+  }
+  if (callee.text == support::StdNames::ByteBufferOrder) {
+    return std::string(expression.children.size() == 1
+                           ? support::StdNames::RuntimeByteBufferOrder
+                           : support::StdNames::RuntimeByteBufferSetOrder);
   }
   if (callee.text == support::StdNames::ByteBufferClear) {
     return std::string(support::StdNames::RuntimeByteBufferClear);
@@ -2919,6 +2938,12 @@ nir::Value valueFor(const frontend::AstExpression& expression,
   case AstExpressionKind::Select:
     if (expression.children.empty()) {
       return nir::unknownValue("." + expression.text, expression.span);
+    }
+    if (isByteOrderConstant(expression)) {
+      return nir::literalValue(
+          expression.text == support::StdNames::ByteOrderLittleEndian ? "true"
+                                                                       : "false",
+          "Boolean", expression.span);
     }
     {
       const bool tupleOperation =
@@ -5777,6 +5802,11 @@ nir::Module NirEmitter::emit(const frontend::TypedModule& module) const {
                           support::SourceSpan::none());
   builder.addFunctionDecl(std::string(support::StdNames::RuntimeByteBufferReset),
                           "(java.nio.ByteBuffer)java.nio.ByteBuffer",
+                          support::SourceSpan::none());
+  builder.addFunctionDecl(std::string(support::StdNames::RuntimeByteBufferOrder),
+                          "(java.nio.ByteBuffer)Boolean", support::SourceSpan::none());
+  builder.addFunctionDecl(std::string(support::StdNames::RuntimeByteBufferSetOrder),
+                          "(java.nio.ByteBuffer,Boolean)java.nio.ByteBuffer",
                           support::SourceSpan::none());
   builder.addFunctionDecl(std::string(support::StdNames::RuntimeStringLength),
                           "(String)Int", support::SourceSpan::none());

@@ -94,6 +94,7 @@ struct StdNames final {
   inline static constexpr std::string_view JavaNioInvalidMarkException =
       "java.nio.InvalidMarkException";
   inline static constexpr std::string_view JavaNioByteBuffer = "java.nio.ByteBuffer";
+  inline static constexpr std::string_view JavaNioByteOrder = "java.nio.ByteOrder";
   inline static constexpr std::string_view ThrowableMessage = "message";
   inline static constexpr std::string_view ThrowableCause = "cause";
   inline static constexpr std::string_view ThrowableTrace = "stackTrace";
@@ -146,6 +147,9 @@ struct StdNames final {
   inline static constexpr std::string_view NativeBytesPutShortBe = "putShortBE";
   inline static constexpr std::string_view NativeBytesPutShortLe = "putShortLE";
   inline static constexpr std::string_view ByteBuffer = "ByteBuffer";
+  inline static constexpr std::string_view ByteOrder = "ByteOrder";
+  inline static constexpr std::string_view ByteOrderBigEndian = "BIG_ENDIAN";
+  inline static constexpr std::string_view ByteOrderLittleEndian = "LITTLE_ENDIAN";
   inline static constexpr std::string_view ByteBufferWrap = "wrap";
   inline static constexpr std::string_view ByteBufferCapacity = "capacity";
   inline static constexpr std::string_view ByteBufferPosition = "position";
@@ -169,6 +173,7 @@ struct StdNames final {
   inline static constexpr std::string_view ByteBufferRewind = "rewind";
   inline static constexpr std::string_view ByteBufferMark = "mark";
   inline static constexpr std::string_view ByteBufferReset = "reset";
+  inline static constexpr std::string_view ByteBufferOrder = "order";
   inline static constexpr std::string_view ArrayEmpty = "empty";
   inline static constexpr std::string_view ArrayFill = "fill";
   inline static constexpr std::string_view ArrayRange = "range";
@@ -278,6 +283,10 @@ struct StdNames final {
       "scala.scalanative.runtime.byteBufferMark";
   inline static constexpr std::string_view RuntimeByteBufferReset =
       "scala.scalanative.runtime.byteBufferReset";
+  inline static constexpr std::string_view RuntimeByteBufferOrder =
+      "scala.scalanative.runtime.byteBufferOrder";
+  inline static constexpr std::string_view RuntimeByteBufferSetOrder =
+      "scala.scalanative.runtime.byteBufferSetOrder";
   inline static constexpr std::string_view RuntimeStringLength =
       "scala.scalanative.runtime.stringLength";
   inline static constexpr std::string_view RuntimeStringToString =

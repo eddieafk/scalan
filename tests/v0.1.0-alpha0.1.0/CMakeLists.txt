@@ -86,6 +86,12 @@ scalanative_add_scala_test(
 
 scalanative_add_scala_test(
   VERSION "${test_version}"
+  KIND inval
+  NAME byte-buffer-order-diagnostics
+  SOURCE inval/ByteBufferOrderDiagnostics.scala)
+
+scalanative_add_scala_test(
+  VERSION "${test_version}"
   KIND run
   NAME captured-runtime-polymorphic-functions
   SOURCE run/CapturedRuntimePolymorphicFunctions.scala)
@@ -161,6 +167,12 @@ scalanative_add_scala_test(
   KIND run
   NAME indexed-double-byte-buffer-access
   SOURCE run/IndexedDoubleByteBufferAccess.scala)
+
+scalanative_add_scala_test(
+  VERSION "${test_version}"
+  KIND run
+  NAME byte-buffer-order
+  SOURCE run/ByteBufferOrder.scala)
 
 scalanative_add_smoke_test(
   VERSION "${test_version}"

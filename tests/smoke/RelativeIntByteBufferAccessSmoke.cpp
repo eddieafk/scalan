@@ -44,13 +44,14 @@ int relativeIntByteBufferLowering() {
           result.llvmIr, "define internal ptr @__scalanative_byte_buffer_put_int") &&
       scalanative::testing::contains(
           result.llvmIr,
-          "call i32 @__scalanative_native_bytes_get_int(ptr %array, i32 %position)") &&
+          "call i32 @__scalanative_native_bytes_get_int(ptr %array, i32 %position, i1 "
+          "%little_endian)") &&
       scalanative::testing::contains(
           result.llvmIr,
           "call void @__scalanative_native_bytes_put_int(ptr %array, i32 %position, "
-          "i32 %value)") &&
+          "i32 %value, i1 %little_endian)") &&
       scalanative::testing::contains(result.llvmIr,
-                                     "Runtime ABI = 'scalanative-runtime-68'");
+                                     "Runtime ABI = 'scalanative-runtime-69'");
   if (!intNir || !intLlvm) {
     return scalanative::testing::fail(
         TestName, "relative Int ByteBuffer access was not lowered as expected:\n" +

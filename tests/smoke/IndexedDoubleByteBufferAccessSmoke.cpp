@@ -43,15 +43,15 @@ int indexedDoubleByteBufferLowering() {
       scalanative::testing::contains(
           result.llvmIr,
           "call double @__scalanative_native_bytes_get_double(ptr %array, i32 "
-          "%index)") &&
+          "%index, i1 %little_endian)") &&
       scalanative::testing::contains(
           result.llvmIr,
           "call void @__scalanative_native_bytes_put_double(ptr %array, i32 %index, "
-          "double %value)") &&
+          "double %value, i1 %little_endian)") &&
       scalanative::testing::contains(
           result.llvmIr, "call void @__scalanative_throw_byte_buffer_index()") &&
       scalanative::testing::contains(result.llvmIr,
-                                     "Runtime ABI = 'scalanative-runtime-68'");
+                                     "Runtime ABI = 'scalanative-runtime-69'");
   if (!indexedDoubleNir || !indexedDoubleLlvm) {
     return scalanative::testing::fail(
         TestName, "indexed Double ByteBuffer access was not lowered as expected:\n" +

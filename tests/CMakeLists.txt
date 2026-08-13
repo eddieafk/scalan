@@ -9,6 +9,9 @@ target_link_libraries(
   PRIVATE scalanative::tools-build scalanative::support)
 scalanative_target_defaults(scalanative-scala-test-runner)
 
+option(SCALANATIVE_ENABLE_SMOKE_TESTS
+       "Build and register C++ smoke tests for focused compiler diagnostics" OFF)
+
 if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
   target_compile_options(scalanative-scala-test-runner PRIVATE -O0 -g0)
 endif()
@@ -70,6 +73,11 @@ function(scalanative_add_smoke_test)
   string(MAKE_C_IDENTIFIER "${TEST_VERSION}_${TEST_NAME}" target_suffix)
   set(target "scalanative-smoke-${target_suffix}")
   set(test_name "${TEST_VERSION}.smoke.${TEST_NAME}")
+
+  if(NOT SCALANATIVE_ENABLE_SMOKE_TESTS)
+    add_custom_target("${target}")
+    return()
+  endif()
 
   add_executable("${target}" "${source}")
   target_include_directories(
