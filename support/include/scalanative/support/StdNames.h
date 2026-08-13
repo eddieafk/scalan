@@ -174,6 +174,7 @@ struct StdNames final {
   inline static constexpr std::string_view ByteBufferMark = "mark";
   inline static constexpr std::string_view ByteBufferReset = "reset";
   inline static constexpr std::string_view ByteBufferOrder = "order";
+  inline static constexpr std::string_view ByteBufferSlice = "slice";
   inline static constexpr std::string_view ArrayEmpty = "empty";
   inline static constexpr std::string_view ArrayFill = "fill";
   inline static constexpr std::string_view ArrayRange = "range";
@@ -287,6 +288,8 @@ struct StdNames final {
       "scala.scalanative.runtime.byteBufferOrder";
   inline static constexpr std::string_view RuntimeByteBufferSetOrder =
       "scala.scalanative.runtime.byteBufferSetOrder";
+  inline static constexpr std::string_view RuntimeByteBufferSlice =
+      "scala.scalanative.runtime.byteBufferSlice";
   inline static constexpr std::string_view RuntimeStringLength =
       "scala.scalanative.runtime.stringLength";
   inline static constexpr std::string_view RuntimeStringToString =

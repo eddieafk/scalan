@@ -157,6 +157,7 @@ constexpr std::size_t ByteBufferPositionOffset = 20;
 constexpr std::size_t ByteBufferLimitOffset = 24;
 constexpr std::size_t ByteBufferMarkOffset = 28;
 constexpr std::size_t ByteBufferOrderOffset = 32;
+constexpr std::size_t ByteBufferBaseOffset = 36;
 constexpr std::size_t SuppressedExceptionCapacity = 64;
 constexpr std::size_t SuppressedArrayOwnerOffset =
     ObjectHeaderSize + 8 + SuppressedExceptionCapacity * 8;
@@ -1301,6 +1302,16 @@ void emitRuntimeTypeHelpers(std::ostringstream& out,
   out << "  ret ptr %buffer\n";
   out << "}\n\n";
 
+  out << "define internal i32 @__scalanative_byte_buffer_backing_index(ptr "
+         "%buffer, i32 %index) {\n";
+  out << "entry:\n";
+  out << "  %base_slot = getelementptr i8, ptr %buffer, i64 "
+      << ByteBufferBaseOffset << "\n";
+  out << "  %base = load i32, ptr %base_slot\n";
+  out << "  %backing_index = add i32 %base, %index\n";
+  out << "  ret i32 %backing_index\n";
+  out << "}\n\n";
+
   out << "define internal ptr @__scalanative_byte_buffer_wrap(ptr %array) {\n";
   out << "entry:\n";
   out << "  %is_null = icmp eq ptr %array, null\n";
@@ -1324,16 +1335,62 @@ void emitRuntimeTypeHelpers(std::ostringstream& out,
       << "\n";
   out << "  %order_slot = getelementptr i8, ptr %buffer, i64 " << ByteBufferOrderOffset
       << "\n";
+  out << "  %base_slot = getelementptr i8, ptr %buffer, i64 " << ByteBufferBaseOffset
+      << "\n";
   out << "  store ptr %array, ptr %backing_slot\n";
   out << "  store i32 %length, ptr %capacity_slot\n";
   out << "  store i32 0, ptr %position_slot\n";
   out << "  store i32 %length, ptr %limit_slot\n";
   out << "  store i32 -1, ptr %mark_slot\n";
   out << "  store i8 0, ptr %order_slot\n";
+  out << "  store i32 0, ptr %base_slot\n";
   out << "  ret ptr %buffer\n";
   out << "null_array:\n";
   out << "  call void @__scalanative_throw_null_array()\n";
   out << "  unreachable\n";
+  out << "}\n\n";
+
+  out << "define internal ptr @__scalanative_byte_buffer_slice(ptr %buffer) {\n";
+  out << "entry:\n";
+  out << "  call void @__scalanative_byte_buffer_require(ptr %buffer)\n";
+  out << "  %source_backing_slot = getelementptr i8, ptr %buffer, i64 "
+      << ByteBufferBackingOffset << "\n";
+  out << "  %source_position_slot = getelementptr i8, ptr %buffer, i64 "
+      << ByteBufferPositionOffset << "\n";
+  out << "  %source_limit_slot = getelementptr i8, ptr %buffer, i64 "
+      << ByteBufferLimitOffset << "\n";
+  out << "  %source_base_slot = getelementptr i8, ptr %buffer, i64 "
+      << ByteBufferBaseOffset << "\n";
+  out << "  %array = load ptr, ptr %source_backing_slot\n";
+  out << "  %position = load i32, ptr %source_position_slot\n";
+  out << "  %limit = load i32, ptr %source_limit_slot\n";
+  out << "  %base = load i32, ptr %source_base_slot\n";
+  out << "  %remaining = sub i32 %limit, %position\n";
+  out << "  %slice_base = add i32 %base, %position\n";
+  out << "  %slice = call ptr @__scalanative_box_alloc(i64 " << ByteBufferSize
+      << ", ptr null)\n";
+  out << "  %backing_slot = getelementptr i8, ptr %slice, i64 "
+      << ByteBufferBackingOffset << "\n";
+  out << "  %capacity_slot = getelementptr i8, ptr %slice, i64 "
+      << ByteBufferCapacityOffset << "\n";
+  out << "  %position_slot = getelementptr i8, ptr %slice, i64 "
+      << ByteBufferPositionOffset << "\n";
+  out << "  %limit_slot = getelementptr i8, ptr %slice, i64 "
+      << ByteBufferLimitOffset << "\n";
+  out << "  %mark_slot = getelementptr i8, ptr %slice, i64 " << ByteBufferMarkOffset
+      << "\n";
+  out << "  %order_slot = getelementptr i8, ptr %slice, i64 "
+      << ByteBufferOrderOffset << "\n";
+  out << "  %base_slot = getelementptr i8, ptr %slice, i64 " << ByteBufferBaseOffset
+      << "\n";
+  out << "  store ptr %array, ptr %backing_slot\n";
+  out << "  store i32 %remaining, ptr %capacity_slot\n";
+  out << "  store i32 0, ptr %position_slot\n";
+  out << "  store i32 %remaining, ptr %limit_slot\n";
+  out << "  store i32 -1, ptr %mark_slot\n";
+  out << "  store i8 0, ptr %order_slot\n";
+  out << "  store i32 %slice_base, ptr %base_slot\n";
+  out << "  ret ptr %slice\n";
   out << "}\n\n";
 
   const auto emitByteBufferIntQuery = [&](std::string_view name, std::size_t offset) {
@@ -1388,7 +1445,9 @@ void emitRuntimeTypeHelpers(std::ostringstream& out,
   out << "  %array = load ptr, ptr %backing_slot\n";
   out << "  %elements = getelementptr i8, ptr %array, i64 " << ObjectHeaderSize + 8
       << "\n";
-  out << "  %wide_position = sext i32 %position to i64\n";
+  out << "  %backing_index = call i32 "
+         "@__scalanative_byte_buffer_backing_index(ptr %buffer, i32 %position)\n";
+  out << "  %wide_position = sext i32 %backing_index to i64\n";
   out << "  %element_slot = getelementptr i8, ptr %elements, i64 %wide_position\n";
   out << "  %value = load i8, ptr %element_slot\n";
   out << "  %next_position = add i32 %position, 1\n";
@@ -1417,7 +1476,9 @@ void emitRuntimeTypeHelpers(std::ostringstream& out,
   out << "  %array = load ptr, ptr %backing_slot\n";
   out << "  %elements = getelementptr i8, ptr %array, i64 " << ObjectHeaderSize + 8
       << "\n";
-  out << "  %wide_position = sext i32 %position to i64\n";
+  out << "  %backing_index = call i32 "
+         "@__scalanative_byte_buffer_backing_index(ptr %buffer, i32 %position)\n";
+  out << "  %wide_position = sext i32 %backing_index to i64\n";
   out << "  %element_slot = getelementptr i8, ptr %elements, i64 %wide_position\n";
   out << "  store i8 %value, ptr %element_slot\n";
   out << "  %next_position = add i32 %position, 1\n";
@@ -1444,10 +1505,12 @@ void emitRuntimeTypeHelpers(std::ostringstream& out,
   out << "  %backing_slot = getelementptr i8, ptr %buffer, i64 "
       << ByteBufferBackingOffset << "\n";
   out << "  %array = load ptr, ptr %backing_slot\n";
+  out << "  %backing_index = call i32 "
+         "@__scalanative_byte_buffer_backing_index(ptr %buffer, i32 %position)\n";
   out << "  %little_endian = call i1 "
          "@__scalanative_byte_buffer_is_little_endian(ptr %buffer)\n";
   out << "  %value = call i16 @__scalanative_native_bytes_get_short(ptr %array, i32 "
-         "%position, i1 %little_endian)\n";
+         "%backing_index, i1 %little_endian)\n";
   out << "  %next_position = add i32 %position, 2\n";
   out << "  store i32 %next_position, ptr %position_slot\n";
   out << "  ret i16 %value\n";
@@ -1473,10 +1536,12 @@ void emitRuntimeTypeHelpers(std::ostringstream& out,
   out << "  %backing_slot = getelementptr i8, ptr %buffer, i64 "
       << ByteBufferBackingOffset << "\n";
   out << "  %array = load ptr, ptr %backing_slot\n";
+  out << "  %backing_index = call i32 "
+         "@__scalanative_byte_buffer_backing_index(ptr %buffer, i32 %position)\n";
   out << "  %little_endian = call i1 "
          "@__scalanative_byte_buffer_is_little_endian(ptr %buffer)\n";
   out << "  call void @__scalanative_native_bytes_put_short(ptr %array, i32 "
-         "%position, i16 %value, i1 %little_endian)\n";
+         "%backing_index, i16 %value, i1 %little_endian)\n";
   out << "  %next_position = add i32 %position, 2\n";
   out << "  store i32 %next_position, ptr %position_slot\n";
   out << "  ret ptr %buffer\n";
@@ -1501,10 +1566,12 @@ void emitRuntimeTypeHelpers(std::ostringstream& out,
   out << "  %backing_slot = getelementptr i8, ptr %buffer, i64 "
       << ByteBufferBackingOffset << "\n";
   out << "  %array = load ptr, ptr %backing_slot\n";
+  out << "  %backing_index = call i32 "
+         "@__scalanative_byte_buffer_backing_index(ptr %buffer, i32 %position)\n";
   out << "  %little_endian = call i1 "
          "@__scalanative_byte_buffer_is_little_endian(ptr %buffer)\n";
   out << "  %value = call i32 @__scalanative_native_bytes_get_int(ptr %array, i32 "
-         "%position, i1 %little_endian)\n";
+         "%backing_index, i1 %little_endian)\n";
   out << "  %next_position = add i32 %position, 4\n";
   out << "  store i32 %next_position, ptr %position_slot\n";
   out << "  ret i32 %value\n";
@@ -1530,10 +1597,12 @@ void emitRuntimeTypeHelpers(std::ostringstream& out,
   out << "  %backing_slot = getelementptr i8, ptr %buffer, i64 "
       << ByteBufferBackingOffset << "\n";
   out << "  %array = load ptr, ptr %backing_slot\n";
+  out << "  %backing_index = call i32 "
+         "@__scalanative_byte_buffer_backing_index(ptr %buffer, i32 %position)\n";
   out << "  %little_endian = call i1 "
          "@__scalanative_byte_buffer_is_little_endian(ptr %buffer)\n";
-  out << "  call void @__scalanative_native_bytes_put_int(ptr %array, i32 %position, "
-         "i32 %value, i1 %little_endian)\n";
+  out << "  call void @__scalanative_native_bytes_put_int(ptr %array, i32 "
+         "%backing_index, i32 %value, i1 %little_endian)\n";
   out << "  %next_position = add i32 %position, 4\n";
   out << "  store i32 %next_position, ptr %position_slot\n";
   out << "  ret ptr %buffer\n";
@@ -1558,10 +1627,12 @@ void emitRuntimeTypeHelpers(std::ostringstream& out,
   out << "  %backing_slot = getelementptr i8, ptr %buffer, i64 "
       << ByteBufferBackingOffset << "\n";
   out << "  %array = load ptr, ptr %backing_slot\n";
+  out << "  %backing_index = call i32 "
+         "@__scalanative_byte_buffer_backing_index(ptr %buffer, i32 %position)\n";
   out << "  %little_endian = call i1 "
          "@__scalanative_byte_buffer_is_little_endian(ptr %buffer)\n";
   out << "  %value = call i64 @__scalanative_native_bytes_get_long(ptr %array, i32 "
-         "%position, i1 %little_endian)\n";
+         "%backing_index, i1 %little_endian)\n";
   out << "  %next_position = add i32 %position, 8\n";
   out << "  store i32 %next_position, ptr %position_slot\n";
   out << "  ret i64 %value\n";
@@ -1587,10 +1658,12 @@ void emitRuntimeTypeHelpers(std::ostringstream& out,
   out << "  %backing_slot = getelementptr i8, ptr %buffer, i64 "
       << ByteBufferBackingOffset << "\n";
   out << "  %array = load ptr, ptr %backing_slot\n";
+  out << "  %backing_index = call i32 "
+         "@__scalanative_byte_buffer_backing_index(ptr %buffer, i32 %position)\n";
   out << "  %little_endian = call i1 "
          "@__scalanative_byte_buffer_is_little_endian(ptr %buffer)\n";
-  out << "  call void @__scalanative_native_bytes_put_long(ptr %array, i32 %position, "
-         "i64 %value, i1 %little_endian)\n";
+  out << "  call void @__scalanative_native_bytes_put_long(ptr %array, i32 "
+         "%backing_index, i64 %value, i1 %little_endian)\n";
   out << "  %next_position = add i32 %position, 8\n";
   out << "  store i32 %next_position, ptr %position_slot\n";
   out << "  ret ptr %buffer\n";
@@ -1615,10 +1688,12 @@ void emitRuntimeTypeHelpers(std::ostringstream& out,
   out << "  %backing_slot = getelementptr i8, ptr %buffer, i64 "
       << ByteBufferBackingOffset << "\n";
   out << "  %array = load ptr, ptr %backing_slot\n";
+  out << "  %backing_index = call i32 "
+         "@__scalanative_byte_buffer_backing_index(ptr %buffer, i32 %index)\n";
   out << "  %little_endian = call i1 "
          "@__scalanative_byte_buffer_is_little_endian(ptr %buffer)\n";
   out << "  %value = call i64 @__scalanative_native_bytes_get_long(ptr %array, i32 "
-         "%index, i1 %little_endian)\n";
+         "%backing_index, i1 %little_endian)\n";
   out << "  ret i64 %value\n";
   out << "invalid:\n";
   out << "  call void @__scalanative_throw_byte_buffer_index()\n";
@@ -1641,10 +1716,12 @@ void emitRuntimeTypeHelpers(std::ostringstream& out,
   out << "  %backing_slot = getelementptr i8, ptr %buffer, i64 "
       << ByteBufferBackingOffset << "\n";
   out << "  %array = load ptr, ptr %backing_slot\n";
+  out << "  %backing_index = call i32 "
+         "@__scalanative_byte_buffer_backing_index(ptr %buffer, i32 %index)\n";
   out << "  %little_endian = call i1 "
          "@__scalanative_byte_buffer_is_little_endian(ptr %buffer)\n";
-  out << "  call void @__scalanative_native_bytes_put_long(ptr %array, i32 %index, "
-         "i64 %value, i1 %little_endian)\n";
+  out << "  call void @__scalanative_native_bytes_put_long(ptr %array, i32 "
+         "%backing_index, i64 %value, i1 %little_endian)\n";
   out << "  ret ptr %buffer\n";
   out << "invalid:\n";
   out << "  call void @__scalanative_throw_byte_buffer_index()\n";
@@ -1668,10 +1745,12 @@ void emitRuntimeTypeHelpers(std::ostringstream& out,
   out << "  %backing_slot = getelementptr i8, ptr %buffer, i64 "
       << ByteBufferBackingOffset << "\n";
   out << "  %array = load ptr, ptr %backing_slot\n";
+  out << "  %backing_index = call i32 "
+         "@__scalanative_byte_buffer_backing_index(ptr %buffer, i32 %position)\n";
   out << "  %little_endian = call i1 "
          "@__scalanative_byte_buffer_is_little_endian(ptr %buffer)\n";
   out << "  %value = call float @__scalanative_native_bytes_get_float(ptr %array, i32 "
-         "%position, i1 %little_endian)\n";
+         "%backing_index, i1 %little_endian)\n";
   out << "  %next_position = add i32 %position, 4\n";
   out << "  store i32 %next_position, ptr %position_slot\n";
   out << "  ret float %value\n";
@@ -1697,10 +1776,12 @@ void emitRuntimeTypeHelpers(std::ostringstream& out,
   out << "  %backing_slot = getelementptr i8, ptr %buffer, i64 "
       << ByteBufferBackingOffset << "\n";
   out << "  %array = load ptr, ptr %backing_slot\n";
+  out << "  %backing_index = call i32 "
+         "@__scalanative_byte_buffer_backing_index(ptr %buffer, i32 %position)\n";
   out << "  %little_endian = call i1 "
          "@__scalanative_byte_buffer_is_little_endian(ptr %buffer)\n";
-  out << "  call void @__scalanative_native_bytes_put_float(ptr %array, i32 %position, "
-         "float %value, i1 %little_endian)\n";
+  out << "  call void @__scalanative_native_bytes_put_float(ptr %array, i32 "
+         "%backing_index, float %value, i1 %little_endian)\n";
   out << "  %next_position = add i32 %position, 4\n";
   out << "  store i32 %next_position, ptr %position_slot\n";
   out << "  ret ptr %buffer\n";
@@ -1726,10 +1807,12 @@ void emitRuntimeTypeHelpers(std::ostringstream& out,
   out << "  %backing_slot = getelementptr i8, ptr %buffer, i64 "
       << ByteBufferBackingOffset << "\n";
   out << "  %array = load ptr, ptr %backing_slot\n";
+  out << "  %backing_index = call i32 "
+         "@__scalanative_byte_buffer_backing_index(ptr %buffer, i32 %position)\n";
   out << "  %little_endian = call i1 "
          "@__scalanative_byte_buffer_is_little_endian(ptr %buffer)\n";
   out << "  %value = call double @__scalanative_native_bytes_get_double(ptr %array, "
-         "i32 %position, i1 %little_endian)\n";
+         "i32 %backing_index, i1 %little_endian)\n";
   out << "  %next_position = add i32 %position, 8\n";
   out << "  store i32 %next_position, ptr %position_slot\n";
   out << "  ret double %value\n";
@@ -1755,10 +1838,12 @@ void emitRuntimeTypeHelpers(std::ostringstream& out,
   out << "  %backing_slot = getelementptr i8, ptr %buffer, i64 "
       << ByteBufferBackingOffset << "\n";
   out << "  %array = load ptr, ptr %backing_slot\n";
+  out << "  %backing_index = call i32 "
+         "@__scalanative_byte_buffer_backing_index(ptr %buffer, i32 %position)\n";
   out << "  %little_endian = call i1 "
          "@__scalanative_byte_buffer_is_little_endian(ptr %buffer)\n";
   out << "  call void @__scalanative_native_bytes_put_double(ptr %array, i32 "
-         "%position, double %value, i1 %little_endian)\n";
+         "%backing_index, double %value, i1 %little_endian)\n";
   out << "  %next_position = add i32 %position, 8\n";
   out << "  store i32 %next_position, ptr %position_slot\n";
   out << "  ret ptr %buffer\n";
@@ -1783,10 +1868,12 @@ void emitRuntimeTypeHelpers(std::ostringstream& out,
   out << "  %backing_slot = getelementptr i8, ptr %buffer, i64 "
       << ByteBufferBackingOffset << "\n";
   out << "  %array = load ptr, ptr %backing_slot\n";
+  out << "  %backing_index = call i32 "
+         "@__scalanative_byte_buffer_backing_index(ptr %buffer, i32 %index)\n";
   out << "  %little_endian = call i1 "
          "@__scalanative_byte_buffer_is_little_endian(ptr %buffer)\n";
   out << "  %value = call double @__scalanative_native_bytes_get_double(ptr %array, "
-         "i32 %index, i1 %little_endian)\n";
+         "i32 %backing_index, i1 %little_endian)\n";
   out << "  ret double %value\n";
   out << "invalid:\n";
   out << "  call void @__scalanative_throw_byte_buffer_index()\n";
@@ -1809,10 +1896,12 @@ void emitRuntimeTypeHelpers(std::ostringstream& out,
   out << "  %backing_slot = getelementptr i8, ptr %buffer, i64 "
       << ByteBufferBackingOffset << "\n";
   out << "  %array = load ptr, ptr %backing_slot\n";
+  out << "  %backing_index = call i32 "
+         "@__scalanative_byte_buffer_backing_index(ptr %buffer, i32 %index)\n";
   out << "  %little_endian = call i1 "
          "@__scalanative_byte_buffer_is_little_endian(ptr %buffer)\n";
-  out << "  call void @__scalanative_native_bytes_put_double(ptr %array, i32 %index, "
-         "double %value, i1 %little_endian)\n";
+  out << "  call void @__scalanative_native_bytes_put_double(ptr %array, i32 "
+         "%backing_index, double %value, i1 %little_endian)\n";
   out << "  ret ptr %buffer\n";
   out << "invalid:\n";
   out << "  call void @__scalanative_throw_byte_buffer_index()\n";
@@ -1835,10 +1924,12 @@ void emitRuntimeTypeHelpers(std::ostringstream& out,
   out << "  %backing_slot = getelementptr i8, ptr %buffer, i64 "
       << ByteBufferBackingOffset << "\n";
   out << "  %array = load ptr, ptr %backing_slot\n";
+  out << "  %backing_index = call i32 "
+         "@__scalanative_byte_buffer_backing_index(ptr %buffer, i32 %index)\n";
   out << "  %little_endian = call i1 "
          "@__scalanative_byte_buffer_is_little_endian(ptr %buffer)\n";
   out << "  %value = call float @__scalanative_native_bytes_get_float(ptr %array, i32 "
-         "%index, i1 %little_endian)\n";
+         "%backing_index, i1 %little_endian)\n";
   out << "  ret float %value\n";
   out << "invalid:\n";
   out << "  call void @__scalanative_throw_byte_buffer_index()\n";
@@ -1861,10 +1952,12 @@ void emitRuntimeTypeHelpers(std::ostringstream& out,
   out << "  %backing_slot = getelementptr i8, ptr %buffer, i64 "
       << ByteBufferBackingOffset << "\n";
   out << "  %array = load ptr, ptr %backing_slot\n";
+  out << "  %backing_index = call i32 "
+         "@__scalanative_byte_buffer_backing_index(ptr %buffer, i32 %index)\n";
   out << "  %little_endian = call i1 "
          "@__scalanative_byte_buffer_is_little_endian(ptr %buffer)\n";
-  out << "  call void @__scalanative_native_bytes_put_float(ptr %array, i32 %index, "
-         "float %value, i1 %little_endian)\n";
+  out << "  call void @__scalanative_native_bytes_put_float(ptr %array, i32 "
+         "%backing_index, float %value, i1 %little_endian)\n";
   out << "  ret ptr %buffer\n";
   out << "invalid:\n";
   out << "  call void @__scalanative_throw_byte_buffer_index()\n";
@@ -1887,10 +1980,12 @@ void emitRuntimeTypeHelpers(std::ostringstream& out,
   out << "  %backing_slot = getelementptr i8, ptr %buffer, i64 "
       << ByteBufferBackingOffset << "\n";
   out << "  %array = load ptr, ptr %backing_slot\n";
+  out << "  %backing_index = call i32 "
+         "@__scalanative_byte_buffer_backing_index(ptr %buffer, i32 %index)\n";
   out << "  %little_endian = call i1 "
          "@__scalanative_byte_buffer_is_little_endian(ptr %buffer)\n";
   out << "  %value = call i32 @__scalanative_native_bytes_get_int(ptr %array, i32 "
-         "%index, i1 %little_endian)\n";
+         "%backing_index, i1 %little_endian)\n";
   out << "  ret i32 %value\n";
   out << "invalid:\n";
   out << "  call void @__scalanative_throw_byte_buffer_index()\n";
@@ -1913,10 +2008,12 @@ void emitRuntimeTypeHelpers(std::ostringstream& out,
   out << "  %backing_slot = getelementptr i8, ptr %buffer, i64 "
       << ByteBufferBackingOffset << "\n";
   out << "  %array = load ptr, ptr %backing_slot\n";
+  out << "  %backing_index = call i32 "
+         "@__scalanative_byte_buffer_backing_index(ptr %buffer, i32 %index)\n";
   out << "  %little_endian = call i1 "
          "@__scalanative_byte_buffer_is_little_endian(ptr %buffer)\n";
-  out << "  call void @__scalanative_native_bytes_put_int(ptr %array, i32 %index, "
-         "i32 %value, i1 %little_endian)\n";
+  out << "  call void @__scalanative_native_bytes_put_int(ptr %array, i32 "
+         "%backing_index, i32 %value, i1 %little_endian)\n";
   out << "  ret ptr %buffer\n";
   out << "invalid:\n";
   out << "  call void @__scalanative_throw_byte_buffer_index()\n";
@@ -1939,10 +2036,12 @@ void emitRuntimeTypeHelpers(std::ostringstream& out,
   out << "  %backing_slot = getelementptr i8, ptr %buffer, i64 "
       << ByteBufferBackingOffset << "\n";
   out << "  %array = load ptr, ptr %backing_slot\n";
+  out << "  %backing_index = call i32 "
+         "@__scalanative_byte_buffer_backing_index(ptr %buffer, i32 %index)\n";
   out << "  %little_endian = call i1 "
          "@__scalanative_byte_buffer_is_little_endian(ptr %buffer)\n";
   out << "  %value = call i16 @__scalanative_native_bytes_get_short(ptr %array, i32 "
-         "%index, i1 %little_endian)\n";
+         "%backing_index, i1 %little_endian)\n";
   out << "  ret i16 %value\n";
   out << "invalid:\n";
   out << "  call void @__scalanative_throw_byte_buffer_index()\n";
@@ -1965,10 +2064,12 @@ void emitRuntimeTypeHelpers(std::ostringstream& out,
   out << "  %backing_slot = getelementptr i8, ptr %buffer, i64 "
       << ByteBufferBackingOffset << "\n";
   out << "  %array = load ptr, ptr %backing_slot\n";
+  out << "  %backing_index = call i32 "
+         "@__scalanative_byte_buffer_backing_index(ptr %buffer, i32 %index)\n";
   out << "  %little_endian = call i1 "
          "@__scalanative_byte_buffer_is_little_endian(ptr %buffer)\n";
-  out << "  call void @__scalanative_native_bytes_put_short(ptr %array, i32 %index, "
-         "i16 %value, i1 %little_endian)\n";
+  out << "  call void @__scalanative_native_bytes_put_short(ptr %array, i32 "
+         "%backing_index, i16 %value, i1 %little_endian)\n";
   out << "  ret ptr %buffer\n";
   out << "invalid:\n";
   out << "  call void @__scalanative_throw_byte_buffer_index()\n";
@@ -1992,7 +2093,9 @@ void emitRuntimeTypeHelpers(std::ostringstream& out,
   out << "  %array = load ptr, ptr %backing_slot\n";
   out << "  %elements = getelementptr i8, ptr %array, i64 " << ObjectHeaderSize + 8
       << "\n";
-  out << "  %wide_index = sext i32 %index to i64\n";
+  out << "  %backing_index = call i32 "
+         "@__scalanative_byte_buffer_backing_index(ptr %buffer, i32 %index)\n";
+  out << "  %wide_index = sext i32 %backing_index to i64\n";
   out << "  %element_slot = getelementptr i8, ptr %elements, i64 %wide_index\n";
   out << "  %value = load i8, ptr %element_slot\n";
   out << "  ret i8 %value\n";
@@ -2018,7 +2121,9 @@ void emitRuntimeTypeHelpers(std::ostringstream& out,
   out << "  %array = load ptr, ptr %backing_slot\n";
   out << "  %elements = getelementptr i8, ptr %array, i64 " << ObjectHeaderSize + 8
       << "\n";
-  out << "  %wide_index = sext i32 %index to i64\n";
+  out << "  %backing_index = call i32 "
+         "@__scalanative_byte_buffer_backing_index(ptr %buffer, i32 %index)\n";
+  out << "  %wide_index = sext i32 %backing_index to i64\n";
   out << "  %element_slot = getelementptr i8, ptr %elements, i64 %wide_index\n";
   out << "  store i8 %value, ptr %element_slot\n";
   out << "  ret ptr %buffer\n";
@@ -7063,6 +7168,8 @@ std::string lowerCall(const nir::Value& value, const std::string& expectedType,
       target == support::StdNames::RuntimeByteBufferOrder;
   const bool isRuntimeByteBufferSetOrder =
       target == support::StdNames::RuntimeByteBufferSetOrder;
+  const bool isRuntimeByteBufferSlice =
+      target == support::StdNames::RuntimeByteBufferSlice;
   const bool isRuntimeByteBufferOperation =
       isRuntimeByteBufferCapacity || isRuntimeByteBufferPosition ||
       isRuntimeByteBufferSetPosition || isRuntimeByteBufferLimit ||
@@ -7080,6 +7187,7 @@ std::string lowerCall(const nir::Value& value, const std::string& expectedType,
       isRuntimeByteBufferGetDouble || isRuntimeByteBufferPutDouble ||
       isRuntimeByteBufferGetDoubleAt || isRuntimeByteBufferPutDoubleAt ||
       isRuntimeByteBufferOrder || isRuntimeByteBufferSetOrder ||
+      isRuntimeByteBufferSlice ||
       isRuntimeByteBufferClear || isRuntimeByteBufferFlip ||
       isRuntimeByteBufferRewind || isRuntimeByteBufferMark || isRuntimeByteBufferReset;
   const bool isRuntimeArrayAlloc = target == support::StdNames::RuntimeArrayAlloc;
@@ -8128,7 +8236,8 @@ std::string lowerCall(const nir::Value& value, const std::string& expectedType,
         isRuntimeByteBufferReset || isRuntimeByteBufferPutLong ||
         isRuntimeByteBufferPutLongAt || isRuntimeByteBufferPutFloat ||
         isRuntimeByteBufferPutFloatAt || isRuntimeByteBufferPutDouble ||
-        isRuntimeByteBufferPutDoubleAt || isRuntimeByteBufferSetOrder;
+        isRuntimeByteBufferPutDoubleAt || isRuntimeByteBufferSetOrder ||
+        isRuntimeByteBufferSlice;
     const bool returnsBoolean =
         isRuntimeByteBufferHasRemaining || isRuntimeByteBufferOrder;
     const bool returnsByte = isRuntimeByteBufferGet || isRuntimeByteBufferGetAt;
@@ -8274,6 +8383,8 @@ std::string lowerCall(const nir::Value& value, const std::string& expectedType,
       helper = "__scalanative_byte_buffer_order";
     } else if (isRuntimeByteBufferSetOrder) {
       helper = "__scalanative_byte_buffer_set_order";
+    } else if (isRuntimeByteBufferSlice) {
+      helper = "__scalanative_byte_buffer_slice";
     } else if (isRuntimeByteBufferClear) {
       helper = "__scalanative_byte_buffer_clear";
     } else if (isRuntimeByteBufferFlip) {

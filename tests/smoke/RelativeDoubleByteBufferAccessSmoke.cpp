@@ -53,13 +53,13 @@ int relativeDoubleByteBufferLowering() {
       scalanative::testing::contains(
           result.llvmIr,
           "call double @__scalanative_native_bytes_get_double(ptr %array, i32 "
-          "%position, i1 %little_endian)") &&
+          "%backing_index, i1 %little_endian)") &&
       scalanative::testing::contains(
           result.llvmIr,
           "call void @__scalanative_native_bytes_put_double(ptr %array, i32 "
-          "%position, double %value, i1 %little_endian)") &&
+          "%backing_index, double %value, i1 %little_endian)") &&
       scalanative::testing::contains(result.llvmIr,
-                                     "Runtime ABI = 'scalanative-runtime-69'");
+                                     "Runtime ABI = 'scalanative-runtime-70'");
   if (!doubleNir || !doubleLlvm) {
     return scalanative::testing::fail(
         TestName, "relative Double ByteBuffer access was not lowered as expected:\n" +

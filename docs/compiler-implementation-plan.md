@@ -3834,6 +3834,19 @@ Current scaffold status:
   order flag.
 
   Slicing, duplication, read-only views, and bulk transfer remain later slices.
+- Runtime ABI 70 adds no-argument `ByteBuffer.slice()`. The returned buffer
+  shares the source backing array beginning at the source's current position,
+  while its capacity and limit equal the source's remaining byte count. Its
+  position begins at zero, its mark is undefined, and its byte order begins at
+  the standard `BIG_ENDIAN` default. Creating or mutating the slice does not
+  change the source buffer's position, limit, mark, or order.
+
+  A four-byte logical base offset now occupies the padding already reserved in
+  the 40-byte ByteBuffer state. Every relative and indexed primitive access
+  translates through that base, so slices and nested slices share storage
+  without copying while retaining independent cursor state. The indexed
+  `slice(index, length)` overload, duplication, read-only views, and bulk
+  transfer remain later slices.
 - Runtime ABI 60 completes the initial Short surface with
   `ByteBuffer.getShort(index): Short` and
   `putShort(index, value): ByteBuffer`. Both operations require

@@ -40,16 +40,18 @@ int indexedIntByteBufferLowering() {
           result.llvmIr, "define internal ptr @__scalanative_byte_buffer_put_int_at") &&
       scalanative::testing::contains(
           result.llvmIr,
-          "call i32 @__scalanative_native_bytes_get_int(ptr %array, i32 %index, i1 "
+          "call i32 @__scalanative_native_bytes_get_int(ptr %array, i32 "
+          "%backing_index, i1 "
           "%little_endian)") &&
       scalanative::testing::contains(
           result.llvmIr,
-          "call void @__scalanative_native_bytes_put_int(ptr %array, i32 %index, "
+          "call void @__scalanative_native_bytes_put_int(ptr %array, i32 "
+          "%backing_index, "
           "i32 %value, i1 %little_endian)") &&
       scalanative::testing::contains(
           result.llvmIr, "call void @__scalanative_throw_byte_buffer_index()") &&
       scalanative::testing::contains(result.llvmIr,
-                                     "Runtime ABI = 'scalanative-runtime-69'");
+                                     "Runtime ABI = 'scalanative-runtime-70'");
   if (!indexedIntNir || !indexedIntLlvm) {
     return scalanative::testing::fail(
         TestName, "indexed Int ByteBuffer access was not lowered as expected:\n" +

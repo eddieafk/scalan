@@ -42,16 +42,18 @@ int indexedShortByteBufferLowering() {
           "define internal ptr @__scalanative_byte_buffer_put_short_at") &&
       scalanative::testing::contains(
           result.llvmIr,
-          "call i16 @__scalanative_native_bytes_get_short(ptr %array, i32 %index, "
+          "call i16 @__scalanative_native_bytes_get_short(ptr %array, i32 "
+          "%backing_index, "
           "i1 %little_endian)") &&
       scalanative::testing::contains(
           result.llvmIr,
-          "call void @__scalanative_native_bytes_put_short(ptr %array, i32 %index, "
+          "call void @__scalanative_native_bytes_put_short(ptr %array, i32 "
+          "%backing_index, "
           "i16 %value, i1 %little_endian)") &&
       scalanative::testing::contains(
           result.llvmIr, "call void @__scalanative_throw_byte_buffer_index()") &&
       scalanative::testing::contains(result.llvmIr,
-                                     "Runtime ABI = 'scalanative-runtime-69'");
+                                     "Runtime ABI = 'scalanative-runtime-70'");
   if (!indexedShortNir || !indexedShortLlvm) {
     return scalanative::testing::fail(
         TestName, "indexed Short ByteBuffer access was not lowered as expected:\n" +
