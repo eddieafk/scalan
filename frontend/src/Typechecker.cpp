@@ -9194,25 +9194,56 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
           const bool positionOrLimit =
               selected.text == support::StdNames::ByteBufferPosition ||
               selected.text == support::StdNames::ByteBufferLimit;
+          const bool get = selected.text == support::StdNames::ByteBufferGet;
           const bool put = selected.text == support::StdNames::ByteBufferPut;
-          if ((positionOrLimit && argumentCount > 1) || (put && argumentCount != 1) ||
-              (!positionOrLimit && !put && argumentCount != 0)) {
-            const std::string argumentContract =
-                positionOrLimit ? " accepts zero or one Int argument"
-                                : (put ? " requires exactly one Byte argument"
-                                       : " does not accept arguments");
+          const bool validArity =
+              (positionOrLimit && argumentCount <= 1) || (get && argumentCount <= 1) ||
+              (put && (argumentCount == 1 || argumentCount == 2)) ||
+              (!positionOrLimit && !get && !put && argumentCount == 0);
+          if (!validArity) {
+            std::string argumentContract;
+            if (positionOrLimit || get) {
+              argumentContract = " accepts zero or one Int argument";
+            } else if (put) {
+              argumentContract =
+                  " requires one Byte argument or an Int index and Byte value";
+            } else {
+              argumentContract = " does not accept arguments";
+            }
             diagnostics_.error(expression.span, selected.text + argumentContract);
             for (std::size_t i = 1; i < expression.children.size(); ++i) {
               (void)inferExpressionType(expression.children[i], scope);
             }
-          } else if (argumentCount == 1) {
+          } else if (positionOrLimit && argumentCount == 1) {
             const TypeInfo value = inferExpressionType(expression.children[1], scope);
-            const SimpleTypeKind expectedKind =
-                put ? SimpleTypeKind::Byte : SimpleTypeKind::Int;
-            if (value.kind != expectedKind && value.kind != SimpleTypeKind::Unknown) {
+            if (value.kind != SimpleTypeKind::Int &&
+                value.kind != SimpleTypeKind::Unknown) {
               diagnostics_.error(expression.children[1].span,
-                                 selected.text + " value must have type " +
-                                     (put ? "Byte" : "Int"));
+                                 selected.text + " value must have type Int");
+            }
+          } else if (get && argumentCount == 1) {
+            const TypeInfo index = inferExpressionType(expression.children[1], scope);
+            if (index.kind != SimpleTypeKind::Int &&
+                index.kind != SimpleTypeKind::Unknown) {
+              diagnostics_.error(expression.children[1].span,
+                                 "get index must have type Int");
+            }
+          } else if (put) {
+            const std::size_t valueIndex = argumentCount == 1 ? 1 : 2;
+            if (argumentCount == 2) {
+              const TypeInfo index = inferExpressionType(expression.children[1], scope);
+              if (index.kind != SimpleTypeKind::Int &&
+                  index.kind != SimpleTypeKind::Unknown) {
+                diagnostics_.error(expression.children[1].span,
+                                   "put index must have type Int");
+              }
+            }
+            const TypeInfo value =
+                inferExpressionType(expression.children[valueIndex], scope);
+            if (value.kind != SimpleTypeKind::Byte &&
+                value.kind != SimpleTypeKind::Unknown) {
+              diagnostics_.error(expression.children[valueIndex].span,
+                                 "put value must have type Byte");
             }
           }
 

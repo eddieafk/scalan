@@ -114,13 +114,15 @@ bool isByteBufferQuery(std::string_view target) {
          target == support::StdNames::RuntimeByteBufferLimit ||
          target == support::StdNames::RuntimeByteBufferRemaining ||
          target == support::StdNames::RuntimeByteBufferHasRemaining ||
-         target == support::StdNames::RuntimeByteBufferGet;
+         target == support::StdNames::RuntimeByteBufferGet ||
+         target == support::StdNames::RuntimeByteBufferGetAt;
 }
 
 bool isByteBufferMutation(std::string_view target) {
   return target == support::StdNames::RuntimeByteBufferSetPosition ||
          target == support::StdNames::RuntimeByteBufferSetLimit ||
          target == support::StdNames::RuntimeByteBufferPut ||
+         target == support::StdNames::RuntimeByteBufferPutAt ||
          target == support::StdNames::RuntimeByteBufferClear ||
          target == support::StdNames::RuntimeByteBufferFlip ||
          target == support::StdNames::RuntimeByteBufferRewind;
@@ -1880,8 +1882,7 @@ private:
                                  target->kind != DefinitionKind::Trait &&
                                  target->kind != DefinitionKind::Module))) {
         addError("NIR function definition '" + definition_.name +
-                 "' tests against undefined class, trait, or module: " +
-                 value.text);
+                 "' tests against undefined class, trait, or module: " + value.text);
         return ValueInfo{false, "Unknown", {}};
       }
       ValueInfo operand = verifyValue(value.operands.front());

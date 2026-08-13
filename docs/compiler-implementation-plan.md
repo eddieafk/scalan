@@ -3660,6 +3660,21 @@ Current scaffold status:
   Indexed byte access is intentionally separate because it does not advance
   position. Byte-order state, relative multibyte access, mark/reset, slicing,
   duplication, read-only views, and bulk transfer remain later slices.
+- Runtime ABI 57 adds absolute byte access with `ByteBuffer.get(index): Byte`
+  and `put(index, value): ByteBuffer`. Both operations validate
+  `0 <= index < limit`, access the backing byte directly, and leave the current
+  position unchanged. Indexed `put` remains fluent and returns the same buffer.
+
+  Invalid indices throw a catchable `java.lang.IndexOutOfBoundsException` with
+  the concise message `ByteBuffer index is out of bounds`. Validation completes
+  before reading or writing the backing storage, so a failed write changes
+  neither the bytes nor buffer state. Frontend typing distinguishes the indexed
+  overloads from ABI 56's relative operations, NIR gives each form its own
+  unambiguous intrinsic, and scoped-zone provenance follows the same primitive
+  read and receiver-preserving write rules.
+
+  Byte-order state, relative and absolute multibyte access, mark/reset, slicing,
+  duplication, read-only views, and bulk transfer remain later slices.
 - The frontend seeds a tiny runtime builtin, `println(value): Unit`, for the
   currently supported literal/value subset.
 - `nscplugin` emits `scala.scalanative.runtime.println : (Unknown)Unit` as a

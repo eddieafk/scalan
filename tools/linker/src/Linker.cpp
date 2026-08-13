@@ -167,6 +167,11 @@ bool isRuntimeBufferOverflowOperation(std::string_view name) {
   return name == support::StdNames::RuntimeByteBufferPut;
 }
 
+bool isRuntimeIndexOutOfBoundsOperation(std::string_view name) {
+  return name == support::StdNames::RuntimeByteBufferGetAt ||
+         name == support::StdNames::RuntimeByteBufferPutAt;
+}
+
 bool isRuntimeNullReceiverOperation(std::string_view name) {
   return name == support::StdNames::RuntimeStringLength ||
          name == support::StdNames::RuntimeStringToString ||
@@ -184,7 +189,9 @@ bool isRuntimeNullReceiverOperation(std::string_view name) {
          name == support::StdNames::RuntimeByteBufferRemaining ||
          name == support::StdNames::RuntimeByteBufferHasRemaining ||
          name == support::StdNames::RuntimeByteBufferGet ||
+         name == support::StdNames::RuntimeByteBufferGetAt ||
          name == support::StdNames::RuntimeByteBufferPut ||
+         name == support::StdNames::RuntimeByteBufferPutAt ||
          name == support::StdNames::RuntimeByteBufferClear ||
          name == support::StdNames::RuntimeByteBufferFlip ||
          name == support::StdNames::RuntimeByteBufferRewind;
@@ -1014,6 +1021,14 @@ collectDefinitionReferences(const nir::Definition& definition,
         support::StdNames::JavaNioBufferOverflowException);
     if (globals.contains(bufferOverflowName)) {
       references.push_back(bufferOverflowName);
+    }
+  }
+  if (isFunction(definition.kind) &&
+      isRuntimeIndexOutOfBoundsOperation(definition.name)) {
+    const std::string indexOutOfBoundsName(
+        support::StdNames::JavaLangIndexOutOfBoundsException);
+    if (globals.contains(indexOutOfBoundsName)) {
+      references.push_back(indexOutOfBoundsName);
     }
   }
   if (isFunction(definition.kind) && isRuntimeArrayOperation(definition.name)) {

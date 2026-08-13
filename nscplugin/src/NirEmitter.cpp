@@ -856,10 +856,14 @@ std::string byteBufferRuntimeName(const frontend::AstExpression& expression,
     return std::string(support::StdNames::RuntimeByteBufferHasRemaining);
   }
   if (callee.text == support::StdNames::ByteBufferGet) {
-    return std::string(support::StdNames::RuntimeByteBufferGet);
+    return std::string(expression.children.size() == 1
+                           ? support::StdNames::RuntimeByteBufferGet
+                           : support::StdNames::RuntimeByteBufferGetAt);
   }
   if (callee.text == support::StdNames::ByteBufferPut) {
-    return std::string(support::StdNames::RuntimeByteBufferPut);
+    return std::string(expression.children.size() == 2
+                           ? support::StdNames::RuntimeByteBufferPut
+                           : support::StdNames::RuntimeByteBufferPutAt);
   }
   if (callee.text == support::StdNames::ByteBufferClear) {
     return std::string(support::StdNames::RuntimeByteBufferClear);
@@ -5637,8 +5641,13 @@ nir::Module NirEmitter::emit(const frontend::TypedModule& module) const {
                           "(java.nio.ByteBuffer)Boolean", support::SourceSpan::none());
   builder.addFunctionDecl(std::string(support::StdNames::RuntimeByteBufferGet),
                           "(java.nio.ByteBuffer)Byte", support::SourceSpan::none());
+  builder.addFunctionDecl(std::string(support::StdNames::RuntimeByteBufferGetAt),
+                          "(java.nio.ByteBuffer,Int)Byte", support::SourceSpan::none());
   builder.addFunctionDecl(std::string(support::StdNames::RuntimeByteBufferPut),
                           "(java.nio.ByteBuffer,Byte)java.nio.ByteBuffer",
+                          support::SourceSpan::none());
+  builder.addFunctionDecl(std::string(support::StdNames::RuntimeByteBufferPutAt),
+                          "(java.nio.ByteBuffer,Int,Byte)java.nio.ByteBuffer",
                           support::SourceSpan::none());
   builder.addFunctionDecl(std::string(support::StdNames::RuntimeByteBufferClear),
                           "(java.nio.ByteBuffer)java.nio.ByteBuffer",
