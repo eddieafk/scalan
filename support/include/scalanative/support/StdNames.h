@@ -162,6 +162,8 @@ struct StdNames final {
   inline static constexpr std::string_view ByteBufferPutLong = "putLong";
   inline static constexpr std::string_view ByteBufferGetFloat = "getFloat";
   inline static constexpr std::string_view ByteBufferPutFloat = "putFloat";
+  inline static constexpr std::string_view ByteBufferGetDouble = "getDouble";
+  inline static constexpr std::string_view ByteBufferPutDouble = "putDouble";
   inline static constexpr std::string_view ByteBufferClear = "clear";
   inline static constexpr std::string_view ByteBufferFlip = "flip";
   inline static constexpr std::string_view ByteBufferRewind = "rewind";
@@ -258,6 +260,10 @@ struct StdNames final {
       "scala.scalanative.runtime.byteBufferGetFloatAt";
   inline static constexpr std::string_view RuntimeByteBufferPutFloatAt =
       "scala.scalanative.runtime.byteBufferPutFloatAt";
+  inline static constexpr std::string_view RuntimeByteBufferGetDouble =
+      "scala.scalanative.runtime.byteBufferGetDouble";
+  inline static constexpr std::string_view RuntimeByteBufferPutDouble =
+      "scala.scalanative.runtime.byteBufferPutDouble";
   inline static constexpr std::string_view RuntimeByteBufferClear =
       "scala.scalanative.runtime.byteBufferClear";
   inline static constexpr std::string_view RuntimeByteBufferFlip =

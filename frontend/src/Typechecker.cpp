@@ -491,6 +491,8 @@ bool isByteBufferOperationName(std::string_view operation) {
          operation == support::StdNames::ByteBufferPutLong ||
          operation == support::StdNames::ByteBufferGetFloat ||
          operation == support::StdNames::ByteBufferPutFloat ||
+         operation == support::StdNames::ByteBufferGetDouble ||
+         operation == support::StdNames::ByteBufferPutDouble ||
          operation == support::StdNames::ByteBufferClear ||
          operation == support::StdNames::ByteBufferFlip ||
          operation == support::StdNames::ByteBufferRewind ||
@@ -9222,6 +9224,10 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
           const bool putLong = selected.text == support::StdNames::ByteBufferPutLong;
           const bool getFloat = selected.text == support::StdNames::ByteBufferGetFloat;
           const bool putFloat = selected.text == support::StdNames::ByteBufferPutFloat;
+          const bool getDouble =
+              selected.text == support::StdNames::ByteBufferGetDouble;
+          const bool putDouble =
+              selected.text == support::StdNames::ByteBufferPutDouble;
           const bool validArity =
               (positionOrLimit && argumentCount <= 1) || (get && argumentCount <= 1) ||
               (put && (argumentCount == 1 || argumentCount == 2)) ||
@@ -9233,9 +9239,10 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
               (putLong && (argumentCount == 1 || argumentCount == 2)) ||
               (getFloat && argumentCount <= 1) ||
               (putFloat && (argumentCount == 1 || argumentCount == 2)) ||
+              (getDouble && argumentCount == 0) || (putDouble && argumentCount == 1) ||
               (!positionOrLimit && !get && !put && !getShort && !putShort && !getInt &&
                !putInt && !getLong && !putLong && !getFloat && !putFloat &&
-               argumentCount == 0);
+               !getDouble && !putDouble && argumentCount == 0);
           if (!validArity) {
             std::string argumentContract;
             if (positionOrLimit || get) {
@@ -9263,6 +9270,8 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
             } else if (putFloat) {
               argumentContract =
                   " requires one Float value or an Int index and Float value";
+            } else if (putDouble) {
+              argumentContract = " requires one Double argument";
             } else {
               argumentContract = " does not accept arguments";
             }
@@ -9397,6 +9406,13 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
               diagnostics_.error(expression.children[valueIndex].span,
                                  "putFloat value must have type Float");
             }
+          } else if (putDouble) {
+            const TypeInfo value = inferExpressionType(expression.children[1], scope);
+            if (value.kind != SimpleTypeKind::Double &&
+                value.kind != SimpleTypeKind::Unknown) {
+              diagnostics_.error(expression.children[1].span,
+                                 "putDouble value must have type Double");
+            }
           }
 
           const bool returnsInt =
@@ -9425,6 +9441,9 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
           }
           if (selected.text == support::StdNames::ByteBufferGetFloat) {
             return TypeInfo{SimpleTypeKind::Float, "Float"};
+          }
+          if (selected.text == support::StdNames::ByteBufferGetDouble) {
+            return TypeInfo{SimpleTypeKind::Double, "Double"};
           }
           return TypeInfo{SimpleTypeKind::Object,
                           std::string(support::StdNames::JavaNioByteBuffer)};
@@ -11686,6 +11705,7 @@ bool Typechecker::analyzeZoneExpression(
             selected.text == support::StdNames::ByteBufferPutInt ||
             selected.text == support::StdNames::ByteBufferPutLong ||
             selected.text == support::StdNames::ByteBufferPutFloat ||
+            selected.text == support::StdNames::ByteBufferPutDouble ||
             selected.text == support::StdNames::ByteBufferClear ||
             selected.text == support::StdNames::ByteBufferFlip ||
             selected.text == support::StdNames::ByteBufferRewind ||
