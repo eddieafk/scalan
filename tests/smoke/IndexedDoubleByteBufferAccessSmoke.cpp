@@ -7,11 +7,11 @@
 namespace {
 
 constexpr std::string_view TestName =
-    "v0.1.0-alpha0.1.0.smoke.relative-float-byte-buffer-lowering";
+    "v0.1.0-alpha0.1.0.smoke.indexed-double-byte-buffer-lowering";
 
-int relativeFloatByteBufferLowering() {
+int indexedDoubleByteBufferLowering() {
   const scalanative::testing::TestResource resource{
-      "v0.1.0-alpha0.1.0", "run", "RelativeFloatByteBufferAccess.scala"};
+      "v0.1.0-alpha0.1.0", "run", "IndexedDoubleByteBufferAccess.scala"};
   if (!std::filesystem::is_regular_file(resource.path())) {
     return scalanative::testing::fail(TestName, "missing Scala resource: " +
                                                     resource.path().string());
@@ -28,37 +28,33 @@ int relativeFloatByteBufferLowering() {
                                                     result.diagnosticsText);
   }
 
-  const bool floatNir =
-      scalanative::testing::contains(result.nirText,
-                                     "scala.scalanative.runtime.byteBufferGetFloat") &&
-      scalanative::testing::contains(result.nirText,
-                                     "scala.scalanative.runtime.byteBufferPutFloat");
-  const bool floatLlvm =
+  const bool indexedDoubleNir =
       scalanative::testing::contains(
-          result.llvmIr, "define internal float @__scalanative_native_bytes_get_float") &&
+          result.nirText, "scala.scalanative.runtime.byteBufferGetDoubleAt") &&
       scalanative::testing::contains(
-          result.llvmIr, "define internal void @__scalanative_native_bytes_put_float") &&
-      scalanative::testing::contains(
-          result.llvmIr, "define internal float @__scalanative_byte_buffer_get_float") &&
-      scalanative::testing::contains(
-          result.llvmIr, "define internal ptr @__scalanative_byte_buffer_put_float") &&
-      scalanative::testing::contains(result.llvmIr,
-                                     "%value = bitcast i32 %bits to float") &&
-      scalanative::testing::contains(result.llvmIr,
-                                     "%bits = bitcast float %value to i32") &&
+          result.nirText, "scala.scalanative.runtime.byteBufferPutDoubleAt");
+  const bool indexedDoubleLlvm =
       scalanative::testing::contains(
           result.llvmIr,
-          "call float @__scalanative_native_bytes_get_float(ptr %array, i32 "
-          "%position)") &&
+          "define internal double @__scalanative_byte_buffer_get_double_at") &&
       scalanative::testing::contains(
           result.llvmIr,
-          "call void @__scalanative_native_bytes_put_float(ptr %array, i32 %position, "
-          "float %value)") &&
+          "define internal ptr @__scalanative_byte_buffer_put_double_at") &&
+      scalanative::testing::contains(
+          result.llvmIr,
+          "call double @__scalanative_native_bytes_get_double(ptr %array, i32 "
+          "%index)") &&
+      scalanative::testing::contains(
+          result.llvmIr,
+          "call void @__scalanative_native_bytes_put_double(ptr %array, i32 %index, "
+          "double %value)") &&
+      scalanative::testing::contains(
+          result.llvmIr, "call void @__scalanative_throw_byte_buffer_index()") &&
       scalanative::testing::contains(result.llvmIr,
                                      "Runtime ABI = 'scalanative-runtime-68'");
-  if (!floatNir || !floatLlvm) {
+  if (!indexedDoubleNir || !indexedDoubleLlvm) {
     return scalanative::testing::fail(
-        TestName, "relative Float ByteBuffer access was not lowered as expected:\n" +
+        TestName, "indexed Double ByteBuffer access was not lowered as expected:\n" +
                       result.nirText + "\n" + result.llvmIr);
   }
   return 0;
@@ -67,5 +63,5 @@ int relativeFloatByteBufferLowering() {
 } // namespace
 
 int main() {
-  return relativeFloatByteBufferLowering();
+  return indexedDoubleByteBufferLowering();
 }

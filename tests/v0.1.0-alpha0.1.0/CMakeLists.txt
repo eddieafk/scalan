@@ -80,6 +80,12 @@ scalanative_add_scala_test(
 
 scalanative_add_scala_test(
   VERSION "${test_version}"
+  KIND inval
+  NAME indexed-double-byte-buffer-diagnostics
+  SOURCE inval/IndexedDoubleByteBufferDiagnostics.scala)
+
+scalanative_add_scala_test(
+  VERSION "${test_version}"
   KIND run
   NAME captured-runtime-polymorphic-functions
   SOURCE run/CapturedRuntimePolymorphicFunctions.scala)
@@ -150,6 +156,12 @@ scalanative_add_scala_test(
   NAME relative-double-byte-buffer-access
   SOURCE run/RelativeDoubleByteBufferAccess.scala)
 
+scalanative_add_scala_test(
+  VERSION "${test_version}"
+  KIND run
+  NAME indexed-double-byte-buffer-access
+  SOURCE run/IndexedDoubleByteBufferAccess.scala)
+
 scalanative_add_smoke_test(
   VERSION "${test_version}"
   NAME captured-runtime-polymorphic-closure-nir
@@ -210,6 +222,11 @@ scalanative_add_smoke_test(
   NAME relative-double-byte-buffer-lowering
   SOURCE "${CMAKE_CURRENT_LIST_DIR}/../smoke/RelativeDoubleByteBufferAccessSmoke.cpp")
 
+scalanative_add_smoke_test(
+  VERSION "${test_version}"
+  NAME indexed-double-byte-buffer-lowering
+  SOURCE "${CMAKE_CURRENT_LIST_DIR}/../smoke/IndexedDoubleByteBufferAccessSmoke.cpp")
+
 add_custom_target(
   scalanative-tests-v0.1.0-alpha0.1.0
   DEPENDS scalanative-scala-test-runner
@@ -224,4 +241,5 @@ add_custom_target(
           scalanative-smoke-v0_1_0_alpha0_1_0_indexed_long_byte_buffer_lowering
           scalanative-smoke-v0_1_0_alpha0_1_0_relative_float_byte_buffer_lowering
           scalanative-smoke-v0_1_0_alpha0_1_0_indexed_float_byte_buffer_lowering
-          scalanative-smoke-v0_1_0_alpha0_1_0_relative_double_byte_buffer_lowering)
+          scalanative-smoke-v0_1_0_alpha0_1_0_relative_double_byte_buffer_lowering
+          scalanative-smoke-v0_1_0_alpha0_1_0_indexed_double_byte_buffer_lowering)

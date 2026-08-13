@@ -50,7 +50,7 @@ int relativeLongByteBufferLowering() {
           "call void @__scalanative_native_bytes_put_long(ptr %array, i32 %position, "
           "i64 %value)") &&
       scalanative::testing::contains(result.llvmIr,
-                                     "Runtime ABI = 'scalanative-runtime-67'");
+                                     "Runtime ABI = 'scalanative-runtime-68'");
   if (!longNir || !longLlvm) {
     return scalanative::testing::fail(
         TestName, "relative Long ByteBuffer access was not lowered as expected:\n" +

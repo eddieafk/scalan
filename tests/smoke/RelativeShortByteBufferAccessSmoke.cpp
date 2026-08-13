@@ -47,7 +47,7 @@ int relativeShortByteBufferLowering() {
           "call void @__scalanative_native_bytes_put_short(ptr %array, i32 "
           "%position, i16 %value, i1 false)") &&
       scalanative::testing::contains(result.llvmIr,
-                                     "Runtime ABI = 'scalanative-runtime-67'");
+                                     "Runtime ABI = 'scalanative-runtime-68'");
   if (!shortNir || !shortLlvm) {
     return scalanative::testing::fail(
         TestName, "relative Short ByteBuffer access was not lowered as expected:\n" +

@@ -9239,7 +9239,8 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
               (putLong && (argumentCount == 1 || argumentCount == 2)) ||
               (getFloat && argumentCount <= 1) ||
               (putFloat && (argumentCount == 1 || argumentCount == 2)) ||
-              (getDouble && argumentCount == 0) || (putDouble && argumentCount == 1) ||
+              (getDouble && argumentCount <= 1) ||
+              (putDouble && (argumentCount == 1 || argumentCount == 2)) ||
               (!positionOrLimit && !get && !put && !getShort && !putShort && !getInt &&
                !putInt && !getLong && !putLong && !getFloat && !putFloat &&
                !getDouble && !putDouble && argumentCount == 0);
@@ -9270,8 +9271,11 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
             } else if (putFloat) {
               argumentContract =
                   " requires one Float value or an Int index and Float value";
+            } else if (getDouble) {
+              argumentContract = " accepts zero or one Int argument";
             } else if (putDouble) {
-              argumentContract = " requires one Double argument";
+              argumentContract =
+                  " requires one Double value or an Int index and Double value";
             } else {
               argumentContract = " does not accept arguments";
             }
@@ -9406,11 +9410,28 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
               diagnostics_.error(expression.children[valueIndex].span,
                                  "putFloat value must have type Float");
             }
+          } else if (getDouble && argumentCount == 1) {
+            const TypeInfo index = inferExpressionType(expression.children[1], scope);
+            if (index.kind != SimpleTypeKind::Int &&
+                index.kind != SimpleTypeKind::Unknown) {
+              diagnostics_.error(expression.children[1].span,
+                                 "getDouble index must have type Int");
+            }
           } else if (putDouble) {
-            const TypeInfo value = inferExpressionType(expression.children[1], scope);
+            const std::size_t valueIndex = argumentCount == 1 ? 1 : 2;
+            if (argumentCount == 2) {
+              const TypeInfo index = inferExpressionType(expression.children[1], scope);
+              if (index.kind != SimpleTypeKind::Int &&
+                  index.kind != SimpleTypeKind::Unknown) {
+                diagnostics_.error(expression.children[1].span,
+                                   "putDouble index must have type Int");
+              }
+            }
+            const TypeInfo value =
+                inferExpressionType(expression.children[valueIndex], scope);
             if (value.kind != SimpleTypeKind::Double &&
                 value.kind != SimpleTypeKind::Unknown) {
-              diagnostics_.error(expression.children[1].span,
+              diagnostics_.error(expression.children[valueIndex].span,
                                  "putDouble value must have type Double");
             }
           }
