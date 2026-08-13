@@ -1,7 +1,5 @@
 # scalanative
 
-## Aim
-
 `scalanative` is a C++ bootstrap compiler for Scala 3 programs. Its goal is to
 compile Scala source through a typed frontend and Native Intermediate
 Representation (NIR), then use LLVM to produce native executables.
