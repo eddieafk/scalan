@@ -1,13 +1,9 @@
-// expected-error: getLong does not accept arguments
-// expected-error: putLong requires one Long argument
+// expected-error: putLong requires one Long value or an Int index and Long value
 // expected-error: putLong value must have type Long
 
 package tests.v010alpha010.invalidrelativelongbytebuffer
 
 object Invalid {
-  def getWithIndex(buffer: ByteBuffer): Long =
-    buffer.getLong(0)
-
   def putWithoutValue(buffer: ByteBuffer): ByteBuffer =
     buffer.putLong()
 

@@ -179,7 +179,9 @@ bool isRuntimeIndexOutOfBoundsOperation(std::string_view name) {
          name == support::StdNames::RuntimeByteBufferGetShortAt ||
          name == support::StdNames::RuntimeByteBufferPutShortAt ||
          name == support::StdNames::RuntimeByteBufferGetIntAt ||
-         name == support::StdNames::RuntimeByteBufferPutIntAt;
+         name == support::StdNames::RuntimeByteBufferPutIntAt ||
+         name == support::StdNames::RuntimeByteBufferGetLongAt ||
+         name == support::StdNames::RuntimeByteBufferPutLongAt;
 }
 
 bool isRuntimeInvalidMarkOperation(std::string_view name) {
@@ -216,6 +218,8 @@ bool isRuntimeNullReceiverOperation(std::string_view name) {
          name == support::StdNames::RuntimeByteBufferPutIntAt ||
          name == support::StdNames::RuntimeByteBufferGetLong ||
          name == support::StdNames::RuntimeByteBufferPutLong ||
+         name == support::StdNames::RuntimeByteBufferGetLongAt ||
+         name == support::StdNames::RuntimeByteBufferPutLongAt ||
          name == support::StdNames::RuntimeByteBufferClear ||
          name == support::StdNames::RuntimeByteBufferFlip ||
          name == support::StdNames::RuntimeByteBufferRewind ||

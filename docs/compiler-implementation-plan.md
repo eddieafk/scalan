@@ -3747,8 +3747,22 @@ Current scaffold status:
   storage, so `BufferUnderflowException` and `BufferOverflowException` leave
   position and backing bytes unchanged.
 
-  Byte-order selection, indexed Long access, remaining primitive widths,
+  Byte-order selection, remaining primitive widths,
   slicing, duplication, read-only views, and bulk transfer remain later slices.
+- Runtime ABI 64 completes the initial Long surface with
+  `ByteBuffer.getLong(index): Long` and
+  `putLong(index, value): ByteBuffer`. Both operations require
+  `0 <= index <= limit - 8`, use the default big-endian order, and leave
+  position and mark unchanged. Indexed put remains fluent.
+
+  Invalid ranges throw the existing catchable `IndexOutOfBoundsException` with
+  `ByteBuffer index is out of bounds`. Validation covers all eight bytes before
+  touching storage, so rejected writes preserve backing storage and buffer
+  state. The overflow-safe `limit - 8` formulation also handles limits below
+  eight without computing an overflowing end index.
+
+  Byte-order selection, remaining primitive widths, slicing, duplication,
+  read-only views, and bulk transfer remain later slices.
 - Runtime ABI 60 completes the initial Short surface with
   `ByteBuffer.getShort(index): Short` and
   `putShort(index, value): ByteBuffer`. Both operations require

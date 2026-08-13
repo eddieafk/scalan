@@ -9225,7 +9225,8 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
               (putShort && (argumentCount == 1 || argumentCount == 2)) ||
               (getInt && argumentCount <= 1) ||
               (putInt && (argumentCount == 1 || argumentCount == 2)) ||
-              (getLong && argumentCount == 0) || (putLong && argumentCount == 1) ||
+              (getLong && argumentCount <= 1) ||
+              (putLong && (argumentCount == 1 || argumentCount == 2)) ||
               (!positionOrLimit && !get && !put && !getShort && !putShort && !getInt &&
                !putInt && !getLong && !putLong && argumentCount == 0);
           if (!validArity) {
@@ -9245,8 +9246,11 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
             } else if (putInt) {
               argumentContract =
                   " requires one Int value or an Int index and Int value";
+            } else if (getLong) {
+              argumentContract = " accepts zero or one Int argument";
             } else if (putLong) {
-              argumentContract = " requires one Long argument";
+              argumentContract =
+                  " requires one Long value or an Int index and Long value";
             } else {
               argumentContract = " does not accept arguments";
             }
@@ -9333,11 +9337,28 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
               diagnostics_.error(expression.children[valueIndex].span,
                                  "putInt value must have type Int");
             }
+          } else if (getLong && argumentCount == 1) {
+            const TypeInfo index = inferExpressionType(expression.children[1], scope);
+            if (index.kind != SimpleTypeKind::Int &&
+                index.kind != SimpleTypeKind::Unknown) {
+              diagnostics_.error(expression.children[1].span,
+                                 "getLong index must have type Int");
+            }
           } else if (putLong) {
-            const TypeInfo value = inferExpressionType(expression.children[1], scope);
+            const std::size_t valueIndex = argumentCount == 1 ? 1 : 2;
+            if (argumentCount == 2) {
+              const TypeInfo index = inferExpressionType(expression.children[1], scope);
+              if (index.kind != SimpleTypeKind::Int &&
+                  index.kind != SimpleTypeKind::Unknown) {
+                diagnostics_.error(expression.children[1].span,
+                                   "putLong index must have type Int");
+              }
+            }
+            const TypeInfo value =
+                inferExpressionType(expression.children[valueIndex], scope);
             if (value.kind != SimpleTypeKind::Long &&
                 value.kind != SimpleTypeKind::Unknown) {
-              diagnostics_.error(expression.children[1].span,
+              diagnostics_.error(expression.children[valueIndex].span,
                                  "putLong value must have type Long");
             }
           }
