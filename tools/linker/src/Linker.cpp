@@ -241,6 +241,7 @@ bool isRuntimeNullReceiverOperation(std::string_view name) {
          name == support::StdNames::RuntimeByteBufferSetOrder ||
          name == support::StdNames::RuntimeByteBufferSlice ||
          name == support::StdNames::RuntimeByteBufferSliceAt ||
+         name == support::StdNames::RuntimeByteBufferDuplicate ||
          name == support::StdNames::RuntimeByteBufferClear ||
          name == support::StdNames::RuntimeByteBufferFlip ||
          name == support::StdNames::RuntimeByteBufferRewind ||

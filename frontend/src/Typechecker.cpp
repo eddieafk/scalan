@@ -520,7 +520,8 @@ bool isByteBufferOperationName(std::string_view operation) {
          operation == support::StdNames::ByteBufferMark ||
          operation == support::StdNames::ByteBufferReset ||
          operation == support::StdNames::ByteBufferOrder ||
-         operation == support::StdNames::ByteBufferSlice;
+         operation == support::StdNames::ByteBufferSlice ||
+         operation == support::StdNames::ByteBufferDuplicate;
 }
 
 bool isByteBufferType(const TypeInfo& type) {
@@ -11787,6 +11788,7 @@ bool Typechecker::analyzeZoneExpression(
             selected.text == support::StdNames::ByteBufferMark ||
             selected.text == support::StdNames::ByteBufferReset ||
             selected.text == support::StdNames::ByteBufferSlice ||
+            selected.text == support::StdNames::ByteBufferDuplicate ||
             (selected.text == support::StdNames::ByteBufferOrder &&
              expression.children.size() == 2) ||
             ((selected.text == support::StdNames::ByteBufferPosition ||

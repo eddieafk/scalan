@@ -147,6 +147,7 @@ bool isByteBufferMutation(std::string_view target) {
          target == support::StdNames::RuntimeByteBufferSetOrder ||
          target == support::StdNames::RuntimeByteBufferSlice ||
          target == support::StdNames::RuntimeByteBufferSliceAt ||
+         target == support::StdNames::RuntimeByteBufferDuplicate ||
          target == support::StdNames::RuntimeByteBufferClear ||
          target == support::StdNames::RuntimeByteBufferFlip ||
          target == support::StdNames::RuntimeByteBufferRewind ||

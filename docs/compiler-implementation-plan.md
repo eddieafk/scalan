@@ -3861,6 +3861,19 @@ Current scaffold status:
   indexed slices compose their logical base offsets without copying storage.
 
   Duplication, read-only views, and bulk transfer remain later slices.
+- Runtime ABI 72 adds `ByteBuffer.duplicate()`. The returned buffer shares the
+  source's complete logical content and preserves its backing-array base,
+  capacity, position, limit, and mark. The copied cursor state then evolves
+  independently, source and duplicate writes remain mutually visible, and the
+  duplicate begins in the standard `BIG_ENDIAN` byte order even when the
+  source uses little-endian order.
+
+  LLVM reuses the shared slice-range allocator for the complete source
+  capacity, then installs the copied position, limit, and mark. This keeps
+  wrapped buffers, slices, indexed slices, and nested duplicates on one
+  composable view representation without copying storage.
+
+  Read-only views and bulk transfer remain later slices.
 - Runtime ABI 60 completes the initial Short surface with
   `ByteBuffer.getShort(index): Short` and
   `putShort(index, value): ByteBuffer`. Both operations require

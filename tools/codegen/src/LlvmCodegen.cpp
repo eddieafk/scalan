@@ -1427,6 +1427,36 @@ void emitRuntimeTypeHelpers(std::ostringstream& out,
   out << "  unreachable\n";
   out << "}\n\n";
 
+  out << "define internal ptr @__scalanative_byte_buffer_duplicate(ptr %buffer) {\n";
+  out << "entry:\n";
+  out << "  call void @__scalanative_byte_buffer_require(ptr %buffer)\n";
+  out << "  %capacity_slot = getelementptr i8, ptr %buffer, i64 "
+      << ByteBufferCapacityOffset << "\n";
+  out << "  %position_slot = getelementptr i8, ptr %buffer, i64 "
+      << ByteBufferPositionOffset << "\n";
+  out << "  %limit_slot = getelementptr i8, ptr %buffer, i64 "
+      << ByteBufferLimitOffset << "\n";
+  out << "  %mark_slot = getelementptr i8, ptr %buffer, i64 " << ByteBufferMarkOffset
+      << "\n";
+  out << "  %capacity = load i32, ptr %capacity_slot\n";
+  out << "  %position = load i32, ptr %position_slot\n";
+  out << "  %limit = load i32, ptr %limit_slot\n";
+  out << "  %mark = load i32, ptr %mark_slot\n";
+  out << "  %duplicate = call ptr "
+         "@__scalanative_byte_buffer_slice_range(ptr %buffer, i32 0, i32 "
+         "%capacity)\n";
+  out << "  %duplicate_position_slot = getelementptr i8, ptr %duplicate, i64 "
+      << ByteBufferPositionOffset << "\n";
+  out << "  %duplicate_limit_slot = getelementptr i8, ptr %duplicate, i64 "
+      << ByteBufferLimitOffset << "\n";
+  out << "  %duplicate_mark_slot = getelementptr i8, ptr %duplicate, i64 "
+      << ByteBufferMarkOffset << "\n";
+  out << "  store i32 %position, ptr %duplicate_position_slot\n";
+  out << "  store i32 %limit, ptr %duplicate_limit_slot\n";
+  out << "  store i32 %mark, ptr %duplicate_mark_slot\n";
+  out << "  ret ptr %duplicate\n";
+  out << "}\n\n";
+
   const auto emitByteBufferIntQuery = [&](std::string_view name, std::size_t offset) {
     out << "define internal i32 @__scalanative_byte_buffer_" << name
         << "(ptr %buffer) {\n";
@@ -7206,6 +7236,8 @@ std::string lowerCall(const nir::Value& value, const std::string& expectedType,
       target == support::StdNames::RuntimeByteBufferSlice;
   const bool isRuntimeByteBufferSliceAt =
       target == support::StdNames::RuntimeByteBufferSliceAt;
+  const bool isRuntimeByteBufferDuplicate =
+      target == support::StdNames::RuntimeByteBufferDuplicate;
   const bool isRuntimeByteBufferOperation =
       isRuntimeByteBufferCapacity || isRuntimeByteBufferPosition ||
       isRuntimeByteBufferSetPosition || isRuntimeByteBufferLimit ||
@@ -7224,6 +7256,7 @@ std::string lowerCall(const nir::Value& value, const std::string& expectedType,
       isRuntimeByteBufferGetDoubleAt || isRuntimeByteBufferPutDoubleAt ||
       isRuntimeByteBufferOrder || isRuntimeByteBufferSetOrder ||
       isRuntimeByteBufferSlice || isRuntimeByteBufferSliceAt ||
+      isRuntimeByteBufferDuplicate ||
       isRuntimeByteBufferClear || isRuntimeByteBufferFlip ||
       isRuntimeByteBufferRewind || isRuntimeByteBufferMark || isRuntimeByteBufferReset;
   const bool isRuntimeArrayAlloc = target == support::StdNames::RuntimeArrayAlloc;
@@ -8273,7 +8306,8 @@ std::string lowerCall(const nir::Value& value, const std::string& expectedType,
         isRuntimeByteBufferPutLongAt || isRuntimeByteBufferPutFloat ||
         isRuntimeByteBufferPutFloatAt || isRuntimeByteBufferPutDouble ||
         isRuntimeByteBufferPutDoubleAt || isRuntimeByteBufferSetOrder ||
-        isRuntimeByteBufferSlice || isRuntimeByteBufferSliceAt;
+        isRuntimeByteBufferSlice || isRuntimeByteBufferSliceAt ||
+        isRuntimeByteBufferDuplicate;
     const bool returnsBoolean =
         isRuntimeByteBufferHasRemaining || isRuntimeByteBufferOrder;
     const bool returnsByte = isRuntimeByteBufferGet || isRuntimeByteBufferGetAt;
@@ -8426,6 +8460,8 @@ std::string lowerCall(const nir::Value& value, const std::string& expectedType,
       helper = "__scalanative_byte_buffer_slice";
     } else if (isRuntimeByteBufferSliceAt) {
       helper = "__scalanative_byte_buffer_slice_at";
+    } else if (isRuntimeByteBufferDuplicate) {
+      helper = "__scalanative_byte_buffer_duplicate";
     } else if (isRuntimeByteBufferClear) {
       helper = "__scalanative_byte_buffer_clear";
     } else if (isRuntimeByteBufferFlip) {
