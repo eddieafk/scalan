@@ -117,7 +117,8 @@ bool isByteBufferQuery(std::string_view target) {
          target == support::StdNames::RuntimeByteBufferGet ||
          target == support::StdNames::RuntimeByteBufferGetAt ||
          target == support::StdNames::RuntimeByteBufferGetShort ||
-         target == support::StdNames::RuntimeByteBufferGetShortAt;
+         target == support::StdNames::RuntimeByteBufferGetShortAt ||
+         target == support::StdNames::RuntimeByteBufferGetInt;
 }
 
 bool isByteBufferMutation(std::string_view target) {
@@ -127,6 +128,7 @@ bool isByteBufferMutation(std::string_view target) {
          target == support::StdNames::RuntimeByteBufferPutAt ||
          target == support::StdNames::RuntimeByteBufferPutShort ||
          target == support::StdNames::RuntimeByteBufferPutShortAt ||
+         target == support::StdNames::RuntimeByteBufferPutInt ||
          target == support::StdNames::RuntimeByteBufferClear ||
          target == support::StdNames::RuntimeByteBufferFlip ||
          target == support::StdNames::RuntimeByteBufferRewind ||

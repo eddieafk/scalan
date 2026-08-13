@@ -156,6 +156,8 @@ struct StdNames final {
   inline static constexpr std::string_view ByteBufferPut = "put";
   inline static constexpr std::string_view ByteBufferGetShort = "getShort";
   inline static constexpr std::string_view ByteBufferPutShort = "putShort";
+  inline static constexpr std::string_view ByteBufferGetInt = "getInt";
+  inline static constexpr std::string_view ByteBufferPutInt = "putInt";
   inline static constexpr std::string_view ByteBufferClear = "clear";
   inline static constexpr std::string_view ByteBufferFlip = "flip";
   inline static constexpr std::string_view ByteBufferRewind = "rewind";
@@ -228,6 +230,10 @@ struct StdNames final {
       "scala.scalanative.runtime.byteBufferGetShortAt";
   inline static constexpr std::string_view RuntimeByteBufferPutShortAt =
       "scala.scalanative.runtime.byteBufferPutShortAt";
+  inline static constexpr std::string_view RuntimeByteBufferGetInt =
+      "scala.scalanative.runtime.byteBufferGetInt";
+  inline static constexpr std::string_view RuntimeByteBufferPutInt =
+      "scala.scalanative.runtime.byteBufferPutInt";
   inline static constexpr std::string_view RuntimeByteBufferClear =
       "scala.scalanative.runtime.byteBufferClear";
   inline static constexpr std::string_view RuntimeByteBufferFlip =

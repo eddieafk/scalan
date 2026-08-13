@@ -878,6 +878,12 @@ std::string byteBufferRuntimeName(const frontend::AstExpression& expression,
                            ? support::StdNames::RuntimeByteBufferPutShort
                            : support::StdNames::RuntimeByteBufferPutShortAt);
   }
+  if (callee.text == support::StdNames::ByteBufferGetInt) {
+    return std::string(support::StdNames::RuntimeByteBufferGetInt);
+  }
+  if (callee.text == support::StdNames::ByteBufferPutInt) {
+    return std::string(support::StdNames::RuntimeByteBufferPutInt);
+  }
   if (callee.text == support::StdNames::ByteBufferClear) {
     return std::string(support::StdNames::RuntimeByteBufferClear);
   }
@@ -5680,6 +5686,11 @@ nir::Module NirEmitter::emit(const frontend::TypedModule& module) const {
                           support::SourceSpan::none());
   builder.addFunctionDecl(std::string(support::StdNames::RuntimeByteBufferPutShortAt),
                           "(java.nio.ByteBuffer,Int,Short)java.nio.ByteBuffer",
+                          support::SourceSpan::none());
+  builder.addFunctionDecl(std::string(support::StdNames::RuntimeByteBufferGetInt),
+                          "(java.nio.ByteBuffer)Int", support::SourceSpan::none());
+  builder.addFunctionDecl(std::string(support::StdNames::RuntimeByteBufferPutInt),
+                          "(java.nio.ByteBuffer,Int)java.nio.ByteBuffer",
                           support::SourceSpan::none());
   builder.addFunctionDecl(std::string(support::StdNames::RuntimeByteBufferClear),
                           "(java.nio.ByteBuffer)java.nio.ByteBuffer",

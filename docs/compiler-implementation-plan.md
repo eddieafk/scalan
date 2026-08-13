@@ -3705,8 +3705,22 @@ Current scaffold status:
   unchanged. Increasing position continues to preserve a valid mark, so reset
   can restore the position recorded before relative Short access.
 
-  Byte-order selection, additional primitive widths, slicing, duplication,
-  read-only views, and bulk transfer remain later slices.
+  Byte-order selection, additional relative and absolute primitive widths,
+  slicing, duplication, read-only views, and bulk transfer remain later slices.
+- Runtime ABI 61 extends relative multibyte access with the default big-endian
+  `ByteBuffer.getInt(): Int` and `putInt(value): ByteBuffer`. Both require four
+  remaining bytes and advance position by exactly four only after the complete
+  access succeeds. Put remains fluent, and increasing position preserves an
+  existing mark for a later reset.
+
+  LLVM composes each Int from two portable big-endian Short accesses and splits
+  writes the same way, retaining every bit without unaligned loads or host-order
+  assumptions. The buffer validates all four bytes before touching storage, so
+  `BufferUnderflowException` and `BufferOverflowException` leave position and
+  backing bytes unchanged.
+
+  Byte-order selection, indexed Int access, wider primitive widths, slicing,
+  duplication, read-only views, and bulk transfer remain later slices.
 - Runtime ABI 60 completes the initial Short surface with
   `ByteBuffer.getShort(index): Short` and
   `putShort(index, value): ByteBuffer`. Both operations require
