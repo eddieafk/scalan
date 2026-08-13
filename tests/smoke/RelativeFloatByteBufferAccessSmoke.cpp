@@ -55,7 +55,7 @@ int relativeFloatByteBufferLowering() {
           "call void @__scalanative_native_bytes_put_float(ptr %array, i32 %position, "
           "float %value)") &&
       scalanative::testing::contains(result.llvmIr,
-                                     "Runtime ABI = 'scalanative-runtime-65'");
+                                     "Runtime ABI = 'scalanative-runtime-66'");
   if (!floatNir || !floatLlvm) {
     return scalanative::testing::fail(
         TestName, "relative Float ByteBuffer access was not lowered as expected:\n" +
