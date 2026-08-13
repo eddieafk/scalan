@@ -7404,8 +7404,32 @@ TypeInfo Typechecker::typecheckRuntimePolymorphicFunctionLiteral(
     return expectedType;
   }
 
-  std::vector<std::string> captures;
+  std::vector<TypedPolymorphicFunctionCapture> captures;
+  std::vector<std::string> capturedMemberNames;
+  std::vector<TypedPolymorphicFunctionModuleMember> moduleMembers;
   std::unordered_set<std::string> capturedNames;
+  std::unordered_set<std::string> capturedMembers;
+  std::unordered_set<std::string> capturedModuleMembers;
+  std::vector<std::string> mutableCaptures;
+  std::vector<std::string> erasedCaptures;
+  bool capturesSuper = false;
+  bool missingOuterReceiver = false;
+  const auto captureOuterReceiver = [&](const support::SourceSpan& span) {
+    if (!capturedNames.insert("$outer$this").second) {
+      return;
+    }
+    auto self = scope.find("this");
+    if (self == scope.end()) {
+      missingOuterReceiver = true;
+      return;
+    }
+    AstExpression value;
+    value.kind = AstExpressionKind::This;
+    value.text = "this";
+    value.span = span;
+    captures.push_back(TypedPolymorphicFunctionCapture{
+        "this", "$capture$this", self->second.type, std::move(value), true});
+  };
   std::function<void(const AstExpression&, std::unordered_set<std::string>&)>
       collectCaptures;
   collectCaptures = [&](const AstExpression& expression,
@@ -7413,17 +7437,59 @@ TypeInfo Typechecker::typecheckRuntimePolymorphicFunctionLiteral(
     if (expression.kind == AstExpressionKind::Identifier &&
         !boundNames.contains(expression.text)) {
       auto symbol = scope.find(expression.text);
-      if (symbol != scope.end() &&
-          (symbol->second.isLexicalValue || symbol->second.isInstanceMember) &&
-          capturedNames.insert(expression.text).second) {
-        captures.push_back(expression.text);
+      if (symbol == scope.end()) {
+        return;
       }
+      const std::string memberOwner = ownerNameOf(symbol->second.symbolName);
+      auto owner = globalSymbols_.find(memberOwner);
+      if (owner != globalSymbols_.end() &&
+          owner->second.kind == AstDeclarationKind::Object &&
+          (symbol->second.kind == AstDeclarationKind::Def ||
+           symbol->second.kind == AstDeclarationKind::Val ||
+           symbol->second.kind == AstDeclarationKind::Var)) {
+        if (capturedModuleMembers.insert(expression.text).second) {
+          moduleMembers.push_back(TypedPolymorphicFunctionModuleMember{
+              expression.text, symbol->second.symbolName,
+              symbol->second.kind == AstDeclarationKind::Val ||
+                  symbol->second.kind == AstDeclarationKind::Var});
+        }
+        return;
+      }
+      if (symbol->second.isInstanceMember) {
+        captureOuterReceiver(expression.span);
+        if (capturedMembers.insert(expression.text).second) {
+          capturedMemberNames.push_back(expression.text);
+        }
+        return;
+      }
+      if (!symbol->second.isLexicalValue ||
+          !capturedNames.insert(expression.text).second) {
+        return;
+      }
+      if (symbol->second.kind == AstDeclarationKind::Var) {
+        mutableCaptures.push_back(expression.text);
+        return;
+      }
+      if (symbol->second.isErasedCompileTimeValue ||
+          symbol->second.polymorphicFunctionValue != nullptr) {
+        erasedCaptures.push_back(expression.text);
+        return;
+      }
+      AstExpression value;
+      value.kind = AstExpressionKind::Identifier;
+      value.text = expression.text;
+      value.span = expression.span;
+      captures.push_back(TypedPolymorphicFunctionCapture{
+          expression.text, "$capture$" + std::to_string(captures.size()),
+          symbol->second.type, std::move(value), false});
       return;
     }
-    if ((expression.kind == AstExpressionKind::This ||
-         expression.kind == AstExpressionKind::Super) &&
-        capturedNames.insert("this").second) {
-      captures.push_back("this");
+    if (expression.kind == AstExpressionKind::This) {
+      captureOuterReceiver(expression.span);
+      return;
+    }
+    if (expression.kind == AstExpressionKind::Super) {
+      capturesSuper = true;
       return;
     }
     if (expression.kind == AstExpressionKind::Block) {
@@ -7448,19 +7514,41 @@ TypeInfo Typechecker::typecheckRuntimePolymorphicFunctionLiteral(
   };
   std::unordered_set<std::string> boundNames{application->parameterName};
   collectCaptures(application->body, boundNames);
-  if (!captures.empty()) {
-    std::string names;
-    for (std::size_t index = 0; index < captures.size(); ++index) {
+  const auto joinedNames = [](const std::vector<std::string>& names) {
+    std::string joined;
+    for (std::size_t index = 0; index < names.size(); ++index) {
       if (index != 0) {
-        names += ", ";
+        joined += ", ";
       }
-      names += captures[index];
+      joined += names[index];
     }
+    return joined;
+  };
+  if (!mutableCaptures.empty()) {
     diagnostics_.error(
         function.span,
-        "runtime polymorphic function closures cannot capture values in this "
-        "milestone: " +
-            names);
+        "runtime polymorphic function closures cannot capture mutable local "
+        "values yet: " +
+            joinedNames(mutableCaptures));
+  }
+  if (!erasedCaptures.empty()) {
+    diagnostics_.error(function.span,
+                       "runtime polymorphic function closures cannot capture erased "
+                       "compiler-known values yet: " +
+                           joinedNames(erasedCaptures));
+  }
+  if (capturesSuper) {
+    diagnostics_.error(
+        function.span,
+        "runtime polymorphic function closures cannot capture super yet");
+  }
+  if (missingOuterReceiver) {
+    diagnostics_.error(
+        function.span,
+        "runtime polymorphic function closure has no outer receiver to capture");
+  }
+  if (!mutableCaptures.empty() || !erasedCaptures.empty() || capturesSuper ||
+      missingOuterReceiver) {
     return expectedType;
   }
 
@@ -7487,6 +7575,16 @@ TypeInfo Typechecker::typecheckRuntimePolymorphicFunctionLiteral(
         SimpleTypeKind::Object, std::string(support::StdNames::ScalaPolyFunction)}};
     closure.inferredType = TypeInfo{SimpleTypeKind::Object, className};
     closure.inferredType.runtimeName = className;
+    for (const TypedPolymorphicFunctionCapture& capture : captures) {
+      closure.parameters.push_back(capture.fieldName + ": " + capture.type.name);
+      closure.parameterTypes.push_back(capture.type);
+      closure.contextualParameters.push_back(false);
+      closure.inlineParameters.push_back(false);
+    }
+    if (!captures.empty()) {
+      closure.parameterClauseSizes = {captures.size()};
+      closure.contextualParameterClauses = {false};
+    }
 
     TypeParameterInfo typeParameter;
     typeParameter.name = application->parameterType.name;
@@ -7523,8 +7621,9 @@ TypeInfo Typechecker::typecheckRuntimePolymorphicFunctionLiteral(
     inlineApplications_.insert(inlineApplications_.end(),
                                application->inlineApplications.begin(),
                                application->inlineApplications.end());
-    polymorphicFunctionClosures_.push_back(
-        TypedPolymorphicFunctionClosure{function.span, className});
+    polymorphicFunctionClosures_.push_back(TypedPolymorphicFunctionClosure{
+        function.span, className, std::move(captures), std::move(capturedMemberNames),
+        std::move(moduleMembers)});
     polymorphicFunctionClosureDeclarations_.push_back(std::move(closure));
   }
   return expectedType;

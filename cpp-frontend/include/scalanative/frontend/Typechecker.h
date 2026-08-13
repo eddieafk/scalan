@@ -181,9 +181,26 @@ struct TypedPolymorphicFunctionApplication {
   std::vector<TypedInlineApplication> inlineApplications;
 };
 
+struct TypedPolymorphicFunctionCapture {
+  std::string name;
+  std::string fieldName;
+  TypeInfo type;
+  AstExpression value;
+  bool isOuterReceiver = false;
+};
+
+struct TypedPolymorphicFunctionModuleMember {
+  std::string name;
+  std::string symbolName;
+  bool requiresAccessor = false;
+};
+
 struct TypedPolymorphicFunctionClosure {
   support::SourceSpan span;
   std::string className;
+  std::vector<TypedPolymorphicFunctionCapture> captures;
+  std::vector<std::string> capturedMemberNames;
+  std::vector<TypedPolymorphicFunctionModuleMember> moduleMembers;
 };
 
 struct TypedModule {

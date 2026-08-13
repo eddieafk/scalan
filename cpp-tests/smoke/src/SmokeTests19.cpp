@@ -181,9 +181,6 @@ object Main {
   constexpr const char* invalidSource = R"(package demo.invalidruntimepolyclosure
 
 object Values {
-  def captured(prefix: String): [A] => A => String =
-    [A] => (value: A) => prefix + value.toString
-
   def identity(): [A] => A => A =
     [A] => (value: A) => value
 
@@ -195,9 +192,6 @@ object Values {
 
   def wrongSignature: String =
     acceptsText(identity())
-
-  def directCapture(prefix: String): String =
-    acceptsText([A] => (value: A) => prefix + value.toString)
 
   def wrongResult(): [A] => A => String =
     [A] => (value: A) => value
@@ -300,10 +294,6 @@ object Values {
       invokedArgument != std::string_view::npos && invokedFunction < invokedArgument;
   const bool invalidDiagnosticsMatch =
       !invalid.ok &&
-      countOccurrences(
-          invalid.diagnosticsText,
-          "runtime polymorphic function closures cannot capture values in this "
-          "milestone: prefix") == 2 &&
       contains(invalid.diagnosticsText,
                "runtime polymorphic function invocation requires exactly one "
                "explicit type argument and one value argument") &&

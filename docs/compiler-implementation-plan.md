@@ -1371,12 +1371,30 @@ Current scaffold status:
   mapper, and empty-tuple mappers exactly once; call results are unboxed or cast
   back to their specialized primitive, String, or reference types. Existing
   compiler-known literals and aliases retain their zero-allocation lowering.
-  Capturing runtime closures are deliberately diagnosed until environment-field
-  synthesis is implemented. `SmokeTests19.cpp` is the new compact partition for
-  native behavior, runtime ABI and virtual dispatch, passing/returning/forwarding,
+  This first runtime slice deliberately diagnosed captured closures pending the
+  environment-field synthesis described below. `SmokeTests19.cpp` is the compact
+  partition for native behavior, runtime ABI and virtual dispatch,
+  passing/returning/forwarding,
   runtime aliases, direct factory invocation, precise tuple results, evaluation
   order, empty behavior, and diagnostics;
   `cpp-examples/RuntimePolymorphicFunctions.scala` is the public example.
+  Runtime polymorphic closures now carry captured environments. Immutable
+  lexical values become typed constructor fields, so primitive captures stay
+  unboxed and generic/reference captures remain traced through ordinary class
+  layout metadata. Object members remain module-qualified. Unqualified class
+  members and explicit `this` capture the outer receiver instead, so method
+  dispatch and later mutations of receiver fields are observed when the closure
+  runs. Construction evaluates each captured value once in lexical discovery
+  order, while compiler-known
+  literal calls keep the existing allocation-free specialization path. Mutable
+  local variables still require shared-cell conversion, erased compiler-known
+  polymorphic values require a materialization boundary, and `super` requires
+  non-local-super lowering, so each remains a focused diagnostic.
+  `SmokeTests20.cpp` isolates native output, typed environment layout, primitive
+  and generic captures, implicit/explicit receiver capture, runtime passing and
+  aliasing, direct invocation, `Tuple.map`, empty behavior, evaluation order,
+  and deferred-case diagnostics;
+  `cpp-examples/CapturedRuntimePolymorphicFunctions.scala` is the public example.
   Compiler-owned `scala.compiletime.requireConst(value)` accepts Boolean, Byte,
   Short, Int, Long, Float, Double, Char, and String arguments through canonical,
   renamed, or qualified calls. It reuses inline substitution and constant

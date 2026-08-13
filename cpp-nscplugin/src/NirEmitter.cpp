@@ -22,6 +22,16 @@ constexpr std::string_view SummonName = "summon";
 constexpr std::string_view ImplicitlyName = "implicitly";
 
 struct ValueContext {
+  struct CapturedValue {
+    std::string fieldName;
+    frontend::TypeInfo type;
+  };
+
+  struct ModuleMember {
+    std::string symbolName;
+    bool requiresAccessor = false;
+  };
+
   std::string packageName;
   std::unordered_map<std::string, std::string> importAliases;
   std::unordered_set<std::string> implicitThisMembers;
@@ -38,6 +48,10 @@ struct ValueContext {
       polymorphicFunctionClosures = nullptr;
   const std::vector<support::SourceSpan>* polymorphicFunctionValueDeclarations =
       nullptr;
+  std::unordered_map<std::string, CapturedValue> capturedValues;
+  std::unordered_set<std::string> capturedThisMembers;
+  std::unordered_map<std::string, ModuleMember> capturedModuleMembers;
+  std::string capturedThisField;
   std::unordered_set<std::string>* referenceArrayElementTypes = nullptr;
   std::map<std::string, std::string>* runtimeArrayDeclarations = nullptr;
   std::vector<std::string> superTypes;
@@ -750,6 +764,21 @@ polymorphicFunctionClosureFor(const frontend::AstExpression& expression,
                             candidate.span.length == expression.span.length;
                    });
   return closure == context.polymorphicFunctionClosures->rend() ? nullptr : &*closure;
+}
+
+const frontend::TypedPolymorphicFunctionClosure*
+polymorphicFunctionClosureForClass(const std::string& className,
+                                   const ValueContext& context) {
+  if (context.polymorphicFunctionClosures == nullptr || className.empty()) {
+    return nullptr;
+  }
+  auto closure =
+      std::find_if(context.polymorphicFunctionClosures->begin(),
+                   context.polymorphicFunctionClosures->end(),
+                   [&](const frontend::TypedPolymorphicFunctionClosure& candidate) {
+                     return candidate.className == className;
+                   });
+  return closure == context.polymorphicFunctionClosures->end() ? nullptr : &*closure;
 }
 
 bool isCompilerKnownPolymorphicFunctionValue(const frontend::AstExpression& declaration,
@@ -2580,6 +2609,26 @@ nir::Value valueFor(const frontend::AstExpression& expression,
         expression.text == support::StdNames::RuntimeFormatBoolean) {
       return nir::localValue(expression.text, expression.span);
     }
+    if (!context.localNames.contains(expression.text)) {
+      if (auto captured = context.capturedValues.find(expression.text);
+          captured != context.capturedValues.end()) {
+        return nir::selectValue(nir::localValue("this", expression.span),
+                                captured->second.fieldName, expression.span);
+      }
+      if (!context.capturedThisField.empty() &&
+          context.capturedThisMembers.contains(expression.text)) {
+        nir::Value outer = nir::selectValue(nir::localValue("this", expression.span),
+                                            context.capturedThisField, expression.span);
+        return nir::selectValue(std::move(outer), expression.text, expression.span);
+      }
+      if (auto member = context.capturedModuleMembers.find(expression.text);
+          member != context.capturedModuleMembers.end()) {
+        nir::Value value = nir::localValue(member->second.symbolName, expression.span);
+        return member->second.requiresAccessor && !preserveCallable
+                   ? nir::callValue(std::move(value), {}, expression.span)
+                   : value;
+      }
+    }
     if (shouldUseImplicitThis(expression.text, context)) {
       nir::Value selected = nir::selectValue(nir::localValue("this", expression.span),
                                              expression.text, expression.span);
@@ -2640,6 +2689,10 @@ nir::Value valueFor(const frontend::AstExpression& expression,
     return nir::literalValue(expression.text, literalTypeFor(expression),
                              expression.span);
   case AstExpressionKind::This:
+    if (!context.capturedThisField.empty()) {
+      return nir::selectValue(nir::localValue("this", expression.span),
+                              context.capturedThisField, expression.span);
+    }
     return nir::localValue("this", expression.span);
   case AstExpressionKind::Super:
     if (!expression.text.empty() && expression.text != "super") {
@@ -2679,7 +2732,18 @@ nir::Value valueFor(const frontend::AstExpression& expression,
   case AstExpressionKind::PolymorphicFunction:
     if (const frontend::TypedPolymorphicFunctionClosure* closure =
             polymorphicFunctionClosureFor(expression, context)) {
-      return nir::newValue(closure->className, expression.span);
+      std::vector<nir::Value> captures;
+      captures.reserve(closure->captures.size());
+      for (const frontend::TypedPolymorphicFunctionCapture& capture :
+           closure->captures) {
+        nir::Value value = expressionValueFor(capture.value, context);
+        value = boxForObjectStorage(std::move(value), runtimeTypeName(capture.type),
+                                    capture.value, context);
+        value = narrowCompositeValue(std::move(value), capture.type, capture.value,
+                                     context);
+        captures.push_back(std::move(value));
+      }
+      return nir::newValue(closure->className, std::move(captures), expression.span);
     }
     return nir::unknownValue("<unlowered-polymorphic-function>", expression.span);
   case AstExpressionKind::LocalDeclaration:
@@ -5878,6 +5942,24 @@ void NirEmitter::emitDeclaration(
   context.runtimeArrayDeclarations = runtimeArrayDeclarations;
   context.hasImplicitReceiver = hasImplicitReceiver;
   context.currentOwner = owner;
+  if (const frontend::TypedPolymorphicFunctionClosure* closure =
+          polymorphicFunctionClosureForClass(owner, context)) {
+    for (const frontend::TypedPolymorphicFunctionCapture& capture : closure->captures) {
+      if (capture.isOuterReceiver) {
+        context.capturedThisField = capture.fieldName;
+      } else {
+        context.capturedValues[capture.name] =
+            ValueContext::CapturedValue{capture.fieldName, capture.type};
+      }
+    }
+    context.capturedThisMembers.insert(closure->capturedMemberNames.begin(),
+                                       closure->capturedMemberNames.end());
+    for (const frontend::TypedPolymorphicFunctionModuleMember& member :
+         closure->moduleMembers) {
+      context.capturedModuleMembers[member.name] =
+          ValueContext::ModuleMember{member.symbolName, member.requiresAccessor};
+    }
+  }
   context.stackableSuper = ownerKind == frontend::AstDeclarationKind::Trait;
   if (hasImplicitReceiver) {
     context.implicitThisMembers = implicitThisMembersFor(module.declarations, owner);
