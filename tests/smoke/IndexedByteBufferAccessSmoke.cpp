@@ -41,7 +41,7 @@ int indexedByteBufferLowering() {
       scalanative::testing::contains(
           result.llvmIr, "call void @__scalanative_throw_byte_buffer_index()") &&
       scalanative::testing::contains(result.llvmIr,
-                                     "Runtime ABI = 'scalanative-runtime-64'");
+                                     "Runtime ABI = 'scalanative-runtime-65'");
   if (!indexedNir || !indexedLlvm) {
     return scalanative::testing::fail(
         TestName, "indexed ByteBuffer access was not lowered as expected:\n" +

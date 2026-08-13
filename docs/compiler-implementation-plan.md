@@ -3763,6 +3763,20 @@ Current scaffold status:
 
   Byte-order selection, remaining primitive widths, slicing, duplication,
   read-only views, and bulk transfer remain later slices.
+- Runtime ABI 65 extends relative multibyte access with the default big-endian
+  `ByteBuffer.getFloat(): Float` and `putFloat(value): ByteBuffer`. Both require
+  four remaining bytes and advance position by exactly four only after the
+  complete access succeeds. Put remains fluent, and increasing position
+  preserves an existing mark for a later reset.
+
+  LLVM reuses the portable big-endian Int helpers and bitcasts between the raw
+  32-bit payload and `Float`, preserving every IEEE-754 bit without numeric
+  conversion, unaligned loads, or host-order assumptions. Full-range validation
+  ensures `BufferUnderflowException` and `BufferOverflowException` leave
+  position and backing bytes unchanged.
+
+  Byte-order selection, indexed Float access, remaining primitive widths,
+  slicing, duplication, read-only views, and bulk transfer remain later slices.
 - Runtime ABI 60 completes the initial Short surface with
   `ByteBuffer.getShort(index): Short` and
   `putShort(index, value): ByteBuffer`. Both operations require

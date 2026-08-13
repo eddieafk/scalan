@@ -163,14 +163,16 @@ bool isRuntimeBufferUnderflowOperation(std::string_view name) {
   return name == support::StdNames::RuntimeByteBufferGet ||
          name == support::StdNames::RuntimeByteBufferGetShort ||
          name == support::StdNames::RuntimeByteBufferGetInt ||
-         name == support::StdNames::RuntimeByteBufferGetLong;
+         name == support::StdNames::RuntimeByteBufferGetLong ||
+         name == support::StdNames::RuntimeByteBufferGetFloat;
 }
 
 bool isRuntimeBufferOverflowOperation(std::string_view name) {
   return name == support::StdNames::RuntimeByteBufferPut ||
          name == support::StdNames::RuntimeByteBufferPutShort ||
          name == support::StdNames::RuntimeByteBufferPutInt ||
-         name == support::StdNames::RuntimeByteBufferPutLong;
+         name == support::StdNames::RuntimeByteBufferPutLong ||
+         name == support::StdNames::RuntimeByteBufferPutFloat;
 }
 
 bool isRuntimeIndexOutOfBoundsOperation(std::string_view name) {
@@ -220,6 +222,8 @@ bool isRuntimeNullReceiverOperation(std::string_view name) {
          name == support::StdNames::RuntimeByteBufferPutLong ||
          name == support::StdNames::RuntimeByteBufferGetLongAt ||
          name == support::StdNames::RuntimeByteBufferPutLongAt ||
+         name == support::StdNames::RuntimeByteBufferGetFloat ||
+         name == support::StdNames::RuntimeByteBufferPutFloat ||
          name == support::StdNames::RuntimeByteBufferClear ||
          name == support::StdNames::RuntimeByteBufferFlip ||
          name == support::StdNames::RuntimeByteBufferRewind ||
