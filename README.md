@@ -36,15 +36,25 @@ make quick
 make check
 ```
 
-The active smoke suite keeps new regressions in numbered translation units and
-compiles only the harness at `-O0` without debug symbols; the compiler libraries
-still use the selected preset normally. During work on the newest coverage, use:
+New compiler tests live under `tests/<version>/{val,inval,run}` as named Scala
+resources. Direct C++ coverage lives in `tests/smoke`, uses the shared resource
+helpers from `tests/include`, and is also registered under a stable test name.
+The test harnesses compile at `-O0` without debug symbols; compiler libraries
+still use the selected preset normally. To build and run only the current
+version's compact suite, use:
 
 ```sh
-cmake --build build/debug --target cpp-smoke-tests -j2
-CPP_SCALANATIVE_SMOKE_TESTS17_ONLY=1 \
-  build/debug/cpp-tests/smoke/cpp-smoke-tests
+cmake --build build/debug \
+  --target scalanative-tests-v0.1.0-alpha0.1.0 -j2
+ctest --test-dir build/debug --output-on-failure \
+  -L '^v0.1.0-alpha0.1.0$'
+
+# Equivalent convenience target.
+make test-version-debug
 ```
+
+The former `cpp-tests/smoke` executable remains available at its existing path
+as legacy coverage while its cases are migrated incrementally.
 
 Try the scaffold compiler:
 
@@ -191,14 +201,17 @@ build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
 # `val identity = [A] => (value: A) => value; identity[Int](42)`. Their body is
 # checked once, their captures and selected receiver are preserved at each call,
 # and compiler-known backing storage is erased. Passing a literal directly or
-# returning it through a declared runtime boundary materializes a non-capturing
-# literal as a `scala.PolyFunction` closure object. The resulting value can be
-# passed, returned, aliased at runtime, invoked dynamically, and used by
-# `Tuple.map`; its erased virtual `apply` ABI restores precise primitive, String,
-# and reference results.
-# Capturing runtime closure objects remain a later milestone and receive a
-# focused diagnostic, while compiler-known capturing values retain
-# zero-allocation lowering.
+# returning it through a declared runtime boundary materializes the literal as a
+# `scala.PolyFunction` closure object. Immutable lexical values are captured by
+# value in typed environment fields; object members stay module-qualified, and
+# class members retain their outer receiver so later field mutations remain
+# visible. The resulting value can be passed, returned, aliased at runtime,
+# invoked dynamically, and used by `Tuple.map`; its erased virtual `apply` ABI
+# restores precise primitive,
+# String, and reference results. Compiler-known literals retain zero-allocation
+# lowering. Mutable local captures, erased compiler-known value captures, and
+# `super` captures receive focused diagnostics pending cell and non-local-super
+# lowering.
 # Compiler-owned `scala.compiletime.requireConst(value)` accepts Boolean, Byte,
 # Short, Int, Long, Float, Double, Char, and String expressions and verifies
 # them after inline substitution and constant folding. Canonical, renamed, and
@@ -304,6 +317,10 @@ build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
 build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
   --output /tmp/runtime-polymorphic-functions \
   cpp-examples/RuntimePolymorphicFunctions.scala
+
+build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
+  --output /tmp/captured-runtime-polymorphic-functions \
+  cpp-examples/CapturedRuntimePolymorphicFunctions.scala
 
 build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
   --output /tmp/compiletime-uninitialized \

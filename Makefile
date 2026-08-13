@@ -4,6 +4,7 @@ JOBS ?= 4
 
 DEBUG_BUILD ?= build/debug
 RELEASE_BUILD ?= build/release
+TEST_VERSION ?= v0.1.0-alpha0.1.0
 
 INTERFLOW_EXAMPLE ?= cpp-examples/InterflowOptimizations.scala
 INTERFLOW_NIR ?= /tmp/cpp-scalanative-interflow.nir
@@ -16,11 +17,14 @@ help:
 	@printf '  %-24s %s\n' 'make interflow-example' 'Emit optimized NIR and an interflow JSON report for the example.'
 	@printf '  %-24s %s\n' 'make test-debug' 'Build debug and run all debug CTest tests.'
 	@printf '  %-24s %s\n' 'make test-release' 'Build release and run all release CTest tests.'
+	@printf '  %-24s %s\n' 'make test-version-debug' 'Build and run the current versioned tests only.'
+	@printf '  %-24s %s\n' 'make test-version-release' 'Build and run the current versioned tests in release.'
 	@printf '  %-24s %s\n' 'make check' 'Run the usual debug smoke, debug CTest, and release CTest validation.'
 	@printf '  %-24s %s\n' 'make build-debug' 'Configure and build the debug preset.'
 	@printf '  %-24s %s\n' 'make build-release' 'Configure and build the release preset.'
 	@printf '%s\n' ''
 	@printf '%s\n' 'Variables: JOBS=4 DEBUG_BUILD=build/debug RELEASE_BUILD=build/release'
+	@printf '%s\n' '           TEST_VERSION=v0.1.0-alpha0.1.0'
 	@printf '%s\n' '           INTERFLOW_EXAMPLE=cpp-examples/InterflowOptimizations.scala'
 	@printf '%s\n' '           INTERFLOW_NIR=/tmp/cpp-scalanative-interflow.nir'
 	@printf '%s\n' '           INTERFLOW_REPORT=/tmp/cpp-scalanative-interflow-report.json'
@@ -52,6 +56,15 @@ test-debug: build-debug
 
 test-release: build-release
 	$(CTEST) --test-dir $(RELEASE_BUILD) --output-on-failure
+
+.PHONY: test-version-debug test-version-release
+test-version-debug: configure-debug
+	$(CMAKE) --build $(DEBUG_BUILD) --target scalanative-tests-$(TEST_VERSION) --parallel $(JOBS)
+	$(CTEST) --test-dir $(DEBUG_BUILD) --output-on-failure -L '^$(TEST_VERSION)$$'
+
+test-version-release: configure-release
+	$(CMAKE) --build $(RELEASE_BUILD) --target scalanative-tests-$(TEST_VERSION) --parallel $(JOBS)
+	$(CTEST) --test-dir $(RELEASE_BUILD) --output-on-failure -L '^$(TEST_VERSION)$$'
 
 .PHONY: quick check-debug check-release check verify
 quick: smoke-debug

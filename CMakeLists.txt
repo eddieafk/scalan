@@ -22,5 +22,4 @@ add_subdirectory(cpp-tools/build)
 add_subdirectory(cpp-driver)
 
 enable_testing()
-add_subdirectory(cpp-tests/smoke)
-
+add_subdirectory(tests)
