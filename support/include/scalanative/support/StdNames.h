@@ -290,6 +290,8 @@ struct StdNames final {
       "scala.scalanative.runtime.byteBufferSetOrder";
   inline static constexpr std::string_view RuntimeByteBufferSlice =
       "scala.scalanative.runtime.byteBufferSlice";
+  inline static constexpr std::string_view RuntimeByteBufferSliceAt =
+      "scala.scalanative.runtime.byteBufferSliceAt";
   inline static constexpr std::string_view RuntimeStringLength =
       "scala.scalanative.runtime.stringLength";
   inline static constexpr std::string_view RuntimeStringToString =

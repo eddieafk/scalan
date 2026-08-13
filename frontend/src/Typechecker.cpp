@@ -9252,6 +9252,7 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
           const bool putDouble =
               selected.text == support::StdNames::ByteBufferPutDouble;
           const bool order = selected.text == support::StdNames::ByteBufferOrder;
+          const bool slice = selected.text == support::StdNames::ByteBufferSlice;
           const bool validArity =
               (positionOrLimit && argumentCount <= 1) || (get && argumentCount <= 1) ||
               (put && (argumentCount == 1 || argumentCount == 2)) ||
@@ -9266,9 +9267,10 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
               (getDouble && argumentCount <= 1) ||
               (putDouble && (argumentCount == 1 || argumentCount == 2)) ||
               (order && argumentCount <= 1) ||
+              (slice && (argumentCount == 0 || argumentCount == 2)) ||
               (!positionOrLimit && !get && !put && !getShort && !putShort && !getInt &&
                !putInt && !getLong && !putLong && !getFloat && !putFloat &&
-               !getDouble && !putDouble && !order && argumentCount == 0);
+               !getDouble && !putDouble && !order && !slice && argumentCount == 0);
           if (!validArity) {
             std::string argumentContract;
             if (positionOrLimit || get) {
@@ -9303,6 +9305,9 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
                   " requires one Double value or an Int index and Double value";
             } else if (order) {
               argumentContract = " accepts zero or one ByteOrder argument";
+            } else if (slice) {
+              argumentContract =
+                  " accepts no arguments or an Int index and Int length";
             } else {
               argumentContract = " does not accept arguments";
             }
@@ -9466,6 +9471,19 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
             if (!isByteOrderType(value) && value.kind != SimpleTypeKind::Unknown) {
               diagnostics_.error(expression.children[1].span,
                                  "order value must have type ByteOrder");
+            }
+          } else if (slice && argumentCount == 2) {
+            const TypeInfo index = inferExpressionType(expression.children[1], scope);
+            if (index.kind != SimpleTypeKind::Int &&
+                index.kind != SimpleTypeKind::Unknown) {
+              diagnostics_.error(expression.children[1].span,
+                                 "slice index must have type Int");
+            }
+            const TypeInfo length = inferExpressionType(expression.children[2], scope);
+            if (length.kind != SimpleTypeKind::Int &&
+                length.kind != SimpleTypeKind::Unknown) {
+              diagnostics_.error(expression.children[2].span,
+                                 "slice length must have type Int");
             }
           }
 

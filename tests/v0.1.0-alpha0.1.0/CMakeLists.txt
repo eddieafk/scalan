@@ -98,6 +98,12 @@ scalanative_add_scala_test(
 
 scalanative_add_scala_test(
   VERSION "${test_version}"
+  KIND inval
+  NAME indexed-byte-buffer-slice-diagnostics
+  SOURCE inval/IndexedByteBufferSliceDiagnostics.scala)
+
+scalanative_add_scala_test(
+  VERSION "${test_version}"
   KIND run
   NAME captured-runtime-polymorphic-functions
   SOURCE run/CapturedRuntimePolymorphicFunctions.scala)
@@ -185,6 +191,12 @@ scalanative_add_scala_test(
   KIND run
   NAME byte-buffer-slice
   SOURCE run/ByteBufferSlice.scala)
+
+scalanative_add_scala_test(
+  VERSION "${test_version}"
+  KIND run
+  NAME indexed-byte-buffer-slice
+  SOURCE run/IndexedByteBufferSlice.scala)
 
 scalanative_add_smoke_test(
   VERSION "${test_version}"

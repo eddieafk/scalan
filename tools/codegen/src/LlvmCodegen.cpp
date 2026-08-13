@@ -1350,23 +1350,16 @@ void emitRuntimeTypeHelpers(std::ostringstream& out,
   out << "  unreachable\n";
   out << "}\n\n";
 
-  out << "define internal ptr @__scalanative_byte_buffer_slice(ptr %buffer) {\n";
+  out << "define internal ptr @__scalanative_byte_buffer_slice_range(ptr %buffer, "
+         "i32 %index, i32 %length) {\n";
   out << "entry:\n";
-  out << "  call void @__scalanative_byte_buffer_require(ptr %buffer)\n";
   out << "  %source_backing_slot = getelementptr i8, ptr %buffer, i64 "
       << ByteBufferBackingOffset << "\n";
-  out << "  %source_position_slot = getelementptr i8, ptr %buffer, i64 "
-      << ByteBufferPositionOffset << "\n";
-  out << "  %source_limit_slot = getelementptr i8, ptr %buffer, i64 "
-      << ByteBufferLimitOffset << "\n";
   out << "  %source_base_slot = getelementptr i8, ptr %buffer, i64 "
       << ByteBufferBaseOffset << "\n";
   out << "  %array = load ptr, ptr %source_backing_slot\n";
-  out << "  %position = load i32, ptr %source_position_slot\n";
-  out << "  %limit = load i32, ptr %source_limit_slot\n";
   out << "  %base = load i32, ptr %source_base_slot\n";
-  out << "  %remaining = sub i32 %limit, %position\n";
-  out << "  %slice_base = add i32 %base, %position\n";
+  out << "  %slice_base = add i32 %base, %index\n";
   out << "  %slice = call ptr @__scalanative_box_alloc(i64 " << ByteBufferSize
       << ", ptr null)\n";
   out << "  %backing_slot = getelementptr i8, ptr %slice, i64 "
@@ -1384,13 +1377,54 @@ void emitRuntimeTypeHelpers(std::ostringstream& out,
   out << "  %base_slot = getelementptr i8, ptr %slice, i64 " << ByteBufferBaseOffset
       << "\n";
   out << "  store ptr %array, ptr %backing_slot\n";
-  out << "  store i32 %remaining, ptr %capacity_slot\n";
+  out << "  store i32 %length, ptr %capacity_slot\n";
   out << "  store i32 0, ptr %position_slot\n";
-  out << "  store i32 %remaining, ptr %limit_slot\n";
+  out << "  store i32 %length, ptr %limit_slot\n";
   out << "  store i32 -1, ptr %mark_slot\n";
   out << "  store i8 0, ptr %order_slot\n";
   out << "  store i32 %slice_base, ptr %base_slot\n";
   out << "  ret ptr %slice\n";
+  out << "}\n\n";
+
+  out << "define internal ptr @__scalanative_byte_buffer_slice(ptr %buffer) {\n";
+  out << "entry:\n";
+  out << "  call void @__scalanative_byte_buffer_require(ptr %buffer)\n";
+  out << "  %position_slot = getelementptr i8, ptr %buffer, i64 "
+      << ByteBufferPositionOffset << "\n";
+  out << "  %limit_slot = getelementptr i8, ptr %buffer, i64 "
+      << ByteBufferLimitOffset << "\n";
+  out << "  %position = load i32, ptr %position_slot\n";
+  out << "  %limit = load i32, ptr %limit_slot\n";
+  out << "  %remaining = sub i32 %limit, %position\n";
+  out << "  %slice = call ptr @__scalanative_byte_buffer_slice_range(ptr %buffer, "
+         "i32 %position, i32 %remaining)\n";
+  out << "  ret ptr %slice\n";
+  out << "}\n\n";
+
+  out << "define internal ptr @__scalanative_byte_buffer_slice_at(ptr %buffer, i32 "
+         "%index, i32 %length) {\n";
+  out << "entry:\n";
+  out << "  call void @__scalanative_byte_buffer_require(ptr %buffer)\n";
+  out << "  %limit_slot = getelementptr i8, ptr %buffer, i64 "
+      << ByteBufferLimitOffset << "\n";
+  out << "  %limit = load i32, ptr %limit_slot\n";
+  out << "  %index_nonnegative = icmp sge i32 %index, 0\n";
+  out << "  %length_nonnegative = icmp sge i32 %length, 0\n";
+  out << "  %index_within_limit = icmp sle i32 %index, %limit\n";
+  out << "  %available = sub i32 %limit, %index\n";
+  out << "  %length_within_available = icmp sle i32 %length, %available\n";
+  out << "  %nonnegative = and i1 %index_nonnegative, %length_nonnegative\n";
+  out << "  %within_limit = and i1 %index_within_limit, "
+         "%length_within_available\n";
+  out << "  %valid = and i1 %nonnegative, %within_limit\n";
+  out << "  br i1 %valid, label %allocate, label %invalid\n";
+  out << "allocate:\n";
+  out << "  %slice = call ptr @__scalanative_byte_buffer_slice_range(ptr %buffer, "
+         "i32 %index, i32 %length)\n";
+  out << "  ret ptr %slice\n";
+  out << "invalid:\n";
+  out << "  call void @__scalanative_throw_byte_buffer_index()\n";
+  out << "  unreachable\n";
   out << "}\n\n";
 
   const auto emitByteBufferIntQuery = [&](std::string_view name, std::size_t offset) {
@@ -7170,6 +7204,8 @@ std::string lowerCall(const nir::Value& value, const std::string& expectedType,
       target == support::StdNames::RuntimeByteBufferSetOrder;
   const bool isRuntimeByteBufferSlice =
       target == support::StdNames::RuntimeByteBufferSlice;
+  const bool isRuntimeByteBufferSliceAt =
+      target == support::StdNames::RuntimeByteBufferSliceAt;
   const bool isRuntimeByteBufferOperation =
       isRuntimeByteBufferCapacity || isRuntimeByteBufferPosition ||
       isRuntimeByteBufferSetPosition || isRuntimeByteBufferLimit ||
@@ -7187,7 +7223,7 @@ std::string lowerCall(const nir::Value& value, const std::string& expectedType,
       isRuntimeByteBufferGetDouble || isRuntimeByteBufferPutDouble ||
       isRuntimeByteBufferGetDoubleAt || isRuntimeByteBufferPutDoubleAt ||
       isRuntimeByteBufferOrder || isRuntimeByteBufferSetOrder ||
-      isRuntimeByteBufferSlice ||
+      isRuntimeByteBufferSlice || isRuntimeByteBufferSliceAt ||
       isRuntimeByteBufferClear || isRuntimeByteBufferFlip ||
       isRuntimeByteBufferRewind || isRuntimeByteBufferMark || isRuntimeByteBufferReset;
   const bool isRuntimeArrayAlloc = target == support::StdNames::RuntimeArrayAlloc;
@@ -8237,7 +8273,7 @@ std::string lowerCall(const nir::Value& value, const std::string& expectedType,
         isRuntimeByteBufferPutLongAt || isRuntimeByteBufferPutFloat ||
         isRuntimeByteBufferPutFloatAt || isRuntimeByteBufferPutDouble ||
         isRuntimeByteBufferPutDoubleAt || isRuntimeByteBufferSetOrder ||
-        isRuntimeByteBufferSlice;
+        isRuntimeByteBufferSlice || isRuntimeByteBufferSliceAt;
     const bool returnsBoolean =
         isRuntimeByteBufferHasRemaining || isRuntimeByteBufferOrder;
     const bool returnsByte = isRuntimeByteBufferGet || isRuntimeByteBufferGetAt;
@@ -8286,6 +8322,9 @@ std::string lowerCall(const nir::Value& value, const std::string& expectedType,
       expectedParameters.push_back("Double");
     } else if (isRuntimeByteBufferSetOrder) {
       expectedParameters.push_back("Boolean");
+    } else if (isRuntimeByteBufferSliceAt) {
+      expectedParameters.push_back("Int");
+      expectedParameters.push_back("Int");
     }
     const std::string expectedReturn =
         returnsBuffer
@@ -8385,6 +8424,8 @@ std::string lowerCall(const nir::Value& value, const std::string& expectedType,
       helper = "__scalanative_byte_buffer_set_order";
     } else if (isRuntimeByteBufferSlice) {
       helper = "__scalanative_byte_buffer_slice";
+    } else if (isRuntimeByteBufferSliceAt) {
+      helper = "__scalanative_byte_buffer_slice_at";
     } else if (isRuntimeByteBufferClear) {
       helper = "__scalanative_byte_buffer_clear";
     } else if (isRuntimeByteBufferFlip) {

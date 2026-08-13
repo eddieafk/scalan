@@ -56,7 +56,7 @@ int relativeFloatByteBufferLowering() {
           "%backing_index, "
           "float %value, i1 %little_endian)") &&
       scalanative::testing::contains(result.llvmIr,
-                                     "Runtime ABI = 'scalanative-runtime-70'");
+                                     "Runtime ABI = 'scalanative-runtime-71'");
   if (!floatNir || !floatLlvm) {
     return scalanative::testing::fail(
         TestName, "relative Float ByteBuffer access was not lowered as expected:\n" +

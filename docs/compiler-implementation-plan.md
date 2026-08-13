@@ -3847,6 +3847,20 @@ Current scaffold status:
   without copying while retaining independent cursor state. The indexed
   `slice(index, length)` overload, duplication, read-only views, and bulk
   transfer remain later slices.
+- Runtime ABI 71 completes the initial slicing surface with
+  `ByteBuffer.slice(index, length)`. The index is absolute in the source
+  buffer's coordinate system and does not depend on its current position. A
+  valid range produces a shared view with the requested capacity and limit,
+  position zero, an undefined mark, and the standard `BIG_ENDIAN` initial
+  order; the source state remains unchanged.
+
+  Range validation requires non-negative index and length plus
+  `index <= limit` and `length <= limit - index`. This subtraction-based form
+  avoids overflow from `index + length`. Invalid ranges throw the existing
+  catchable `IndexOutOfBoundsException` before allocating a view. Nested
+  indexed slices compose their logical base offsets without copying storage.
+
+  Duplication, read-only views, and bulk transfer remain later slices.
 - Runtime ABI 60 completes the initial Short surface with
   `ByteBuffer.getShort(index): Short` and
   `putShort(index, value): ByteBuffer`. Both operations require
