@@ -1,13 +1,9 @@
-// expected-error: getInt does not accept arguments
-// expected-error: putInt requires one Int argument
+// expected-error: putInt requires one Int value or an Int index and Int value
 // expected-error: putInt value must have type Int
 
 package tests.v010alpha010.invalidrelativeintbytebuffer
 
 object Invalid {
-  def getWithIndex(buffer: ByteBuffer): Int =
-    buffer.getInt(0)
-
   def putWithoutValue(buffer: ByteBuffer): ByteBuffer =
     buffer.putInt()
 

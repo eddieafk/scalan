@@ -1428,6 +1428,54 @@ void emitRuntimeTypeHelpers(std::ostringstream& out,
   out << "  unreachable\n";
   out << "}\n\n";
 
+  out << "define internal i32 @__scalanative_byte_buffer_get_int_at(ptr %buffer, i32 "
+         "%index) {\n";
+  out << "entry:\n";
+  out << "  call void @__scalanative_byte_buffer_require(ptr %buffer)\n";
+  out << "  %limit_slot = getelementptr i8, ptr %buffer, i64 " << ByteBufferLimitOffset
+      << "\n";
+  out << "  %limit = load i32, ptr %limit_slot\n";
+  out << "  %last_index = sub i32 %limit, 4\n";
+  out << "  %nonnegative = icmp sge i32 %index, 0\n";
+  out << "  %within_limit = icmp sle i32 %index, %last_index\n";
+  out << "  %valid = and i1 %nonnegative, %within_limit\n";
+  out << "  br i1 %valid, label %read, label %invalid\n";
+  out << "read:\n";
+  out << "  %backing_slot = getelementptr i8, ptr %buffer, i64 "
+      << ByteBufferBackingOffset << "\n";
+  out << "  %array = load ptr, ptr %backing_slot\n";
+  out << "  %value = call i32 @__scalanative_native_bytes_get_int(ptr %array, i32 "
+         "%index)\n";
+  out << "  ret i32 %value\n";
+  out << "invalid:\n";
+  out << "  call void @__scalanative_throw_byte_buffer_index()\n";
+  out << "  unreachable\n";
+  out << "}\n\n";
+
+  out << "define internal ptr @__scalanative_byte_buffer_put_int_at(ptr %buffer, i32 "
+         "%index, i32 %value) {\n";
+  out << "entry:\n";
+  out << "  call void @__scalanative_byte_buffer_require(ptr %buffer)\n";
+  out << "  %limit_slot = getelementptr i8, ptr %buffer, i64 " << ByteBufferLimitOffset
+      << "\n";
+  out << "  %limit = load i32, ptr %limit_slot\n";
+  out << "  %last_index = sub i32 %limit, 4\n";
+  out << "  %nonnegative = icmp sge i32 %index, 0\n";
+  out << "  %within_limit = icmp sle i32 %index, %last_index\n";
+  out << "  %valid = and i1 %nonnegative, %within_limit\n";
+  out << "  br i1 %valid, label %write, label %invalid\n";
+  out << "write:\n";
+  out << "  %backing_slot = getelementptr i8, ptr %buffer, i64 "
+      << ByteBufferBackingOffset << "\n";
+  out << "  %array = load ptr, ptr %backing_slot\n";
+  out << "  call void @__scalanative_native_bytes_put_int(ptr %array, i32 %index, "
+         "i32 %value)\n";
+  out << "  ret ptr %buffer\n";
+  out << "invalid:\n";
+  out << "  call void @__scalanative_throw_byte_buffer_index()\n";
+  out << "  unreachable\n";
+  out << "}\n\n";
+
   out << "define internal i16 @__scalanative_byte_buffer_get_short_at(ptr %buffer, "
          "i32 %index) {\n";
   out << "entry:\n";
@@ -6522,6 +6570,10 @@ std::string lowerCall(const nir::Value& value, const std::string& expectedType,
       target == support::StdNames::RuntimeByteBufferGetInt;
   const bool isRuntimeByteBufferPutInt =
       target == support::StdNames::RuntimeByteBufferPutInt;
+  const bool isRuntimeByteBufferGetIntAt =
+      target == support::StdNames::RuntimeByteBufferGetIntAt;
+  const bool isRuntimeByteBufferPutIntAt =
+      target == support::StdNames::RuntimeByteBufferPutIntAt;
   const bool isRuntimeByteBufferClear =
       target == support::StdNames::RuntimeByteBufferClear;
   const bool isRuntimeByteBufferFlip =
@@ -6541,6 +6593,7 @@ std::string lowerCall(const nir::Value& value, const std::string& expectedType,
       isRuntimeByteBufferGetShort || isRuntimeByteBufferPutShort ||
       isRuntimeByteBufferGetShortAt || isRuntimeByteBufferPutShortAt ||
       isRuntimeByteBufferGetInt || isRuntimeByteBufferPutInt ||
+      isRuntimeByteBufferGetIntAt || isRuntimeByteBufferPutIntAt ||
       isRuntimeByteBufferClear || isRuntimeByteBufferFlip ||
       isRuntimeByteBufferRewind || isRuntimeByteBufferMark || isRuntimeByteBufferReset;
   const bool isRuntimeArrayAlloc = target == support::StdNames::RuntimeArrayAlloc;
@@ -7585,7 +7638,8 @@ std::string lowerCall(const nir::Value& value, const std::string& expectedType,
                                isRuntimeByteBufferPutShort || isRuntimeByteBufferFlip ||
                                isRuntimeByteBufferPutShortAt ||
                                isRuntimeByteBufferPutInt || isRuntimeByteBufferRewind ||
-                               isRuntimeByteBufferMark || isRuntimeByteBufferReset;
+                               isRuntimeByteBufferPutIntAt || isRuntimeByteBufferMark ||
+                               isRuntimeByteBufferReset;
     const bool returnsBoolean = isRuntimeByteBufferHasRemaining;
     const bool returnsByte = isRuntimeByteBufferGet || isRuntimeByteBufferGetAt;
     const bool returnsShort =
@@ -7594,7 +7648,7 @@ std::string lowerCall(const nir::Value& value, const std::string& expectedType,
         std::string(support::StdNames::JavaNioByteBuffer)};
     if (isRuntimeByteBufferSetPosition || isRuntimeByteBufferSetLimit ||
         isRuntimeByteBufferGetAt || isRuntimeByteBufferGetShortAt ||
-        isRuntimeByteBufferPutInt) {
+        isRuntimeByteBufferPutInt || isRuntimeByteBufferGetIntAt) {
       expectedParameters.push_back("Int");
     } else if (isRuntimeByteBufferPut) {
       expectedParameters.push_back("Byte");
@@ -7606,6 +7660,9 @@ std::string lowerCall(const nir::Value& value, const std::string& expectedType,
     } else if (isRuntimeByteBufferPutShortAt) {
       expectedParameters.push_back("Int");
       expectedParameters.push_back("Short");
+    } else if (isRuntimeByteBufferPutIntAt) {
+      expectedParameters.push_back("Int");
+      expectedParameters.push_back("Int");
     }
     const std::string expectedReturn =
         returnsBuffer
@@ -7663,6 +7720,10 @@ std::string lowerCall(const nir::Value& value, const std::string& expectedType,
       helper = "__scalanative_byte_buffer_get_int";
     } else if (isRuntimeByteBufferPutInt) {
       helper = "__scalanative_byte_buffer_put_int";
+    } else if (isRuntimeByteBufferGetIntAt) {
+      helper = "__scalanative_byte_buffer_get_int_at";
+    } else if (isRuntimeByteBufferPutIntAt) {
+      helper = "__scalanative_byte_buffer_put_int_at";
     } else if (isRuntimeByteBufferClear) {
       helper = "__scalanative_byte_buffer_clear";
     } else if (isRuntimeByteBufferFlip) {
