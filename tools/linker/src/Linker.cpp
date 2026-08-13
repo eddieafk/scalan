@@ -177,6 +177,21 @@ bool isRuntimeBufferOverflowOperation(std::string_view name) {
          name == support::StdNames::RuntimeByteBufferPutDouble;
 }
 
+bool isRuntimeReadOnlyBufferOperation(std::string_view name) {
+  return name == support::StdNames::RuntimeByteBufferPut ||
+         name == support::StdNames::RuntimeByteBufferPutAt ||
+         name == support::StdNames::RuntimeByteBufferPutShort ||
+         name == support::StdNames::RuntimeByteBufferPutShortAt ||
+         name == support::StdNames::RuntimeByteBufferPutInt ||
+         name == support::StdNames::RuntimeByteBufferPutIntAt ||
+         name == support::StdNames::RuntimeByteBufferPutLong ||
+         name == support::StdNames::RuntimeByteBufferPutLongAt ||
+         name == support::StdNames::RuntimeByteBufferPutFloat ||
+         name == support::StdNames::RuntimeByteBufferPutFloatAt ||
+         name == support::StdNames::RuntimeByteBufferPutDouble ||
+         name == support::StdNames::RuntimeByteBufferPutDoubleAt;
+}
+
 bool isRuntimeIndexOutOfBoundsOperation(std::string_view name) {
   return name == support::StdNames::RuntimeByteBufferGetAt ||
          name == support::StdNames::RuntimeByteBufferPutAt ||
@@ -242,6 +257,8 @@ bool isRuntimeNullReceiverOperation(std::string_view name) {
          name == support::StdNames::RuntimeByteBufferSlice ||
          name == support::StdNames::RuntimeByteBufferSliceAt ||
          name == support::StdNames::RuntimeByteBufferDuplicate ||
+         name == support::StdNames::RuntimeByteBufferAsReadOnlyBuffer ||
+         name == support::StdNames::RuntimeByteBufferIsReadOnly ||
          name == support::StdNames::RuntimeByteBufferClear ||
          name == support::StdNames::RuntimeByteBufferFlip ||
          name == support::StdNames::RuntimeByteBufferRewind ||
@@ -1073,6 +1090,14 @@ collectDefinitionReferences(const nir::Definition& definition,
         support::StdNames::JavaNioBufferOverflowException);
     if (globals.contains(bufferOverflowName)) {
       references.push_back(bufferOverflowName);
+    }
+  }
+  if (isFunction(definition.kind) &&
+      isRuntimeReadOnlyBufferOperation(definition.name)) {
+    const std::string readOnlyBufferName(
+        support::StdNames::JavaNioReadOnlyBufferException);
+    if (globals.contains(readOnlyBufferName)) {
+      references.push_back(readOnlyBufferName);
     }
   }
   if (isFunction(definition.kind) &&

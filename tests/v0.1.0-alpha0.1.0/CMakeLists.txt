@@ -110,6 +110,12 @@ scalanative_add_scala_test(
 
 scalanative_add_scala_test(
   VERSION "${test_version}"
+  KIND inval
+  NAME read-only-byte-buffer-diagnostics
+  SOURCE inval/ReadOnlyByteBufferDiagnostics.scala)
+
+scalanative_add_scala_test(
+  VERSION "${test_version}"
   KIND run
   NAME captured-runtime-polymorphic-functions
   SOURCE run/CapturedRuntimePolymorphicFunctions.scala)
@@ -209,6 +215,12 @@ scalanative_add_scala_test(
   KIND run
   NAME byte-buffer-duplicate
   SOURCE run/ByteBufferDuplicate.scala)
+
+scalanative_add_scala_test(
+  VERSION "${test_version}"
+  KIND run
+  NAME read-only-byte-buffer
+  SOURCE run/ReadOnlyByteBuffer.scala)
 
 scalanative_add_smoke_test(
   VERSION "${test_version}"

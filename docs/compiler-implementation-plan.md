@@ -3874,6 +3874,25 @@ Current scaffold status:
   composable view representation without copying storage.
 
   Read-only views and bulk transfer remain later slices.
+- Runtime ABI 73 adds `ByteBuffer.asReadOnlyBuffer()` and `isReadOnly()`. A
+  read-only view shares the source's complete logical content and copies its
+  capacity, position, limit, mark, and backing-array base while forcing the
+  new view's read-only flag. It retains independent cursor state and begins in
+  `BIG_ENDIAN` order. `isReadOnly()` reports the per-view flag; writable
+  wrapped buffers report false, and read-only slices, duplicates, and nested
+  read-only views continue to report true.
+
+  All relative and indexed primitive `put` variants now check writability
+  before capacity or index validation. A rejected write throws the catchable
+  `java.nio.ReadOnlyBufferException`, correctly modeled as a subclass of
+  `java.lang.UnsupportedOperationException`, without changing cursor state or
+  backing storage. Position, limit, mark, reset, order, and other cursor-state
+  operations remain valid on read-only views.
+
+  The read-only bit occupies existing padding in the 40-byte ByteBuffer view
+  representation, so this slice preserves the allocation size while allowing
+  writable and read-only views to share storage without copying. Bulk transfer
+  remains a later slice.
 - Runtime ABI 60 completes the initial Short surface with
   `ByteBuffer.getShort(index): Short` and
   `putShort(index, value): ByteBuffer`. Both operations require

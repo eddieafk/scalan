@@ -148,7 +148,7 @@ RuntimeTypeLayout boxedPrimitiveTypeLayout(BoxedPrimitiveKind kind) {
 }
 
 std::string runtimeAbiName() {
-  return "scalanative-runtime-72";
+  return "scalanative-runtime-73";
 }
 
 } // namespace scalanative::runtime

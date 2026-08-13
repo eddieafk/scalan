@@ -75,6 +75,8 @@ struct StdNames final {
       "java.lang.IllegalArgumentException";
   inline static constexpr std::string_view JavaLangIllegalStateException =
       "java.lang.IllegalStateException";
+  inline static constexpr std::string_view JavaLangUnsupportedOperationException =
+      "java.lang.UnsupportedOperationException";
   inline static constexpr std::string_view JavaLangNullPointerException =
       "java.lang.NullPointerException";
   inline static constexpr std::string_view JavaLangClassCastException =
@@ -91,6 +93,8 @@ struct StdNames final {
       "java.nio.BufferUnderflowException";
   inline static constexpr std::string_view JavaNioBufferOverflowException =
       "java.nio.BufferOverflowException";
+  inline static constexpr std::string_view JavaNioReadOnlyBufferException =
+      "java.nio.ReadOnlyBufferException";
   inline static constexpr std::string_view JavaNioInvalidMarkException =
       "java.nio.InvalidMarkException";
   inline static constexpr std::string_view JavaNioByteBuffer = "java.nio.ByteBuffer";
@@ -176,6 +180,9 @@ struct StdNames final {
   inline static constexpr std::string_view ByteBufferOrder = "order";
   inline static constexpr std::string_view ByteBufferSlice = "slice";
   inline static constexpr std::string_view ByteBufferDuplicate = "duplicate";
+  inline static constexpr std::string_view ByteBufferAsReadOnlyBuffer =
+      "asReadOnlyBuffer";
+  inline static constexpr std::string_view ByteBufferIsReadOnly = "isReadOnly";
   inline static constexpr std::string_view ArrayEmpty = "empty";
   inline static constexpr std::string_view ArrayFill = "fill";
   inline static constexpr std::string_view ArrayRange = "range";
@@ -295,6 +302,10 @@ struct StdNames final {
       "scala.scalanative.runtime.byteBufferSliceAt";
   inline static constexpr std::string_view RuntimeByteBufferDuplicate =
       "scala.scalanative.runtime.byteBufferDuplicate";
+  inline static constexpr std::string_view RuntimeByteBufferAsReadOnlyBuffer =
+      "scala.scalanative.runtime.byteBufferAsReadOnlyBuffer";
+  inline static constexpr std::string_view RuntimeByteBufferIsReadOnly =
+      "scala.scalanative.runtime.byteBufferIsReadOnly";
   inline static constexpr std::string_view RuntimeStringLength =
       "scala.scalanative.runtime.stringLength";
   inline static constexpr std::string_view RuntimeStringToString =

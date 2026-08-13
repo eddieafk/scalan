@@ -53,7 +53,7 @@ int indexedLongByteBufferLowering() {
       scalanative::testing::contains(
           result.llvmIr, "call void @__scalanative_throw_byte_buffer_index()") &&
       scalanative::testing::contains(result.llvmIr,
-                                     "Runtime ABI = 'scalanative-runtime-72'");
+                                     "Runtime ABI = 'scalanative-runtime-73'");
   if (!indexedLongNir || !indexedLongLlvm) {
     return scalanative::testing::fail(
         TestName, "indexed Long ByteBuffer access was not lowered as expected:\n" +

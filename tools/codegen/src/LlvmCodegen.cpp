@@ -157,6 +157,7 @@ constexpr std::size_t ByteBufferPositionOffset = 20;
 constexpr std::size_t ByteBufferLimitOffset = 24;
 constexpr std::size_t ByteBufferMarkOffset = 28;
 constexpr std::size_t ByteBufferOrderOffset = 32;
+constexpr std::size_t ByteBufferReadOnlyOffset = 33;
 constexpr std::size_t ByteBufferBaseOffset = 36;
 constexpr std::size_t SuppressedExceptionCapacity = 64;
 constexpr std::size_t SuppressedArrayOwnerOffset =
@@ -1273,6 +1274,38 @@ void emitRuntimeTypeHelpers(std::ostringstream& out,
   out << "  unreachable\n";
   out << "}\n\n";
 
+  out << "define internal i1 @__scalanative_byte_buffer_is_read_only_flag(ptr "
+         "%buffer) {\n";
+  out << "entry:\n";
+  out << "  %read_only_slot = getelementptr i8, ptr %buffer, i64 "
+      << ByteBufferReadOnlyOffset << "\n";
+  out << "  %read_only_byte = load i8, ptr %read_only_slot\n";
+  out << "  %read_only = icmp ne i8 %read_only_byte, 0\n";
+  out << "  ret i1 %read_only\n";
+  out << "}\n\n";
+
+  out << "define internal i1 @__scalanative_byte_buffer_is_read_only(ptr %buffer) "
+         "{\n";
+  out << "entry:\n";
+  out << "  call void @__scalanative_byte_buffer_require(ptr %buffer)\n";
+  out << "  %read_only = call i1 "
+         "@__scalanative_byte_buffer_is_read_only_flag(ptr %buffer)\n";
+  out << "  ret i1 %read_only\n";
+  out << "}\n\n";
+
+  out << "define internal void @__scalanative_byte_buffer_require_writable(ptr "
+         "%buffer) {\n";
+  out << "entry:\n";
+  out << "  %read_only = call i1 "
+         "@__scalanative_byte_buffer_is_read_only_flag(ptr %buffer)\n";
+  out << "  br i1 %read_only, label %read_only_buffer, label %writable\n";
+  out << "writable:\n";
+  out << "  ret void\n";
+  out << "read_only_buffer:\n";
+  out << "  call void @__scalanative_throw_byte_buffer_read_only()\n";
+  out << "  unreachable\n";
+  out << "}\n\n";
+
   out << "define internal i1 @__scalanative_byte_buffer_is_little_endian(ptr "
          "%buffer) {\n";
   out << "entry:\n";
@@ -1335,6 +1368,8 @@ void emitRuntimeTypeHelpers(std::ostringstream& out,
       << "\n";
   out << "  %order_slot = getelementptr i8, ptr %buffer, i64 " << ByteBufferOrderOffset
       << "\n";
+  out << "  %read_only_slot = getelementptr i8, ptr %buffer, i64 "
+      << ByteBufferReadOnlyOffset << "\n";
   out << "  %base_slot = getelementptr i8, ptr %buffer, i64 " << ByteBufferBaseOffset
       << "\n";
   out << "  store ptr %array, ptr %backing_slot\n";
@@ -1343,6 +1378,7 @@ void emitRuntimeTypeHelpers(std::ostringstream& out,
   out << "  store i32 %length, ptr %limit_slot\n";
   out << "  store i32 -1, ptr %mark_slot\n";
   out << "  store i8 0, ptr %order_slot\n";
+  out << "  store i8 0, ptr %read_only_slot\n";
   out << "  store i32 0, ptr %base_slot\n";
   out << "  ret ptr %buffer\n";
   out << "null_array:\n";
@@ -1357,8 +1393,11 @@ void emitRuntimeTypeHelpers(std::ostringstream& out,
       << ByteBufferBackingOffset << "\n";
   out << "  %source_base_slot = getelementptr i8, ptr %buffer, i64 "
       << ByteBufferBaseOffset << "\n";
+  out << "  %source_read_only_slot = getelementptr i8, ptr %buffer, i64 "
+      << ByteBufferReadOnlyOffset << "\n";
   out << "  %array = load ptr, ptr %source_backing_slot\n";
   out << "  %base = load i32, ptr %source_base_slot\n";
+  out << "  %source_read_only = load i8, ptr %source_read_only_slot\n";
   out << "  %slice_base = add i32 %base, %index\n";
   out << "  %slice = call ptr @__scalanative_box_alloc(i64 " << ByteBufferSize
       << ", ptr null)\n";
@@ -1374,6 +1413,8 @@ void emitRuntimeTypeHelpers(std::ostringstream& out,
       << "\n";
   out << "  %order_slot = getelementptr i8, ptr %slice, i64 "
       << ByteBufferOrderOffset << "\n";
+  out << "  %read_only_slot = getelementptr i8, ptr %slice, i64 "
+      << ByteBufferReadOnlyOffset << "\n";
   out << "  %base_slot = getelementptr i8, ptr %slice, i64 " << ByteBufferBaseOffset
       << "\n";
   out << "  store ptr %array, ptr %backing_slot\n";
@@ -1382,6 +1423,7 @@ void emitRuntimeTypeHelpers(std::ostringstream& out,
   out << "  store i32 %length, ptr %limit_slot\n";
   out << "  store i32 -1, ptr %mark_slot\n";
   out << "  store i8 0, ptr %order_slot\n";
+  out << "  store i8 %source_read_only, ptr %read_only_slot\n";
   out << "  store i32 %slice_base, ptr %base_slot\n";
   out << "  ret ptr %slice\n";
   out << "}\n\n";
@@ -1457,6 +1499,17 @@ void emitRuntimeTypeHelpers(std::ostringstream& out,
   out << "  ret ptr %duplicate\n";
   out << "}\n\n";
 
+  out << "define internal ptr @__scalanative_byte_buffer_as_read_only(ptr %buffer) "
+         "{\n";
+  out << "entry:\n";
+  out << "  %read_only = call ptr "
+         "@__scalanative_byte_buffer_duplicate(ptr %buffer)\n";
+  out << "  %read_only_slot = getelementptr i8, ptr %read_only, i64 "
+      << ByteBufferReadOnlyOffset << "\n";
+  out << "  store i8 1, ptr %read_only_slot\n";
+  out << "  ret ptr %read_only\n";
+  out << "}\n\n";
+
   const auto emitByteBufferIntQuery = [&](std::string_view name, std::size_t offset) {
     out << "define internal i32 @__scalanative_byte_buffer_" << name
         << "(ptr %buffer) {\n";
@@ -1526,6 +1579,7 @@ void emitRuntimeTypeHelpers(std::ostringstream& out,
          "{\n";
   out << "entry:\n";
   out << "  call void @__scalanative_byte_buffer_require(ptr %buffer)\n";
+  out << "  call void @__scalanative_byte_buffer_require_writable(ptr %buffer)\n";
   out << "  %position_slot = getelementptr i8, ptr %buffer, i64 "
       << ByteBufferPositionOffset << "\n";
   out << "  %limit_slot = getelementptr i8, ptr %buffer, i64 " << ByteBufferLimitOffset
@@ -1587,6 +1641,7 @@ void emitRuntimeTypeHelpers(std::ostringstream& out,
          "%value) {\n";
   out << "entry:\n";
   out << "  call void @__scalanative_byte_buffer_require(ptr %buffer)\n";
+  out << "  call void @__scalanative_byte_buffer_require_writable(ptr %buffer)\n";
   out << "  %position_slot = getelementptr i8, ptr %buffer, i64 "
       << ByteBufferPositionOffset << "\n";
   out << "  %limit_slot = getelementptr i8, ptr %buffer, i64 " << ByteBufferLimitOffset
@@ -1648,6 +1703,7 @@ void emitRuntimeTypeHelpers(std::ostringstream& out,
          "%value) {\n";
   out << "entry:\n";
   out << "  call void @__scalanative_byte_buffer_require(ptr %buffer)\n";
+  out << "  call void @__scalanative_byte_buffer_require_writable(ptr %buffer)\n";
   out << "  %position_slot = getelementptr i8, ptr %buffer, i64 "
       << ByteBufferPositionOffset << "\n";
   out << "  %limit_slot = getelementptr i8, ptr %buffer, i64 " << ByteBufferLimitOffset
@@ -1709,6 +1765,7 @@ void emitRuntimeTypeHelpers(std::ostringstream& out,
          "%value) {\n";
   out << "entry:\n";
   out << "  call void @__scalanative_byte_buffer_require(ptr %buffer)\n";
+  out << "  call void @__scalanative_byte_buffer_require_writable(ptr %buffer)\n";
   out << "  %position_slot = getelementptr i8, ptr %buffer, i64 "
       << ByteBufferPositionOffset << "\n";
   out << "  %limit_slot = getelementptr i8, ptr %buffer, i64 " << ByteBufferLimitOffset
@@ -1768,6 +1825,7 @@ void emitRuntimeTypeHelpers(std::ostringstream& out,
          "%index, i64 %value) {\n";
   out << "entry:\n";
   out << "  call void @__scalanative_byte_buffer_require(ptr %buffer)\n";
+  out << "  call void @__scalanative_byte_buffer_require_writable(ptr %buffer)\n";
   out << "  %limit_slot = getelementptr i8, ptr %buffer, i64 " << ByteBufferLimitOffset
       << "\n";
   out << "  %limit = load i32, ptr %limit_slot\n";
@@ -1827,6 +1885,7 @@ void emitRuntimeTypeHelpers(std::ostringstream& out,
          "float %value) {\n";
   out << "entry:\n";
   out << "  call void @__scalanative_byte_buffer_require(ptr %buffer)\n";
+  out << "  call void @__scalanative_byte_buffer_require_writable(ptr %buffer)\n";
   out << "  %position_slot = getelementptr i8, ptr %buffer, i64 "
       << ByteBufferPositionOffset << "\n";
   out << "  %limit_slot = getelementptr i8, ptr %buffer, i64 " << ByteBufferLimitOffset
@@ -1889,6 +1948,7 @@ void emitRuntimeTypeHelpers(std::ostringstream& out,
          "double %value) {\n";
   out << "entry:\n";
   out << "  call void @__scalanative_byte_buffer_require(ptr %buffer)\n";
+  out << "  call void @__scalanative_byte_buffer_require_writable(ptr %buffer)\n";
   out << "  %position_slot = getelementptr i8, ptr %buffer, i64 "
       << ByteBufferPositionOffset << "\n";
   out << "  %limit_slot = getelementptr i8, ptr %buffer, i64 " << ByteBufferLimitOffset
@@ -1948,6 +2008,7 @@ void emitRuntimeTypeHelpers(std::ostringstream& out,
          "i32 %index, double %value) {\n";
   out << "entry:\n";
   out << "  call void @__scalanative_byte_buffer_require(ptr %buffer)\n";
+  out << "  call void @__scalanative_byte_buffer_require_writable(ptr %buffer)\n";
   out << "  %limit_slot = getelementptr i8, ptr %buffer, i64 " << ByteBufferLimitOffset
       << "\n";
   out << "  %limit = load i32, ptr %limit_slot\n";
@@ -2004,6 +2065,7 @@ void emitRuntimeTypeHelpers(std::ostringstream& out,
          "i32 %index, float %value) {\n";
   out << "entry:\n";
   out << "  call void @__scalanative_byte_buffer_require(ptr %buffer)\n";
+  out << "  call void @__scalanative_byte_buffer_require_writable(ptr %buffer)\n";
   out << "  %limit_slot = getelementptr i8, ptr %buffer, i64 " << ByteBufferLimitOffset
       << "\n";
   out << "  %limit = load i32, ptr %limit_slot\n";
@@ -2060,6 +2122,7 @@ void emitRuntimeTypeHelpers(std::ostringstream& out,
          "%index, i32 %value) {\n";
   out << "entry:\n";
   out << "  call void @__scalanative_byte_buffer_require(ptr %buffer)\n";
+  out << "  call void @__scalanative_byte_buffer_require_writable(ptr %buffer)\n";
   out << "  %limit_slot = getelementptr i8, ptr %buffer, i64 " << ByteBufferLimitOffset
       << "\n";
   out << "  %limit = load i32, ptr %limit_slot\n";
@@ -2116,6 +2179,7 @@ void emitRuntimeTypeHelpers(std::ostringstream& out,
          "i32 %index, i16 %value) {\n";
   out << "entry:\n";
   out << "  call void @__scalanative_byte_buffer_require(ptr %buffer)\n";
+  out << "  call void @__scalanative_byte_buffer_require_writable(ptr %buffer)\n";
   out << "  %limit_slot = getelementptr i8, ptr %buffer, i64 " << ByteBufferLimitOffset
       << "\n";
   out << "  %limit = load i32, ptr %limit_slot\n";
@@ -2172,6 +2236,7 @@ void emitRuntimeTypeHelpers(std::ostringstream& out,
          "%index, i8 %value) {\n";
   out << "entry:\n";
   out << "  call void @__scalanative_byte_buffer_require(ptr %buffer)\n";
+  out << "  call void @__scalanative_byte_buffer_require_writable(ptr %buffer)\n";
   out << "  %limit_slot = getelementptr i8, ptr %buffer, i64 " << ByteBufferLimitOffset
       << "\n";
   out << "  %limit = load i32, ptr %limit_slot\n";
@@ -3857,6 +3922,8 @@ void emitExceptionRuntimeHelpers(
       std::string(support::StdNames::JavaNioBufferUnderflowException));
   const auto bufferOverflow =
       classLayouts.find(std::string(support::StdNames::JavaNioBufferOverflowException));
+  const auto readOnlyBuffer =
+      classLayouts.find(std::string(support::StdNames::JavaNioReadOnlyBufferException));
   const auto invalidMark =
       classLayouts.find(std::string(support::StdNames::JavaNioInvalidMarkException));
   const auto message = fields.find(messageFieldName);
@@ -3953,6 +4020,8 @@ void emitExceptionRuntimeHelpers(
                      ".str.byte_buffer_underflow", 21);
   emitRuntimeFailure("__scalanative_throw_byte_buffer_overflow", bufferOverflow,
                      ".str.byte_buffer_overflow", 20);
+  emitRuntimeFailure("__scalanative_throw_byte_buffer_read_only", readOnlyBuffer,
+                     ".str.byte_buffer_read_only", 24);
   emitRuntimeFailure("__scalanative_throw_byte_buffer_invalid_mark", invalidMark,
                      ".str.byte_buffer_invalid_mark", 27);
 
@@ -7238,6 +7307,10 @@ std::string lowerCall(const nir::Value& value, const std::string& expectedType,
       target == support::StdNames::RuntimeByteBufferSliceAt;
   const bool isRuntimeByteBufferDuplicate =
       target == support::StdNames::RuntimeByteBufferDuplicate;
+  const bool isRuntimeByteBufferAsReadOnlyBuffer =
+      target == support::StdNames::RuntimeByteBufferAsReadOnlyBuffer;
+  const bool isRuntimeByteBufferIsReadOnly =
+      target == support::StdNames::RuntimeByteBufferIsReadOnly;
   const bool isRuntimeByteBufferOperation =
       isRuntimeByteBufferCapacity || isRuntimeByteBufferPosition ||
       isRuntimeByteBufferSetPosition || isRuntimeByteBufferLimit ||
@@ -7256,7 +7329,8 @@ std::string lowerCall(const nir::Value& value, const std::string& expectedType,
       isRuntimeByteBufferGetDoubleAt || isRuntimeByteBufferPutDoubleAt ||
       isRuntimeByteBufferOrder || isRuntimeByteBufferSetOrder ||
       isRuntimeByteBufferSlice || isRuntimeByteBufferSliceAt ||
-      isRuntimeByteBufferDuplicate ||
+      isRuntimeByteBufferDuplicate || isRuntimeByteBufferAsReadOnlyBuffer ||
+      isRuntimeByteBufferIsReadOnly ||
       isRuntimeByteBufferClear || isRuntimeByteBufferFlip ||
       isRuntimeByteBufferRewind || isRuntimeByteBufferMark || isRuntimeByteBufferReset;
   const bool isRuntimeArrayAlloc = target == support::StdNames::RuntimeArrayAlloc;
@@ -8307,9 +8381,10 @@ std::string lowerCall(const nir::Value& value, const std::string& expectedType,
         isRuntimeByteBufferPutFloatAt || isRuntimeByteBufferPutDouble ||
         isRuntimeByteBufferPutDoubleAt || isRuntimeByteBufferSetOrder ||
         isRuntimeByteBufferSlice || isRuntimeByteBufferSliceAt ||
-        isRuntimeByteBufferDuplicate;
-    const bool returnsBoolean =
-        isRuntimeByteBufferHasRemaining || isRuntimeByteBufferOrder;
+        isRuntimeByteBufferDuplicate || isRuntimeByteBufferAsReadOnlyBuffer;
+    const bool returnsBoolean = isRuntimeByteBufferHasRemaining ||
+                                isRuntimeByteBufferOrder ||
+                                isRuntimeByteBufferIsReadOnly;
     const bool returnsByte = isRuntimeByteBufferGet || isRuntimeByteBufferGetAt;
     const bool returnsShort =
         isRuntimeByteBufferGetShort || isRuntimeByteBufferGetShortAt;
@@ -8462,6 +8537,10 @@ std::string lowerCall(const nir::Value& value, const std::string& expectedType,
       helper = "__scalanative_byte_buffer_slice_at";
     } else if (isRuntimeByteBufferDuplicate) {
       helper = "__scalanative_byte_buffer_duplicate";
+    } else if (isRuntimeByteBufferAsReadOnlyBuffer) {
+      helper = "__scalanative_byte_buffer_as_read_only";
+    } else if (isRuntimeByteBufferIsReadOnly) {
+      helper = "__scalanative_byte_buffer_is_read_only";
     } else if (isRuntimeByteBufferClear) {
       helper = "__scalanative_byte_buffer_clear";
     } else if (isRuntimeByteBufferFlip) {
@@ -11319,6 +11398,8 @@ CodegenResult LlvmCodegen::emit(const linker::LinkedProgram& program,
          "c\"ByteBuffer underflow\\00\"\n";
   out << "@.str.byte_buffer_overflow = private unnamed_addr constant [20 x i8] "
          "c\"ByteBuffer overflow\\00\"\n";
+  out << "@.str.byte_buffer_read_only = private unnamed_addr constant [24 x i8] "
+         "c\"ByteBuffer is read-only\\00\"\n";
   out << "@.str.byte_buffer_invalid_mark = private unnamed_addr constant [27 x i8] "
          "c\"ByteBuffer mark is not set\\00\"\n\n";
   out << "@.str.stack_trace_unknown = private unnamed_addr constant [10 x i8] "

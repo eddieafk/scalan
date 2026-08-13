@@ -521,7 +521,9 @@ bool isByteBufferOperationName(std::string_view operation) {
          operation == support::StdNames::ByteBufferReset ||
          operation == support::StdNames::ByteBufferOrder ||
          operation == support::StdNames::ByteBufferSlice ||
-         operation == support::StdNames::ByteBufferDuplicate;
+         operation == support::StdNames::ByteBufferDuplicate ||
+         operation == support::StdNames::ByteBufferAsReadOnlyBuffer ||
+         operation == support::StdNames::ByteBufferIsReadOnly;
 }
 
 bool isByteBufferType(const TypeInfo& type) {
@@ -1692,6 +1694,10 @@ std::vector<TypedDeclaration> standardExceptionDeclarations() {
       exceptionSubclass("IllegalStateException",
                         std::string(support::StdNames::JavaLangIllegalStateException),
                         runtimeException.symbolName);
+  TypedDeclaration unsupportedOperation = exceptionSubclass(
+      "UnsupportedOperationException",
+      std::string(support::StdNames::JavaLangUnsupportedOperationException),
+      runtimeException.symbolName);
   TypedDeclaration nullPointer =
       exceptionSubclass("NullPointerException",
                         std::string(support::StdNames::JavaLangNullPointerException),
@@ -1723,6 +1729,10 @@ std::vector<TypedDeclaration> standardExceptionDeclarations() {
       exceptionSubclass("BufferOverflowException",
                         std::string(support::StdNames::JavaNioBufferOverflowException),
                         runtimeException.symbolName);
+  TypedDeclaration readOnlyBuffer = exceptionSubclass(
+      "ReadOnlyBufferException",
+      std::string(support::StdNames::JavaNioReadOnlyBufferException),
+      unsupportedOperation.symbolName);
   TypedDeclaration invalidMark =
       exceptionSubclass("InvalidMarkException",
                         std::string(support::StdNames::JavaNioInvalidMarkException),
@@ -1762,11 +1772,13 @@ std::vector<TypedDeclaration> standardExceptionDeclarations() {
           std::move(assertionError),      std::move(notImplementedError),
           std::move(exception),           std::move(runtimeException),
           std::move(arithmeticException), std::move(illegalArgument),
-          std::move(illegalState),        std::move(nullPointer),
+          std::move(illegalState),        std::move(unsupportedOperation),
+          std::move(nullPointer),
           std::move(classCast),           std::move(arrayStore),
           std::move(indexOutOfBounds),    std::move(arrayIndexOutOfBounds),
           std::move(negativeArraySize),   std::move(bufferUnderflow),
-          std::move(bufferOverflow),      std::move(invalidMark),
+          std::move(bufferOverflow),      std::move(readOnlyBuffer),
+          std::move(invalidMark),
           std::move(stackTraceElement)};
 }
 
@@ -3662,6 +3674,10 @@ void Typechecker::addRuntimeBuiltins(Scope& scope) {
   addExceptionSubclass("IllegalStateException",
                        std::string(support::StdNames::JavaLangIllegalStateException),
                        std::string(support::StdNames::JavaLangRuntimeException));
+  addExceptionSubclass(
+      "UnsupportedOperationException",
+      std::string(support::StdNames::JavaLangUnsupportedOperationException),
+      std::string(support::StdNames::JavaLangRuntimeException));
   addExceptionSubclass("NullPointerException",
                        std::string(support::StdNames::JavaLangNullPointerException),
                        std::string(support::StdNames::JavaLangRuntimeException));
@@ -3689,6 +3705,10 @@ void Typechecker::addRuntimeBuiltins(Scope& scope) {
   addExceptionSubclass("BufferOverflowException",
                        std::string(support::StdNames::JavaNioBufferOverflowException),
                        std::string(support::StdNames::JavaLangRuntimeException));
+  addExceptionSubclass(
+      "ReadOnlyBufferException",
+      std::string(support::StdNames::JavaNioReadOnlyBufferException),
+      std::string(support::StdNames::JavaLangUnsupportedOperationException));
   addExceptionSubclass("InvalidMarkException",
                        std::string(support::StdNames::JavaNioInvalidMarkException),
                        std::string(support::StdNames::JavaLangIllegalStateException));
@@ -9497,7 +9517,8 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
           if (returnsInt) {
             return TypeInfo{SimpleTypeKind::Int, "Int"};
           }
-          if (selected.text == support::StdNames::ByteBufferHasRemaining) {
+          if (selected.text == support::StdNames::ByteBufferHasRemaining ||
+              selected.text == support::StdNames::ByteBufferIsReadOnly) {
             return TypeInfo{SimpleTypeKind::Boolean, "Boolean"};
           }
           if (selected.text == support::StdNames::ByteBufferGet) {
@@ -11789,6 +11810,7 @@ bool Typechecker::analyzeZoneExpression(
             selected.text == support::StdNames::ByteBufferReset ||
             selected.text == support::StdNames::ByteBufferSlice ||
             selected.text == support::StdNames::ByteBufferDuplicate ||
+            selected.text == support::StdNames::ByteBufferAsReadOnlyBuffer ||
             (selected.text == support::StdNames::ByteBufferOrder &&
              expression.children.size() == 2) ||
             ((selected.text == support::StdNames::ByteBufferPosition ||

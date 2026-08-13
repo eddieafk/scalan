@@ -619,6 +619,9 @@ std::string qualifyTypeName(const std::string& name, const ValueContext& context
   if (name == "IllegalStateException") {
     return std::string(support::StdNames::JavaLangIllegalStateException);
   }
+  if (name == "UnsupportedOperationException") {
+    return std::string(support::StdNames::JavaLangUnsupportedOperationException);
+  }
   if (name == "NullPointerException") {
     return std::string(support::StdNames::JavaLangNullPointerException);
   }
@@ -642,6 +645,9 @@ std::string qualifyTypeName(const std::string& name, const ValueContext& context
   }
   if (name == "BufferOverflowException") {
     return std::string(support::StdNames::JavaNioBufferOverflowException);
+  }
+  if (name == "ReadOnlyBufferException") {
+    return std::string(support::StdNames::JavaNioReadOnlyBufferException);
   }
   if (name == "InvalidMarkException") {
     return std::string(support::StdNames::JavaNioInvalidMarkException);
@@ -944,6 +950,12 @@ std::string byteBufferRuntimeName(const frontend::AstExpression& expression,
   }
   if (callee.text == support::StdNames::ByteBufferDuplicate) {
     return std::string(support::StdNames::RuntimeByteBufferDuplicate);
+  }
+  if (callee.text == support::StdNames::ByteBufferAsReadOnlyBuffer) {
+    return std::string(support::StdNames::RuntimeByteBufferAsReadOnlyBuffer);
+  }
+  if (callee.text == support::StdNames::ByteBufferIsReadOnly) {
+    return std::string(support::StdNames::RuntimeByteBufferIsReadOnly);
   }
   if (callee.text == support::StdNames::ByteBufferClear) {
     return std::string(support::StdNames::RuntimeByteBufferClear);
@@ -5655,6 +5667,8 @@ nir::Module NirEmitter::emit(const frontend::TypedModule& module) const {
                declaration.symbolName !=
                    support::StdNames::JavaLangIllegalStateException &&
                declaration.symbolName !=
+                   support::StdNames::JavaLangUnsupportedOperationException &&
+               declaration.symbolName !=
                    support::StdNames::JavaLangNullPointerException &&
                declaration.symbolName !=
                    support::StdNames::JavaLangClassCastException &&
@@ -5668,6 +5682,8 @@ nir::Module NirEmitter::emit(const frontend::TypedModule& module) const {
                    support::StdNames::JavaNioBufferUnderflowException &&
                declaration.symbolName !=
                    support::StdNames::JavaNioBufferOverflowException &&
+               declaration.symbolName !=
+                   support::StdNames::JavaNioReadOnlyBufferException &&
                declaration.symbolName !=
                    support::StdNames::JavaNioInvalidMarkException &&
                declaration.symbolName != support::StdNames::JavaLangStackTraceElement;
@@ -5824,6 +5840,12 @@ nir::Module NirEmitter::emit(const frontend::TypedModule& module) const {
                           support::SourceSpan::none());
   builder.addFunctionDecl(std::string(support::StdNames::RuntimeByteBufferDuplicate),
                           "(java.nio.ByteBuffer)java.nio.ByteBuffer",
+                          support::SourceSpan::none());
+  builder.addFunctionDecl(
+      std::string(support::StdNames::RuntimeByteBufferAsReadOnlyBuffer),
+      "(java.nio.ByteBuffer)java.nio.ByteBuffer", support::SourceSpan::none());
+  builder.addFunctionDecl(std::string(support::StdNames::RuntimeByteBufferIsReadOnly),
+                          "(java.nio.ByteBuffer)Boolean",
                           support::SourceSpan::none());
   builder.addFunctionDecl(std::string(support::StdNames::RuntimeStringLength),
                           "(String)Int", support::SourceSpan::none());
