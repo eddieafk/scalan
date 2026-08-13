@@ -7,11 +7,11 @@
 namespace {
 
 constexpr std::string_view TestName =
-    "v0.1.0-alpha0.1.0.smoke.indexed-int-byte-buffer-lowering";
+    "v0.1.0-alpha0.1.0.smoke.relative-long-byte-buffer-lowering";
 
-int indexedIntByteBufferLowering() {
+int relativeLongByteBufferLowering() {
   const scalanative::testing::TestResource resource{
-      "v0.1.0-alpha0.1.0", "run", "IndexedIntByteBufferAccess.scala"};
+      "v0.1.0-alpha0.1.0", "run", "RelativeLongByteBufferAccess.scala"};
   if (!std::filesystem::is_regular_file(resource.path())) {
     return scalanative::testing::fail(TestName, "missing Scala resource: " +
                                                     resource.path().string());
@@ -28,30 +28,32 @@ int indexedIntByteBufferLowering() {
                                                     result.diagnosticsText);
   }
 
-  const bool indexedIntNir =
+  const bool longNir =
+      scalanative::testing::contains(result.nirText,
+                                     "scala.scalanative.runtime.byteBufferGetLong") &&
+      scalanative::testing::contains(result.nirText,
+                                     "scala.scalanative.runtime.byteBufferPutLong");
+  const bool longLlvm =
       scalanative::testing::contains(
-          result.nirText, "scala.scalanative.runtime.byteBufferGetIntAt") &&
+          result.llvmIr, "define internal i64 @__scalanative_native_bytes_get_long") &&
       scalanative::testing::contains(
-          result.nirText, "scala.scalanative.runtime.byteBufferPutIntAt");
-  const bool indexedIntLlvm =
+          result.llvmIr, "define internal void @__scalanative_native_bytes_put_long") &&
       scalanative::testing::contains(
-          result.llvmIr, "define internal i32 @__scalanative_byte_buffer_get_int_at") &&
+          result.llvmIr, "define internal i64 @__scalanative_byte_buffer_get_long") &&
       scalanative::testing::contains(
-          result.llvmIr, "define internal ptr @__scalanative_byte_buffer_put_int_at") &&
+          result.llvmIr, "define internal ptr @__scalanative_byte_buffer_put_long") &&
       scalanative::testing::contains(
           result.llvmIr,
-          "call i32 @__scalanative_native_bytes_get_int(ptr %array, i32 %index)") &&
+          "call i64 @__scalanative_native_bytes_get_long(ptr %array, i32 %position)") &&
       scalanative::testing::contains(
           result.llvmIr,
-          "call void @__scalanative_native_bytes_put_int(ptr %array, i32 %index, "
-          "i32 %value)") &&
-      scalanative::testing::contains(
-          result.llvmIr, "call void @__scalanative_throw_byte_buffer_index()") &&
+          "call void @__scalanative_native_bytes_put_long(ptr %array, i32 %position, "
+          "i64 %value)") &&
       scalanative::testing::contains(result.llvmIr,
                                      "Runtime ABI = 'scalanative-runtime-63'");
-  if (!indexedIntNir || !indexedIntLlvm) {
+  if (!longNir || !longLlvm) {
     return scalanative::testing::fail(
-        TestName, "indexed Int ByteBuffer access was not lowered as expected:\n" +
+        TestName, "relative Long ByteBuffer access was not lowered as expected:\n" +
                       result.nirText + "\n" + result.llvmIr);
   }
   return 0;
@@ -60,5 +62,5 @@ int indexedIntByteBufferLowering() {
 } // namespace
 
 int main() {
-  return indexedIntByteBufferLowering();
+  return relativeLongByteBufferLowering();
 }
