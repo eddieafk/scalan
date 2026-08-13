@@ -1,10 +1,3 @@
-# Keep the established suite available while new coverage moves to the
-# versioned, resource-driven layout below. Its explicit binary directory
-# preserves existing developer commands and automation paths.
-add_subdirectory(
-  "${PROJECT_SOURCE_DIR}/cpp-tests/smoke"
-  "${PROJECT_BINARY_DIR}/cpp-tests/smoke")
-
 add_executable(scalanative-scala-test-runner runner/ScalaTestRunner.cpp)
 target_include_directories(
   scalanative-scala-test-runner PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include")
@@ -13,8 +6,8 @@ target_compile_definitions(
   PRIVATE SCALANATIVE_TEST_ROOT="${CMAKE_CURRENT_SOURCE_DIR}")
 target_link_libraries(
   scalanative-scala-test-runner
-  PRIVATE cpp-scalanative::tools-build cpp-scalanative::support)
-cpp_scalanative_target_defaults(scalanative-scala-test-runner)
+  PRIVATE scalanative::tools-build scalanative::support)
+scalanative_target_defaults(scalanative-scala-test-runner)
 
 if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
   target_compile_options(scalanative-scala-test-runner PRIVATE -O0 -g0)
@@ -86,8 +79,8 @@ function(scalanative_add_smoke_test)
     PRIVATE SCALANATIVE_TEST_ROOT="${CMAKE_CURRENT_FUNCTION_LIST_DIR}")
   target_link_libraries(
     "${target}"
-    PRIVATE cpp-scalanative::tools-build cpp-scalanative::support)
-  cpp_scalanative_target_defaults("${target}")
+    PRIVATE scalanative::tools-build scalanative::support)
+  scalanative_target_defaults("${target}")
   if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
     target_compile_options("${target}" PRIVATE -O0 -g0)
   endif()

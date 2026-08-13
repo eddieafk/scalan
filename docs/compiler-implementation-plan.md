@@ -33,10 +33,10 @@ The current scaffold has a small Phase 11 codegen prototype because it is useful
 for end-to-end smoke testing, but that does not mean Phases 7-10 are complete.
 The implementation queue should resume in phase order:
 
-1. Phase 7: strengthen `cpp-nscplugin` typed-AST-to-NIR lowering.
-2. Phase 8: strengthen `cpp-tools/checker` and NIR verification.
-3. Phase 9: implement `cpp-tools/linker` global indexing and reachability.
-4. Phase 10: add `cpp-tools/interflow` pass manager and first checked passes.
+1. Phase 7: strengthen `nscplugin` typed-AST-to-NIR lowering.
+2. Phase 8: strengthen `tools/checker` and NIR verification.
+3. Phase 9: implement `tools/linker` global indexing and reachability.
+4. Phase 10: add `tools/interflow` pass manager and first checked passes.
 5. Phase 11: return to LLVM codegen after the linked NIR surface is reliable.
 
 Phase 11 work should stay limited to smoke-test scaffolding until the Phase 7-10
@@ -45,17 +45,17 @@ queue items above are in place.
 ## Proposed Repository Layout
 
 ```text
-cpp-nscplugin/
+nscplugin/
   include/scalanative/nscplugin/
   src/
   tests/
 
-cpp-nir/
+nir/
   include/scalanative/nir/
   src/
   tests/
 
-cpp-tools/
+tools/
   build/
     include/scalanative/tools/build/
     src/
@@ -77,21 +77,29 @@ cpp-tools/
     src/
     tests/
 
-cpp-frontend/
+frontend/
   source/
   lexer/
   parser/
   ast/
   typecheck/
 
-cpp-runtime/
+runtime/
   memory/
   platform/
 
-cpp-tests/
-  golden/
-  integration/
-  runtime/
+tests/
+  include/
+  issues/
+  runner/
+  smoke/
+  v0/
+    examples/
+    tests/
+  v0.1.0-alpha0.1.0/
+    val/
+    inval/
+    run/
 ```
 
 `frontend/` is the new C++ source compiler. `nscplugin/` keeps the Scala Native
@@ -572,7 +580,7 @@ Exit criteria:
 
 Current scaffold status:
 
-- `cpp-nir` contains an initial module/definition model plus a textual writer.
+- `nir` contains an initial module/definition model plus a textual writer.
 - The typed-AST-to-NIR bridge emits package/object/member-shaped definitions
   with simple Scala-like signatures such as `()Int`.
 - Declarations with initializers now emit structured function bodies that render
@@ -634,7 +642,7 @@ Exit criteria:
 
 Current scaffold status:
 
-- `cpp-nscplugin` emits package/object/member-shaped NIR definitions from the
+- `nscplugin` emits package/object/member-shaped NIR definitions from the
   typed AST.
 - Declarations with initializers emit structured NIR function bodies for
   literals, parameters, simple binary expressions, block-local scaffolding,
@@ -674,44 +682,44 @@ Current scaffold status:
   preserve that reference for later type tests or casts. Typed local `val` and
   `var` initializers plus mutable local assignments use the same boxed storage.
   Typed `Any` class and module `val`/`var` fields initialize and mutate through
-  that same boxed storage; `cpp-examples/AnyFields.scala` exercises `Int`,
+  that same boxed storage; `tests/v0/examples/AnyFields.scala` exercises `Int`,
   `Long`, and `Boolean` field values through the optimized native pipeline.
   Constructor parameters typed `Any` now use the same boxed `Object` storage for
   direct class allocation and parent-constructor forwarding;
-  `cpp-examples/AnyConstructorParameters.scala` covers constructor `Int`,
+  `tests/v0/examples/AnyConstructorParameters.scala` covers constructor `Int`,
   `Long`, and `Boolean` values through the optimized native pipeline.
   `Unit` and `Symbol` now join that boxed `Any` path for explicit and inferred
   `Array[Any]` object slots, locals, fields, constructor parameters, and direct
-  `Any` parameters; `cpp-examples/AnyUnitSymbol.scala` exercises `isInstanceOf`
+  `Any` parameters; `tests/v0/examples/AnyUnitSymbol.scala` exercises `isInstanceOf`
   checks and `Symbol` round-trips through the optimized native pipeline.
   `String` now joins the same Object ABI whenever it is stored as `Any`;
-  `cpp-examples/AnyString.scala` covers boxed String locals, `Array[Any]`
+  `tests/v0/examples/AnyString.scala` covers boxed String locals, `Array[Any]`
   entries, `isInstanceOf[String]`, `asInstanceOf[String]`, `toString`, content
   equality, and content hash values through the optimized native pipeline.
   Boxed and reference-backed `Any.toString`, `println(any)`, and String
   concatenation now lower through `scala.scalanative.runtime.anyToString`;
-  `cpp-examples/AnyToString.scala` covers boxed primitive, `Unit`, `Symbol`,
+  `tests/v0/examples/AnyToString.scala` covers boxed primitive, `Unit`, `Symbol`,
   `Null`, and class-reference formatting through the optimized native pipeline.
   Resolvable user-defined zero-argument `toString` members now win over that
   compiler fallback for direct calls, and the generic `Any` helper now probes
   the runtime vtable for compatible custom `toString` slots before falling back
-  to descriptor names; `cpp-examples/CustomToString.scala` demonstrates direct,
+  to descriptor names; `tests/v0/examples/CustomToString.scala` demonstrates direct,
   base-typed, `Any`-typed, `println`, and concatenation calls.
   Compiler-known `equals(value)` now lowers through the same equality NIR used
-  by `==`; `cpp-examples/Equals.scala` covers primitive, String, reference,
+  by `==`; `tests/v0/examples/Equals.scala` covers primitive, String, reference,
   typed-null, and `Any` identity comparisons through the optimized pipeline.
   Boxed `Any` equality now lowers through `scala.scalanative.runtime.anyEquals`;
-  `cpp-examples/AnyEquals.scala` covers boxed `Int`, `Boolean`, `Long`, `Unit`,
+  `tests/v0/examples/AnyEquals.scala` covers boxed `Int`, `Boolean`, `Long`, `Unit`,
   `Symbol`, primitive-vs-`Any` comparison, and object identity through the
   optimized pipeline.
   Direct Unit equality through `.equals`, `==`, and `!=`, plus Unit `hashCode`,
   now lower without trying to compare or hash a raw Unit payload: Unit-to-Unit
   equality is `true`, direct Unit-to-non-Unit equality is `false`,
   Unit-to-`Any` equality delegates through boxed `Any`, and direct Unit hashCode
-  is `0`; `cpp-examples/UnitEqualsHashCode.scala` and
-  `cpp-examples/UnitOperators.scala` cover those direct and boxed paths.
+  is `0`; `tests/v0/examples/UnitEqualsHashCode.scala` and
+  `tests/v0/examples/UnitOperators.scala` cover those direct and boxed paths.
   Compiler-known `hashCode`/`hashCode()` now lowers through typed hash helpers;
-  `cpp-examples/HashCode.scala` covers primitive, String/Symbol content,
+  `tests/v0/examples/HashCode.scala` covers primitive, String/Symbol content,
   typed-null, object identity, and boxed `Any` hash values through the optimized
   pipeline.
   Non-`Int` mains normalize to process exit code `0`.
@@ -841,7 +849,7 @@ Current scaffold status:
   substitution diagnostics. Runtime signatures erase a type parameter to
   `Object` or its concrete reference upper bound; NIR inserts checked casts when
   an erased field read or method result returns to a concrete static type.
-  `cpp-examples/ReferenceGenerics.scala` and optimized native smoke coverage
+  `tests/v0/examples/ReferenceGenerics.scala` and optimized native smoke coverage
   exercise one- and two-parameter classes, a generic trait declaration, nested
   generic construction, generic member methods, invariant conformance, and
   erased NIR.
@@ -852,7 +860,7 @@ Current scaffold status:
   while specialized field reads and method results unbox before arithmetic,
   comparisons, mutation, or other typed use. Mutable generic constructor fields
   preserve raw storage targets so assignments re-box instead of attempting to
-  write through an unboxed selection. `cpp-examples/PrimitiveGenerics.scala`
+  write through an unboxed selection. `tests/v0/examples/PrimitiveGenerics.scala`
   and optimized native smoke coverage exercise every supported scalar, generic
   class and method round trips, direct mutation, and erased NIR signatures.
   Primitive upper/lower bounds remain deferred.
@@ -865,7 +873,7 @@ Current scaffold status:
   diagnostics that recommend an explicit application where inference cannot
   proceed. Inferred calls reuse the same erased `Object` ABI, boxing, unboxing,
   and checked casts as explicit applications.
-  `cpp-examples/GenericInference.scala` and optimized native smoke coverage
+  `tests/v0/examples/GenericInference.scala` and optimized native smoke coverage
   exercise primitive, reference, bounded, nested, multiple-parameter,
   receiver-member, and generic-inside-generic inference.
 - Expected result types on fields, locals, and methods now complete omitted
@@ -879,7 +887,7 @@ Current scaffold status:
   inside generic method bodies. Interflow also preserves the target reference
   type when folding a cast of `null`, keeping contextually typed conditional
   branches valid after optimization.
-  `cpp-examples/ExpectedGenericInference.scala` and optimized native smoke
+  `tests/v0/examples/ExpectedGenericInference.scala` and optimized native smoke
   coverage exercise these paths and their focused failure diagnostics.
 - Class and trait type parameters now preserve Scala 3 declaration-site `+` and
   `-` variance. Applied-type conformance follows each constructor parameter's
@@ -895,7 +903,7 @@ Current scaffold status:
   subtype relation follows those applied parent patterns, enabling covariant and
   contravariant widening across concrete and still-generic children. Exact
   devirtualization also adapts a statically widened trait receiver before calling
-  a concrete override. `cpp-examples/VarianceAndInheritance.scala` and optimized
+  a concrete override. `tests/v0/examples/VarianceAndInheritance.scala` and optimized
   native smoke coverage exercise direct, transitive, and forwarded generic
   inheritance, inherited storage, both variance directions, illegal positions,
   invariant rejection, and erased dispatch.
@@ -916,7 +924,7 @@ Current scaffold status:
   parameter, and diagnoses missing or ambiguous evidence. Selected arguments are
   recorded on the typed module and lowered as ordinary erased call arguments;
   concrete reference overrides reconstruct their semantic parameter type inside
-  the erased body. `cpp-examples/ContextualAbstractions.scala` and optimized
+  the erased body. `tests/v0/examples/ContextualAbstractions.scala` and optimized
   native smoke coverage exercise value-inferred, contextual-only, mixed
   value/context, mixed expected-result/context, forwarded, repeated-`using`,
   explicit, and locally overridden evidence.
@@ -1139,7 +1147,7 @@ Current scaffold status:
   reaches NIR or LLVM. Focused native-output, malformed-arity, shadowing,
   import-resolution, specialization, runtime-shape, boxing/unboxing, and NIR
   erasure coverage starts the compact `SmokeTests7.cpp` translation unit, while
-  `cpp-examples/CompiletimeConstValueOpt.scala` provides the public example.
+  `tests/v0/examples/CompiletimeConstValueOpt.scala` provides the public example.
   General `Option` collection methods and companion construction remain part of
   the staged standard-library surface rather than this compiler intrinsic.
   Compiler-owned `scala.compiletime.constValueTuple[T]` now materializes the
@@ -1160,7 +1168,7 @@ Current scaffold status:
   `SmokeTests7.cpp` coverage checks Tuple2/Tuple3 and EmptyTuple layout, native
   output, imports, aliases, specialization, shadowing, diagnostics,
   boxing/unboxing, demand-driven arities, and NIR erasure. The public example is
-  `cpp-examples/CompiletimeConstValueTuple.scala`. General tuple algorithms and
+  `tests/v0/examples/CompiletimeConstValueTuple.scala`. General tuple algorithms and
   `*:`-based compile-time recursion remain later milestones.
   Compiler-owned `scala.compiletime.summonAll[T]` now takes a tuple whose
   elements are the evidence types to resolve and returns that same static tuple
@@ -1183,7 +1191,7 @@ Current scaffold status:
   and covers native output, canonical/renamed/qualified calls, tuple aliases,
   inline specialization, primitive and companion evidence, Tuple1/Tuple2/Tuple3
   layouts, `EmptyTuple`, shadowing, diagnostics, demand-driven arities, and NIR
-  erasure. `cpp-examples/CompiletimeSummonAll.scala` provides the public example.
+  erasure. `tests/v0/examples/CompiletimeSummonAll.scala` provides the public example.
   Ordinary tuple value literals now have their own AST node and accept Scala 3
   parenthesized syntax with 2 through 22 elements. A single parenthesized
   expression remains ordinary grouping, a trailing comma is accepted only once
@@ -1201,7 +1209,7 @@ Current scaffold status:
   the normal specialized accessor path. `SmokeTests8.cpp` covers native output,
   direct and stored values, mixed Tuple3 values, nesting, trailing commas,
   grouping, evaluation order, boundary diagnostics, demand-driven layout,
-  boxing/unboxing, and NIR erasure. `cpp-examples/TupleValues.scala` is the public
+  boxing/unboxing, and NIR erasure. `tests/v0/examples/TupleValues.scala` is the public
   example. `Tuple1` and `EmptyTuple` retain their explicit construction forms.
   Scala 3 `head *: tail` construction now parses all colon-ending binary
   operators right-associatively and recognizes `*:` as the tuple prepend
@@ -1224,7 +1232,7 @@ Current scaffold status:
   right association, singleton and multi-element chains, grouped types, stored
   and literal tails, reference elements, head-before-tail evaluation, boundary
   diagnostics, exact demand-driven layout, boxing/projections, and NIR erasure.
-  `cpp-examples/TupleCons.scala` is the public example.
+  `tests/v0/examples/TupleCons.scala` is the public example.
   Closed tuple values now support Scala 3's statically typed `head`, `tail`, and
   `size` operations directly on parenthesized, explicit, stored, and cons-built
   tuples. `head` selects erased `_1` storage and restores the exact primitive,
@@ -1244,7 +1252,7 @@ Current scaffold status:
   output, exact head/reference types, Tuple3-to-Tuple2-to-Tuple1-to-EmptyTuple
   tails, singleton sizes, cons-built and direct receivers, evaluation count,
   demand-driven layout, diagnostics, and NIR erasure.
-  `cpp-examples/TupleOperations.scala` is the public example.
+  `tests/v0/examples/TupleOperations.scala` is the public example.
   Closed tuple values now also support Scala 3's statically typed `apply(n)`
   contract and its shorthand `tuple(n)` spelling. Literal, constant-folded, and
   stable singleton Int indices reduce `Tuple.Elem[This, n.type]` to the exact
@@ -1260,7 +1268,7 @@ Current scaffold status:
   output, both call spellings, exact primitive/String/reference types, folded and
   stable indices, direct and cons-built receivers, evaluation count, diagnostic
   boundaries, NIR projections, and non-tuple `apply` preservation.
-  `cpp-examples/TupleApply.scala` is the public example.
+  `tests/v0/examples/TupleApply.scala` is the public example.
   Closed tuples now additionally support Scala 3's precise `init` and `last`
   operations. `init` computes the covariant TupleN prefix, copies erased `_1`
   through `_(N - 1)` fields into a smaller flat runtime tuple, and returns the
@@ -1274,7 +1282,7 @@ Current scaffold status:
   starts a fresh compact partition covering native output, exact result types,
   Tuple4-to-Tuple3-to-Tuple2-to-Tuple1-to-EmptyTuple prefixes, direct and
   cons-built receivers, evaluation count, demand-driven layout, diagnostics,
-  and NIR erasure. `cpp-examples/TupleInitLast.scala` is the public example.
+  and NIR erasure. `tests/v0/examples/TupleInitLast.scala` is the public example.
   Closed tuples now support Scala 3's precise `left ++ right` concatenation.
   Pre-typecheck discovery combines known operand arities recursively so inferred
   and chained concatenations synthesize their exact result TupleN classes.
@@ -1288,7 +1296,7 @@ Current scaffold status:
   covers native output, exact primitive/String/reference projections, both
   empty identities, chained and cons-built operands, operand order and count,
   demand-driven layouts, boundary diagnostics, and NIR erasure.
-  `cpp-examples/TupleConcat.scala` is the public example.
+  `tests/v0/examples/TupleConcat.scala` is the public example.
   Closed tuples now support Scala 3 `map` with named objects or classes extending
   the demand-driven `scala.PolyFunction` marker and defining the generic unary
   method `apply[A](value: A)`. Typechecking specializes that method independently
@@ -1304,7 +1312,7 @@ Current scaffold status:
   `SmokeTests14.cpp` starts a new compact partition covering native output,
   identity/applied/constant result specialization, exact projections, effect and
   application order, empty behavior, demand-driven layout, diagnostics, and NIR
-  erasure. `cpp-examples/TupleMap.scala` is the named-mapper public example.
+  erasure. `tests/v0/examples/TupleMap.scala` is the named-mapper public example.
   Direct `Tuple.map` arguments now also accept the explicitly typed Scala 3
   polymorphic-function literal form `[A] => (value: A) => body`. The parser
   retains its type and value parameters as a dedicated expression. Typechecking
@@ -1318,7 +1326,7 @@ Current scaffold status:
   it, and elides body evaluation for `EmptyTuple`. `SmokeTests15.cpp` begins a
   fresh compact partition for parser/type/result coverage, captures, native
   output, exact projections, empty behavior, diagnostics, and NIR erasure;
-  `cpp-examples/PolymorphicTupleMap.scala` is the public example.
+  `tests/v0/examples/PolymorphicTupleMap.scala` is the public example.
   Explicit direct invocation of the same literal is now supported through one
   type application and one value argument, for example
   `([A] => (value: A) => value)[Int](42)`. Tuple mapping and direct invocation
@@ -1331,7 +1339,7 @@ Current scaffold status:
   `SmokeTests16.cpp` starts another compact partition covering native behavior,
   primitive and reference identity, applied and constant results, captures,
   arity/shape/conformance diagnostics, demand-driven output, and NIR erasure.
-  `cpp-examples/PolymorphicFunctionInvocation.scala` is the public example.
+  `tests/v0/examples/PolymorphicFunctionInvocation.scala` is the public example.
   Immutable local, object, and class `val` declarations can now retain the same
   unary literal and invoke it repeatedly with explicit type arguments. The
   literal body is checked once at its definition, while each call substitutes
@@ -1344,7 +1352,7 @@ Current scaffold status:
   `SmokeTests17.cpp` covers repeated heterogeneous calls, mutable local captures,
   object/class values, implicit and effectful selected receivers, applied
   results, native output, storage/NIR erasure, and the new diagnostics;
-  `cpp-examples/StoredPolymorphicFunction.scala` is the public example. Passing
+  `tests/v0/examples/StoredPolymorphicFunction.scala` is the public example. Passing
   or returning polymorphic function values is handled by the runtime closure
   slice below; higher-kinded type-lambda application remains a later milestone.
   Declared unary Scala 3 polymorphic-function types such as
@@ -1360,7 +1368,7 @@ Current scaffold status:
   `SmokeTests18.cpp` provides a fresh compact partition for parsing, declared
   types, alias chains, precise mapped results, selected/implicit receiver order,
   empty behavior, diagnostics, and storage/NIR erasure;
-  `cpp-examples/PolymorphicFunctionAliases.scala` is the public example.
+  `tests/v0/examples/PolymorphicFunctionAliases.scala` is the public example.
   Non-capturing polymorphic-function literals can now cross those declared
   runtime boundaries. Typechecking synthesizes a closure class implementing the
   demand-driven `scala.PolyFunction` marker, with one erased virtual method
@@ -1377,7 +1385,7 @@ Current scaffold status:
   passing/returning/forwarding,
   runtime aliases, direct factory invocation, precise tuple results, evaluation
   order, empty behavior, and diagnostics;
-  `cpp-examples/RuntimePolymorphicFunctions.scala` is the public example.
+  `tests/v0/examples/RuntimePolymorphicFunctions.scala` is the public example.
   Runtime polymorphic closures now carry captured environments. Immutable
   lexical values become typed constructor fields, so primitive captures stay
   unboxed and generic/reference captures remain traced through ordinary class
@@ -1394,7 +1402,7 @@ Current scaffold status:
   and generic captures, implicit/explicit receiver capture, runtime passing and
   aliasing, direct invocation, `Tuple.map`, empty behavior, evaluation order,
   and deferred-case diagnostics;
-  `cpp-examples/CapturedRuntimePolymorphicFunctions.scala` is the public example.
+  `tests/v0/examples/CapturedRuntimePolymorphicFunctions.scala` is the public example.
   Compiler-owned `scala.compiletime.requireConst(value)` accepts Boolean, Byte,
   Short, Int, Long, Float, Double, Char, and String arguments through canonical,
   renamed, or qualified calls. It reuses inline substitution and constant
@@ -1424,7 +1432,7 @@ Current scaffold status:
   `null`, numeric zero, zero character, or `false` literal in the generated
   `$init`, so no callable intrinsic reaches LLVM. `SmokeTests6.cpp` covers
   generic/reference/scalar fields, mutation, shadowing, diagnostics, runtime
-  output, and NIR erasure, while `cpp-examples/CompiletimeUninitialized.scala`
+  output, and NIR erasure, while `tests/v0/examples/CompiletimeUninitialized.scala`
   provides a compact public example.
   Compiler-owned `scala.compiletime.error(message)` now emits user-defined
   diagnostics when a call survives inline expansion. Exact imports, aliases,
@@ -1847,7 +1855,7 @@ Exit criteria:
 
 Current scaffold status:
 
-- `cpp-tools/checker` wraps `nir::Verifier` and reports verifier failures as
+- `tools/checker` wraps `nir::Verifier` and reports verifier failures as
   diagnostics.
 - The verifier catches empty module/definition names, missing or malformed
   function signatures, duplicate definitions, declaration bodies, and function
@@ -1925,7 +1933,7 @@ Exit criteria:
 
 Current scaffold status:
 
-- `cpp-tools/linker` builds a global definition index across input modules.
+- `tools/linker` builds a global definition index across input modules.
 - Duplicate globals are diagnosed before reachability runs.
 - Root discovery prefers `scala.scalanative.runtime.main`, falling back to
   explicit `main`-named function definitions when the runtime bridge is absent.
@@ -1980,7 +1988,7 @@ Exit criteria:
 
 Current scaffold status:
 
-- `cpp-tools/interflow` now returns an `InterflowResult` with pass reports,
+- `tools/interflow` now returns an `InterflowResult` with pass reports,
   validation errors, and removed-definition counts.
 - The first pass manager step validates NIR before and after each pass using the
   current NIR verifier.
@@ -2189,7 +2197,7 @@ Current scaffold status:
   types also folds to false after evaluating both payloads in argument order;
   two exact effectful Unit boxes similarly fold to true because their payload
   value is uniquely known, while both payload evaluations remain ordered.
-  `cpp-examples/InterflowOptimizations.scala` now exercises effectful boxed Unit
+  `tests/v0/examples/InterflowOptimizations.scala` now exercises effectful boxed Unit
   equality, hash, `toString`, and string concatenation through source lowering;
   optimized BuildDriver smoke coverage asserts the resulting effect-only calls
   and constants directly in emitted NIR, and verifies that every reported core
@@ -2674,7 +2682,7 @@ Exit criteria:
 
 Current scaffold status:
 
-- `cpp-tools/build` owns a `BuildAction` model for `compile`, `check`,
+- `tools/build` owns a `BuildAction` model for `compile`, `check`,
   `emit-nir`, `emit-llvm`, `build-object`, and `build-binary`.
 - The build config records optimization mode, target triple, native sysroot,
   memory runtime mode, default/static linkage mode, platform/LLD linker
@@ -2724,7 +2732,7 @@ Current scaffold status:
 - `emit-nir`, `emit-llvm`, and the default compile scaffold can write produced
   artifacts to disk and record them in the build result.
 - Native toolchain discovery finds `clang` and LLD from `PATH`, with
-  `CPP_SCALANATIVE_CLANG` and `CPP_SCALANATIVE_LLD` providing explicit paths.
+  `SCALANATIVE_CLANG` and `SCALANATIVE_LLD` providing explicit paths.
 - `--target` and `--sysroot` are forwarded consistently to native compilation,
   target-library probes, Clang link-plan inspection, and the final link. Missing
   or non-directory sysroots are diagnosed before frontend or native work starts.
@@ -2883,7 +2891,7 @@ Current scaffold status:
   standard hierarchy covers the required runtime failures.
 
   Stable generated-runtime builtins now live as LLVM source resources under
-  `cpp-tools/codegen/resources/runtime`. CMake embeds those `.ll` files into the
+  `tools/codegen/resources/runtime`. CMake embeds those `.ll` files into the
   codegen library, so compiler binaries remain self-contained while lifecycle
   and exception IR can be maintained independently from the C++ lowering
   implementation. Layout- and program-dependent metadata stays generated in
@@ -3654,7 +3662,7 @@ Current scaffold status:
   duplication, read-only views, and bulk transfer remain later slices.
 - The frontend seeds a tiny runtime builtin, `println(value): Unit`, for the
   currently supported literal/value subset.
-- `cpp-nscplugin` emits `scala.scalanative.runtime.println : (Unknown)Unit` as a
+- `nscplugin` emits `scala.scalanative.runtime.println : (Unknown)Unit` as a
   NIR runtime declaration and maps `println(...)` calls to that intrinsic.
 - LLVM codegen pre-scans structured NIR for string literals, emits private
   global byte constants, and lowers string values to `ptr`.
@@ -3882,7 +3890,7 @@ Started choices:
 - Formatter baseline: `.clang-format` using LLVM style.
 - Test framework: first pass uses plain executable smoke tests through CTest;
   a richer framework can be introduced when the test surface grows.
-- Module prefix: top-level modules and CMake targets use `cpp-`.
+- Module prefix: top-level modules and CMake targets are unprefixed.
 - CI shape: GitHub Actions configure, build, and CTest workflow.
 
 ### M1: Parseable Scala Subset

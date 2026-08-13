@@ -9,6 +9,9 @@ tests/
   issues/                        focused regressions for reported issues
   runner/                        data-driven Scala test runner
   smoke/                         directly implemented, named C++ smoke tests
+  v0/
+    examples/                    archived pre-versioned public examples
+    tests/                       archived pre-versioned test sources
   v0.1.0-alpha0.1.0/
     val/                         Scala sources that must compile
     inval/                       Scala sources that must not compile
@@ -25,5 +28,6 @@ Direct C++ smoke tests use
 are registered through `scalanative_add_smoke_test`, which gives each executable
 and CTest case a stable name.
 
-The former `cpp-tests/smoke` suite remains mounted by `tests/CMakeLists.txt` as
-legacy coverage while tests are migrated into this structure incrementally.
+The material under `v0/` is preserved as an inactive historical baseline and is
+not registered by `tests/CMakeLists.txt`. All active coverage uses the named,
+versioned model beginning with `v0.1.0-alpha0.1.0`.

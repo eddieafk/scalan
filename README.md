@@ -1,4 +1,4 @@
-# cpp-scalanative
+# scalanative
 
 This repository is starting a C++ bootstrap implementation of a Scala Native
 compiler.
@@ -9,17 +9,17 @@ The intended pipeline is:
 Source -> Lexer -> Parser -> AST -> Typecheck -> NIR -> LLVM IR -> native binary
 ```
 
-The initial project uses `cpp-` prefixed modules:
+The compiler is split into these modules:
 
-- `cpp-support`: source management, diagnostics, arenas, IDs, and GC handle stubs.
-- `cpp-frontend`: source, lexer, parser, AST, and typecheck scaffolding.
-- `cpp-nir`: C++ NIR model, builder, text writer, and verifier.
-- `cpp-nscplugin`: typed-AST-to-NIR lowering boundary.
-- `cpp-tools/{build,checker,codegen,interflow,linker}`: Scala Native-inspired
+- `support`: source management, diagnostics, arenas, IDs, and GC handle stubs.
+- `frontend`: source, lexer, parser, AST, and typecheck scaffolding.
+- `nir`: C++ NIR model, builder, text writer, and verifier.
+- `nscplugin`: typed-AST-to-NIR lowering boundary.
+- `tools/{build,checker,codegen,interflow,linker}`: Scala Native-inspired
   tool phases.
-- `cpp-runtime`: runtime ABI and hybrid GC/arena configuration scaffolding.
-- `cpp-driver`: `cpp-scalanative` command-line entry point.
-- `cpp-tests`: smoke tests.
+- `runtime`: runtime ABI and hybrid GC/arena configuration scaffolding.
+- `driver`: `scalanative` command-line entry point.
+- `tests`: versioned valid, invalid, runtime, and direct C++ smoke tests.
 
 ## Build
 
@@ -53,50 +53,51 @@ ctest --test-dir build/debug --output-on-failure \
 make test-version-debug
 ```
 
-The former `cpp-tests/smoke` executable remains available at its existing path
-as legacy coverage while its cases are migrated incrementally.
+The pre-versioned test sources and public examples are preserved for reference
+under `tests/v0/{tests,examples}`. They are not registered with CMake; active
+coverage starts at `tests/v0.1.0-alpha0.1.0`.
 
 Try the scaffold compiler:
 
 ```sh
-build/debug/cpp-driver/cpp-scalanative --emit-llvm path/to/Main.scala
+build/debug/driver/scalanative --emit-llvm path/to/Main.scala
 
 # Emit compact LLVM IR without source debug metadata.
-build/debug/cpp-driver/cpp-scalanative --emit-llvm --no-debug-info \
+build/debug/driver/scalanative --emit-llvm --no-debug-info \
   path/to/Main.scala
 
 # Run Interflow and request aggressive native optimization.
-build/debug/cpp-driver/cpp-scalanative --build-binary --opt-level 3 \
+build/debug/driver/scalanative --build-binary --opt-level 3 \
   path/to/Main.scala
 
 # Compile the explicit reference-generics example.
-build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
-  --output /tmp/reference-generics cpp-examples/ReferenceGenerics.scala
+build/debug/driver/scalanative --build-binary --optimize \
+  --output /tmp/reference-generics tests/v0/examples/ReferenceGenerics.scala
 
 # Compile the boxed primitive-generics example.
-build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
-  --output /tmp/primitive-generics cpp-examples/PrimitiveGenerics.scala
+build/debug/driver/scalanative --build-binary --optimize \
+  --output /tmp/primitive-generics tests/v0/examples/PrimitiveGenerics.scala
 
 # Compile the argument-driven generic-inference example.
-build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
-  --output /tmp/generic-inference cpp-examples/GenericInference.scala
+build/debug/driver/scalanative --build-binary --optimize \
+  --output /tmp/generic-inference tests/v0/examples/GenericInference.scala
 
 # Compile the expected-result generic-inference example.
-build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
+build/debug/driver/scalanative --build-binary --optimize \
   --output /tmp/expected-generic-inference \
-  cpp-examples/ExpectedGenericInference.scala
+  tests/v0/examples/ExpectedGenericInference.scala
 
 # Compile declaration-site variance and applied generic inheritance.
-build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
+build/debug/driver/scalanative --build-binary --optimize \
   --output /tmp/variance-inheritance \
-  cpp-examples/VarianceAndInheritance.scala
+  tests/v0/examples/VarianceAndInheritance.scala
 
 # Compile ranked/recursive contextual evidence, bounded, union/intersection,
 # and class/trait/type-alias infix Scala 3 `given` imports, interoperable
 # `given`/`using` and legacy `implicit` syntax, and generic `derives` clauses.
-build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
+build/debug/driver/scalanative --build-binary --optimize \
   --output /tmp/contextual-abstractions \
-  cpp-examples/ContextualAbstractions.scala
+  tests/v0/examples/ContextualAbstractions.scala
 
 # Compile generic and non-generic `inline def` call-site specialization with
 # explicit or inferred type arguments, curried ordinary clauses, contextual
@@ -246,89 +247,89 @@ build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
 # Stable top-level and object `inline val` constants, including
 # dependency-ordered aliases of earlier inline values, are substituted directly
 # and can drive branches.
-build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
+build/debug/driver/scalanative --build-binary --optimize \
   --output /tmp/inline-summon-from \
-  cpp-examples/InlineSummonFrom.scala
+  tests/v0/examples/InlineSummonFrom.scala
 
-build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
+build/debug/driver/scalanative --build-binary --optimize \
   --output /tmp/inline-erased-value \
-  cpp-examples/InlineErasedValue.scala
+  tests/v0/examples/InlineErasedValue.scala
 
-build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
+build/debug/driver/scalanative --build-binary --optimize \
   --output /tmp/compiletime-constants \
-  cpp-examples/CompiletimeConstants.scala
+  tests/v0/examples/CompiletimeConstants.scala
 
-build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
+build/debug/driver/scalanative --build-binary --optimize \
   --output /tmp/compiletime-const-value-opt \
-  cpp-examples/CompiletimeConstValueOpt.scala
+  tests/v0/examples/CompiletimeConstValueOpt.scala
 
-build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
+build/debug/driver/scalanative --build-binary --optimize \
   --output /tmp/compiletime-const-value-tuple \
-  cpp-examples/CompiletimeConstValueTuple.scala
+  tests/v0/examples/CompiletimeConstValueTuple.scala
 
-build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
+build/debug/driver/scalanative --build-binary --optimize \
   --output /tmp/compiletime-summon-all \
-  cpp-examples/CompiletimeSummonAll.scala
+  tests/v0/examples/CompiletimeSummonAll.scala
 
-build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
+build/debug/driver/scalanative --build-binary --optimize \
   --output /tmp/tuple-values \
-  cpp-examples/TupleValues.scala
+  tests/v0/examples/TupleValues.scala
 
-build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
+build/debug/driver/scalanative --build-binary --optimize \
   --output /tmp/tuple-cons \
-  cpp-examples/TupleCons.scala
+  tests/v0/examples/TupleCons.scala
 
-build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
+build/debug/driver/scalanative --build-binary --optimize \
   --output /tmp/tuple-operations \
-  cpp-examples/TupleOperations.scala
+  tests/v0/examples/TupleOperations.scala
 
-build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
+build/debug/driver/scalanative --build-binary --optimize \
   --output /tmp/tuple-apply \
-  cpp-examples/TupleApply.scala
+  tests/v0/examples/TupleApply.scala
 
-build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
+build/debug/driver/scalanative --build-binary --optimize \
   --output /tmp/tuple-init-last \
-  cpp-examples/TupleInitLast.scala
+  tests/v0/examples/TupleInitLast.scala
 
-build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
+build/debug/driver/scalanative --build-binary --optimize \
   --output /tmp/tuple-concat \
-  cpp-examples/TupleConcat.scala
+  tests/v0/examples/TupleConcat.scala
 
-build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
+build/debug/driver/scalanative --build-binary --optimize \
   --output /tmp/tuple-map \
-  cpp-examples/TupleMap.scala
+  tests/v0/examples/TupleMap.scala
 
-build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
+build/debug/driver/scalanative --build-binary --optimize \
   --output /tmp/polymorphic-tuple-map \
-  cpp-examples/PolymorphicTupleMap.scala
+  tests/v0/examples/PolymorphicTupleMap.scala
 
-build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
+build/debug/driver/scalanative --build-binary --optimize \
   --output /tmp/polymorphic-function-invocation \
-  cpp-examples/PolymorphicFunctionInvocation.scala
+  tests/v0/examples/PolymorphicFunctionInvocation.scala
 
-build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
+build/debug/driver/scalanative --build-binary --optimize \
   --output /tmp/stored-polymorphic-function \
-  cpp-examples/StoredPolymorphicFunction.scala
+  tests/v0/examples/StoredPolymorphicFunction.scala
 
-build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
+build/debug/driver/scalanative --build-binary --optimize \
   --output /tmp/polymorphic-function-aliases \
-  cpp-examples/PolymorphicFunctionAliases.scala
+  tests/v0/examples/PolymorphicFunctionAliases.scala
 
-build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
+build/debug/driver/scalanative --build-binary --optimize \
   --output /tmp/runtime-polymorphic-functions \
-  cpp-examples/RuntimePolymorphicFunctions.scala
+  tests/v0/examples/RuntimePolymorphicFunctions.scala
 
-build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
+build/debug/driver/scalanative --build-binary --optimize \
   --output /tmp/captured-runtime-polymorphic-functions \
-  cpp-examples/CapturedRuntimePolymorphicFunctions.scala
+  tests/v0/examples/CapturedRuntimePolymorphicFunctions.scala
 
-build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
+build/debug/driver/scalanative --build-binary --optimize \
   --output /tmp/compiletime-uninitialized \
-  cpp-examples/CompiletimeUninitialized.scala
+  tests/v0/examples/CompiletimeUninitialized.scala
 
-build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
+build/debug/driver/scalanative --build-binary --optimize \
   --output /tmp/compiletime-summon-inline \
-  cpp-examples/CompiletimeSummonInline.scala
+  tests/v0/examples/CompiletimeSummonInline.scala
 
 # Compile explicit Scala 3 union/intersection types across parameters, results,
 # locals, nested generic arguments, generic type aliases, inferred branch
@@ -336,19 +337,19 @@ build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
 # generic alternatives (including user-declared transparent classes/traits),
 # members projected from intersection constituents (including synthesized
 # intersection result types), or a union's shared base-type join.
-build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
+build/debug/driver/scalanative --build-binary --optimize \
   --output /tmp/composite-types \
-  cpp-examples/CompositeTypes.scala
+  tests/v0/examples/CompositeTypes.scala
 
 # Compile top-level and stable-object-nested product `Mirror` derivation.
-build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
+build/debug/driver/scalanative --build-binary --optimize \
   --output /tmp/product-mirror-derivation \
-  cpp-examples/ProductMirrorDerivation.scala
+  tests/v0/examples/ProductMirrorDerivation.scala
 
 # Compile source-ordered sums, including a deriving sum nested in a stable object.
-build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
+build/debug/driver/scalanative --build-binary --optimize \
   --output /tmp/sum-mirror-derivation \
-  cpp-examples/SumMirrorDerivation.scala
+  tests/v0/examples/SumMirrorDerivation.scala
 ```
 
 Optimization levels select distinct Interflow pipelines: `O1` performs one
@@ -359,8 +360,8 @@ aggressive convergence cycle. Native compilation receives the matching Clang
 Reuse validated NIR or generated LLVM IR across builds with `--cache-dir`:
 
 ```sh
-build/debug/cpp-driver/cpp-scalanative --emit-llvm --opt-level 3 \
-  --cache-dir /tmp/cpp-scalanative-cache --output /tmp/Main.ll \
+build/debug/driver/scalanative --emit-llvm --opt-level 3 \
+  --cache-dir /tmp/scalanative-cache --output /tmp/Main.ll \
   path/to/Main.scala
 ```
 
@@ -373,8 +374,8 @@ Write a machine-readable summary alongside the normal CLI output with
 `--build-report`:
 
 ```sh
-build/debug/cpp-driver/cpp-scalanative --build-binary \
-  --cache-dir /tmp/cpp-scalanative-cache --output /tmp/Main \
+build/debug/driver/scalanative --build-binary \
+  --cache-dir /tmp/scalanative-cache --output /tmp/Main \
   --build-report /tmp/Main.build.json path/to/Main.scala
 ```
 
@@ -393,7 +394,7 @@ Store repeatable project settings in a versioned JSON configuration:
   "output": "build/Main",
   "optimizationLevel": 2,
   "debugInfo": true,
-  "cacheDirectory": ".cpp-scalanative-cache",
+  "cacheDirectory": ".scalanative-cache",
   "linkMode": "default",
   "linker": "lld",
   "runtimeLibraries": [],
@@ -403,7 +404,7 @@ Store repeatable project settings in a versioned JSON configuration:
 ```
 
 ```sh
-build/debug/cpp-driver/cpp-scalanative --config cpp-scalanative.json
+build/debug/driver/scalanative --config scalanative.json
 ```
 
 The optional `target`, `sysroot`, `gc`, and `optimizationReport` keys map to the
@@ -416,11 +417,11 @@ keys, duplicate keys, invalid types, and unsupported schema versions are errors.
 Select LLVM's LLD explicitly with `--linker lld`:
 
 ```sh
-build/debug/cpp-driver/cpp-scalanative --build-binary --linker lld \
+build/debug/driver/scalanative --build-binary --linker lld \
   --output /tmp/Main path/to/Main.scala
 ```
 
-The driver discovers LLD on `PATH`; `CPP_SCALANATIVE_LLD` can name an explicit
+The driver discovers LLD on `PATH`; `SCALANATIVE_LLD` can name an explicit
 executable. Linker selection changes only the final executable cache identity,
 so compatible LLVM and native object entries remain reusable.
 
@@ -428,7 +429,7 @@ Cross-target native builds can select both a target triple and an installed
 target filesystem root:
 
 ```sh
-build/debug/cpp-driver/cpp-scalanative --build-binary \
+build/debug/driver/scalanative --build-binary \
   --target aarch64-unknown-linux-gnu --sysroot /opt/aarch64-sysroot \
   --linker lld --output /tmp/Main-aarch64 path/to/Main.scala
 ```
@@ -449,7 +450,7 @@ Request fully static native linkage with `--static` or
 `--link-mode static`:
 
 ```sh
-build/debug/cpp-driver/cpp-scalanative --build-binary --static \
+build/debug/driver/scalanative --build-binary --static \
   --output /tmp/Main path/to/Main.scala
 ```
 
@@ -469,13 +470,13 @@ Try the current interflow optimizer coverage example:
 ```sh
 make interflow-example
 
-build/debug/cpp-driver/cpp-scalanative --emit-nir --optimize \
+build/debug/driver/scalanative --emit-nir --optimize \
   --optimization-report /tmp/interflow-report.json \
-  cpp-examples/InterflowOptimizations.scala
+  tests/v0/examples/InterflowOptimizations.scala
 
-build/debug/cpp-driver/cpp-scalanative --emit-llvm --optimize \
+build/debug/driver/scalanative --emit-llvm --optimize \
   --optimization-report /tmp/interflow-report.json \
-  cpp-examples/InterflowOptimizations.scala
+  tests/v0/examples/InterflowOptimizations.scala
 ```
 
 This first version validates the module shape and phase wiring. It emits minimal

@@ -101,7 +101,7 @@ std::string artifactStem(std::string_view name) {
                 : '-';
   }
   const auto nonce = std::chrono::steady_clock::now().time_since_epoch().count();
-  return "cpp-scalanative-test-" + stem + "-" + std::to_string(nonce);
+  return "scalanative-test-" + stem + "-" + std::to_string(nonce);
 }
 
 void removeRunArtifacts(const std::filesystem::path& binary,
