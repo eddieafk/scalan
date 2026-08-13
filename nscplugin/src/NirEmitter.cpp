@@ -633,6 +633,9 @@ std::string qualifyTypeName(const std::string& name, const ValueContext& context
   if (name == "BufferOverflowException") {
     return std::string(support::StdNames::JavaNioBufferOverflowException);
   }
+  if (name == "InvalidMarkException") {
+    return std::string(support::StdNames::JavaNioInvalidMarkException);
+  }
   if (name == support::StdNames::ByteBuffer ||
       name == support::StdNames::JavaNioByteBuffer) {
     return std::string(support::StdNames::JavaNioByteBuffer);
@@ -873,6 +876,12 @@ std::string byteBufferRuntimeName(const frontend::AstExpression& expression,
   }
   if (callee.text == support::StdNames::ByteBufferRewind) {
     return std::string(support::StdNames::RuntimeByteBufferRewind);
+  }
+  if (callee.text == support::StdNames::ByteBufferMark) {
+    return std::string(support::StdNames::RuntimeByteBufferMark);
+  }
+  if (callee.text == support::StdNames::ByteBufferReset) {
+    return std::string(support::StdNames::RuntimeByteBufferReset);
   }
   return {};
 }
@@ -5576,6 +5585,8 @@ nir::Module NirEmitter::emit(const frontend::TypedModule& module) const {
                    support::StdNames::JavaNioBufferUnderflowException &&
                declaration.symbolName !=
                    support::StdNames::JavaNioBufferOverflowException &&
+               declaration.symbolName !=
+                   support::StdNames::JavaNioInvalidMarkException &&
                declaration.symbolName != support::StdNames::JavaLangStackTraceElement;
       });
   if (!hasUserDeclarations) {
@@ -5656,6 +5667,12 @@ nir::Module NirEmitter::emit(const frontend::TypedModule& module) const {
                           "(java.nio.ByteBuffer)java.nio.ByteBuffer",
                           support::SourceSpan::none());
   builder.addFunctionDecl(std::string(support::StdNames::RuntimeByteBufferRewind),
+                          "(java.nio.ByteBuffer)java.nio.ByteBuffer",
+                          support::SourceSpan::none());
+  builder.addFunctionDecl(std::string(support::StdNames::RuntimeByteBufferMark),
+                          "(java.nio.ByteBuffer)java.nio.ByteBuffer",
+                          support::SourceSpan::none());
+  builder.addFunctionDecl(std::string(support::StdNames::RuntimeByteBufferReset),
                           "(java.nio.ByteBuffer)java.nio.ByteBuffer",
                           support::SourceSpan::none());
   builder.addFunctionDecl(std::string(support::StdNames::RuntimeStringLength),

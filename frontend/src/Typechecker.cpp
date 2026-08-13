@@ -485,7 +485,9 @@ bool isByteBufferOperationName(std::string_view operation) {
          operation == support::StdNames::ByteBufferPut ||
          operation == support::StdNames::ByteBufferClear ||
          operation == support::StdNames::ByteBufferFlip ||
-         operation == support::StdNames::ByteBufferRewind;
+         operation == support::StdNames::ByteBufferRewind ||
+         operation == support::StdNames::ByteBufferMark ||
+         operation == support::StdNames::ByteBufferReset;
 }
 
 bool isByteBufferType(const TypeInfo& type) {
@@ -1687,6 +1689,10 @@ std::vector<TypedDeclaration> standardExceptionDeclarations() {
       exceptionSubclass("BufferOverflowException",
                         std::string(support::StdNames::JavaNioBufferOverflowException),
                         runtimeException.symbolName);
+  TypedDeclaration invalidMark =
+      exceptionSubclass("InvalidMarkException",
+                        std::string(support::StdNames::JavaNioInvalidMarkException),
+                        illegalState.symbolName);
   TypedDeclaration stackTraceElement;
   stackTraceElement.kind = AstDeclarationKind::Class;
   stackTraceElement.name = "StackTraceElement";
@@ -1726,7 +1732,8 @@ std::vector<TypedDeclaration> standardExceptionDeclarations() {
           std::move(classCast),           std::move(arrayStore),
           std::move(indexOutOfBounds),    std::move(arrayIndexOutOfBounds),
           std::move(negativeArraySize),   std::move(bufferUnderflow),
-          std::move(bufferOverflow),      std::move(stackTraceElement)};
+          std::move(bufferOverflow),      std::move(invalidMark),
+          std::move(stackTraceElement)};
 }
 
 std::vector<std::pair<std::string, AstDeclaration>>
@@ -3648,6 +3655,9 @@ void Typechecker::addRuntimeBuiltins(Scope& scope) {
   addExceptionSubclass("BufferOverflowException",
                        std::string(support::StdNames::JavaNioBufferOverflowException),
                        std::string(support::StdNames::JavaLangRuntimeException));
+  addExceptionSubclass("InvalidMarkException",
+                       std::string(support::StdNames::JavaNioInvalidMarkException),
+                       std::string(support::StdNames::JavaLangIllegalStateException));
 
   SymbolInfo stackTraceElement;
   stackTraceElement.kind = AstDeclarationKind::Class;
@@ -11521,6 +11531,8 @@ bool Typechecker::analyzeZoneExpression(
             selected.text == support::StdNames::ByteBufferClear ||
             selected.text == support::StdNames::ByteBufferFlip ||
             selected.text == support::StdNames::ByteBufferRewind ||
+            selected.text == support::StdNames::ByteBufferMark ||
+            selected.text == support::StdNames::ByteBufferReset ||
             ((selected.text == support::StdNames::ByteBufferPosition ||
               selected.text == support::StdNames::ByteBufferLimit) &&
              expression.children.size() == 2);

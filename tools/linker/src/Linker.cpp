@@ -172,6 +172,10 @@ bool isRuntimeIndexOutOfBoundsOperation(std::string_view name) {
          name == support::StdNames::RuntimeByteBufferPutAt;
 }
 
+bool isRuntimeInvalidMarkOperation(std::string_view name) {
+  return name == support::StdNames::RuntimeByteBufferReset;
+}
+
 bool isRuntimeNullReceiverOperation(std::string_view name) {
   return name == support::StdNames::RuntimeStringLength ||
          name == support::StdNames::RuntimeStringToString ||
@@ -194,7 +198,9 @@ bool isRuntimeNullReceiverOperation(std::string_view name) {
          name == support::StdNames::RuntimeByteBufferPutAt ||
          name == support::StdNames::RuntimeByteBufferClear ||
          name == support::StdNames::RuntimeByteBufferFlip ||
-         name == support::StdNames::RuntimeByteBufferRewind;
+         name == support::StdNames::RuntimeByteBufferRewind ||
+         name == support::StdNames::RuntimeByteBufferMark ||
+         name == support::StdNames::RuntimeByteBufferReset;
 }
 
 std::string ownerNameOf(const std::string& definitionName) {
@@ -1029,6 +1035,12 @@ collectDefinitionReferences(const nir::Definition& definition,
         support::StdNames::JavaLangIndexOutOfBoundsException);
     if (globals.contains(indexOutOfBoundsName)) {
       references.push_back(indexOutOfBoundsName);
+    }
+  }
+  if (isFunction(definition.kind) && isRuntimeInvalidMarkOperation(definition.name)) {
+    const std::string invalidMarkName(support::StdNames::JavaNioInvalidMarkException);
+    if (globals.contains(invalidMarkName)) {
+      references.push_back(invalidMarkName);
     }
   }
   if (isFunction(definition.kind) && isRuntimeArrayOperation(definition.name)) {

@@ -91,6 +91,8 @@ struct StdNames final {
       "java.nio.BufferUnderflowException";
   inline static constexpr std::string_view JavaNioBufferOverflowException =
       "java.nio.BufferOverflowException";
+  inline static constexpr std::string_view JavaNioInvalidMarkException =
+      "java.nio.InvalidMarkException";
   inline static constexpr std::string_view JavaNioByteBuffer = "java.nio.ByteBuffer";
   inline static constexpr std::string_view ThrowableMessage = "message";
   inline static constexpr std::string_view ThrowableCause = "cause";
@@ -155,6 +157,8 @@ struct StdNames final {
   inline static constexpr std::string_view ByteBufferClear = "clear";
   inline static constexpr std::string_view ByteBufferFlip = "flip";
   inline static constexpr std::string_view ByteBufferRewind = "rewind";
+  inline static constexpr std::string_view ByteBufferMark = "mark";
+  inline static constexpr std::string_view ByteBufferReset = "reset";
   inline static constexpr std::string_view ArrayEmpty = "empty";
   inline static constexpr std::string_view ArrayFill = "fill";
   inline static constexpr std::string_view ArrayRange = "range";
@@ -220,6 +224,10 @@ struct StdNames final {
       "scala.scalanative.runtime.byteBufferFlip";
   inline static constexpr std::string_view RuntimeByteBufferRewind =
       "scala.scalanative.runtime.byteBufferRewind";
+  inline static constexpr std::string_view RuntimeByteBufferMark =
+      "scala.scalanative.runtime.byteBufferMark";
+  inline static constexpr std::string_view RuntimeByteBufferReset =
+      "scala.scalanative.runtime.byteBufferReset";
   inline static constexpr std::string_view RuntimeStringLength =
       "scala.scalanative.runtime.stringLength";
   inline static constexpr std::string_view RuntimeStringToString =

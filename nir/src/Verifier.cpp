@@ -125,7 +125,9 @@ bool isByteBufferMutation(std::string_view target) {
          target == support::StdNames::RuntimeByteBufferPutAt ||
          target == support::StdNames::RuntimeByteBufferClear ||
          target == support::StdNames::RuntimeByteBufferFlip ||
-         target == support::StdNames::RuntimeByteBufferRewind;
+         target == support::StdNames::RuntimeByteBufferRewind ||
+         target == support::StdNames::RuntimeByteBufferMark ||
+         target == support::StdNames::RuntimeByteBufferReset;
 }
 
 std::string compactTypeName(std::string_view typeName) {

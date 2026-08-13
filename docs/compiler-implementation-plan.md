@@ -3673,7 +3673,23 @@ Current scaffold status:
   unambiguous intrinsic, and scoped-zone provenance follows the same primitive
   read and receiver-preserving write rules.
 
-  Byte-order state, relative and absolute multibyte access, mark/reset, slicing,
+  Byte-order state, relative and absolute multibyte access, slicing,
+  duplication, read-only views, and bulk transfer remain later slices.
+- Runtime ABI 58 completes the buffer's existing position/limit/mark state with
+  `ByteBuffer.mark()` and `reset()`. Mark records the current position and both
+  operations return the same buffer for fluent use. Reset restores the recorded
+  position without discarding the mark, so repeated resets remain valid until
+  another state transition invalidates it.
+
+  `reset()` throws a catchable `java.nio.InvalidMarkException` when no mark has
+  been recorded or when position, limit, clear, flip, or rewind has invalidated
+  it. The concise message is `ByteBuffer mark is not set`, and the exception
+  follows the standard `IllegalStateException` hierarchy. A rejected reset
+  leaves position unchanged, while absolute byte access continues to preserve
+  both position and mark. Frontend typing, NIR mutation verification, linker
+  reachability, and LLVM lowering all share the two explicit runtime intrinsics.
+
+  Byte-order state, relative and absolute multibyte access, slicing,
   duplication, read-only views, and bulk transfer remain later slices.
 - The frontend seeds a tiny runtime builtin, `println(value): Unit`, for the
   currently supported literal/value subset.

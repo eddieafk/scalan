@@ -1345,6 +1345,36 @@ void emitRuntimeTypeHelpers(std::ostringstream& out,
   out << "  unreachable\n";
   out << "}\n\n";
 
+  out << "define internal ptr @__scalanative_byte_buffer_mark(ptr %buffer) {\n";
+  out << "entry:\n";
+  out << "  call void @__scalanative_byte_buffer_require(ptr %buffer)\n";
+  out << "  %position_slot = getelementptr i8, ptr %buffer, i64 "
+      << ByteBufferPositionOffset << "\n";
+  out << "  %mark_slot = getelementptr i8, ptr %buffer, i64 " << ByteBufferMarkOffset
+      << "\n";
+  out << "  %position = load i32, ptr %position_slot\n";
+  out << "  store i32 %position, ptr %mark_slot\n";
+  out << "  ret ptr %buffer\n";
+  out << "}\n\n";
+
+  out << "define internal ptr @__scalanative_byte_buffer_reset(ptr %buffer) {\n";
+  out << "entry:\n";
+  out << "  call void @__scalanative_byte_buffer_require(ptr %buffer)\n";
+  out << "  %mark_slot = getelementptr i8, ptr %buffer, i64 " << ByteBufferMarkOffset
+      << "\n";
+  out << "  %mark = load i32, ptr %mark_slot\n";
+  out << "  %valid = icmp sge i32 %mark, 0\n";
+  out << "  br i1 %valid, label %update, label %invalid\n";
+  out << "update:\n";
+  out << "  %position_slot = getelementptr i8, ptr %buffer, i64 "
+      << ByteBufferPositionOffset << "\n";
+  out << "  store i32 %mark, ptr %position_slot\n";
+  out << "  ret ptr %buffer\n";
+  out << "invalid:\n";
+  out << "  call void @__scalanative_throw_byte_buffer_invalid_mark()\n";
+  out << "  unreachable\n";
+  out << "}\n\n";
+
   out << "define internal ptr @__scalanative_byte_buffer_set_position(ptr %buffer, "
          "i32 %value) {\n";
   out << "entry:\n";
@@ -2976,6 +3006,8 @@ void emitExceptionRuntimeHelpers(
       std::string(support::StdNames::JavaNioBufferUnderflowException));
   const auto bufferOverflow =
       classLayouts.find(std::string(support::StdNames::JavaNioBufferOverflowException));
+  const auto invalidMark =
+      classLayouts.find(std::string(support::StdNames::JavaNioInvalidMarkException));
   const auto message = fields.find(messageFieldName);
   const auto cause = fields.find(causeFieldName);
   const auto trace = fields.find(traceFieldName);
@@ -3070,6 +3102,8 @@ void emitExceptionRuntimeHelpers(
                      ".str.byte_buffer_underflow", 21);
   emitRuntimeFailure("__scalanative_throw_byte_buffer_overflow", bufferOverflow,
                      ".str.byte_buffer_overflow", 20);
+  emitRuntimeFailure("__scalanative_throw_byte_buffer_invalid_mark", invalidMark,
+                     ".str.byte_buffer_invalid_mark", 27);
 
   const auto emitCheckedCondition = [&](std::string_view helperName,
                                         std::string_view failureHelper) {
@@ -6299,13 +6333,18 @@ std::string lowerCall(const nir::Value& value, const std::string& expectedType,
       target == support::StdNames::RuntimeByteBufferFlip;
   const bool isRuntimeByteBufferRewind =
       target == support::StdNames::RuntimeByteBufferRewind;
+  const bool isRuntimeByteBufferMark =
+      target == support::StdNames::RuntimeByteBufferMark;
+  const bool isRuntimeByteBufferReset =
+      target == support::StdNames::RuntimeByteBufferReset;
   const bool isRuntimeByteBufferOperation =
       isRuntimeByteBufferCapacity || isRuntimeByteBufferPosition ||
       isRuntimeByteBufferSetPosition || isRuntimeByteBufferLimit ||
       isRuntimeByteBufferSetLimit || isRuntimeByteBufferRemaining ||
       isRuntimeByteBufferHasRemaining || isRuntimeByteBufferGet ||
       isRuntimeByteBufferGetAt || isRuntimeByteBufferPut || isRuntimeByteBufferPutAt ||
-      isRuntimeByteBufferClear || isRuntimeByteBufferFlip || isRuntimeByteBufferRewind;
+      isRuntimeByteBufferClear || isRuntimeByteBufferFlip ||
+      isRuntimeByteBufferRewind || isRuntimeByteBufferMark || isRuntimeByteBufferReset;
   const bool isRuntimeArrayAlloc = target == support::StdNames::RuntimeArrayAlloc;
   const bool isRuntimeArrayLength = target == support::StdNames::RuntimeArrayLength;
   const bool isRuntimeArrayApply = target == support::StdNames::RuntimeArrayApply;
@@ -7345,7 +7384,8 @@ std::string lowerCall(const nir::Value& value, const std::string& expectedType,
     const bool returnsBuffer = isRuntimeByteBufferSetPosition ||
                                isRuntimeByteBufferSetLimit || isRuntimeByteBufferPut ||
                                isRuntimeByteBufferPutAt || isRuntimeByteBufferClear ||
-                               isRuntimeByteBufferFlip || isRuntimeByteBufferRewind;
+                               isRuntimeByteBufferFlip || isRuntimeByteBufferRewind ||
+                               isRuntimeByteBufferMark || isRuntimeByteBufferReset;
     const bool returnsBoolean = isRuntimeByteBufferHasRemaining;
     const bool returnsByte = isRuntimeByteBufferGet || isRuntimeByteBufferGetAt;
     std::vector<std::string> expectedParameters{
@@ -7404,8 +7444,12 @@ std::string lowerCall(const nir::Value& value, const std::string& expectedType,
       helper = "__scalanative_byte_buffer_clear";
     } else if (isRuntimeByteBufferFlip) {
       helper = "__scalanative_byte_buffer_flip";
-    } else {
+    } else if (isRuntimeByteBufferRewind) {
       helper = "__scalanative_byte_buffer_rewind";
+    } else if (isRuntimeByteBufferMark) {
+      helper = "__scalanative_byte_buffer_mark";
+    } else {
+      helper = "__scalanative_byte_buffer_reset";
     }
 
     std::vector<std::string> extraArguments;
@@ -10238,7 +10282,9 @@ CodegenResult LlvmCodegen::emit(const linker::LinkedProgram& program,
   out << "@.str.byte_buffer_underflow = private unnamed_addr constant [21 x i8] "
          "c\"ByteBuffer underflow\\00\"\n";
   out << "@.str.byte_buffer_overflow = private unnamed_addr constant [20 x i8] "
-         "c\"ByteBuffer overflow\\00\"\n\n";
+         "c\"ByteBuffer overflow\\00\"\n";
+  out << "@.str.byte_buffer_invalid_mark = private unnamed_addr constant [27 x i8] "
+         "c\"ByteBuffer mark is not set\\00\"\n\n";
   out << "@.str.stack_trace_unknown = private unnamed_addr constant [10 x i8] "
          "c\"<unknown>\\00\"\n";
   out << "@.str.stack_trace_element_unknown = private unnamed_addr constant [25 x "
