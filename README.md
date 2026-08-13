@@ -190,8 +190,15 @@ build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
 # values can retain the same literal and be invoked repeatedly, such as
 # `val identity = [A] => (value: A) => value; identity[Int](42)`. Their body is
 # checked once, their captures and selected receiver are preserved at each call,
-# and compiler-known backing storage is erased. Aliasing, passing, or returning
-# these values still awaits the general runtime closure-object milestone.
+# and compiler-known backing storage is erased. Passing a literal directly or
+# returning it through a declared runtime boundary materializes a non-capturing
+# literal as a `scala.PolyFunction` closure object. The resulting value can be
+# passed, returned, aliased at runtime, invoked dynamically, and used by
+# `Tuple.map`; its erased virtual `apply` ABI restores precise primitive, String,
+# and reference results.
+# Capturing runtime closure objects remain a later milestone and receive a
+# focused diagnostic, while compiler-known capturing values retain
+# zero-allocation lowering.
 # Compiler-owned `scala.compiletime.requireConst(value)` accepts Boolean, Byte,
 # Short, Int, Long, Float, Double, Char, and String expressions and verifies
 # them after inline substitution and constant folding. Canonical, renamed, and
@@ -293,6 +300,10 @@ build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
 build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
   --output /tmp/polymorphic-function-aliases \
   cpp-examples/PolymorphicFunctionAliases.scala
+
+build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
+  --output /tmp/runtime-polymorphic-functions \
+  cpp-examples/RuntimePolymorphicFunctions.scala
 
 build/debug/cpp-driver/cpp-scalanative --build-binary --optimize \
   --output /tmp/compiletime-uninitialized \

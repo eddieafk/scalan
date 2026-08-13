@@ -168,13 +168,22 @@ struct TypedPolymorphicFunctionApplication {
   std::vector<TypeInfo> mappedResultTypes;
   bool isInvocation = false;
   bool isTupleMap = false;
+  bool isRuntimeInvocation = false;
+  bool isRuntimeTupleMap = false;
   bool hasReceiver = false;
   AstExpression receiver;
   TypeInfo receiverType;
+  AstExpression runtimeFunction;
+  TypeInfo runtimeFunctionType;
   AstExpression body;
   std::vector<TypedExpressionInfo> expressionTypes;
   std::vector<TypedContextApplication> contextApplications;
   std::vector<TypedInlineApplication> inlineApplications;
+};
+
+struct TypedPolymorphicFunctionClosure {
+  support::SourceSpan span;
+  std::string className;
 };
 
 struct TypedModule {
@@ -185,6 +194,7 @@ struct TypedModule {
   std::vector<TypedInlineApplication> inlineApplications;
   std::vector<TypedPolymorphicFunctionApplication> polymorphicFunctionApplications;
   std::vector<support::SourceSpan> polymorphicFunctionValueDeclarations;
+  std::vector<TypedPolymorphicFunctionClosure> polymorphicFunctionClosures;
 };
 
 struct SymbolInfo {
@@ -303,6 +313,8 @@ private:
   [[nodiscard]] bool polymorphicFunctionMatchesDeclaredType(
       const TypeInfo& declared,
       const TypedPolymorphicFunctionApplication& function) const;
+  [[nodiscard]] TypeInfo typecheckRuntimePolymorphicFunctionLiteral(
+      const AstExpression& function, const TypeInfo& expectedType, Scope& scope);
   void
   recordPolymorphicFunctionApplication(TypedPolymorphicFunctionApplication application);
   [[nodiscard]] bool
@@ -517,6 +529,8 @@ private:
   std::vector<TypedInlineApplication> inlineApplications_;
   std::vector<TypedPolymorphicFunctionApplication> polymorphicFunctionApplications_;
   std::vector<support::SourceSpan> polymorphicFunctionValueDeclarations_;
+  std::vector<TypedPolymorphicFunctionClosure> polymorphicFunctionClosures_;
+  std::vector<TypedDeclaration> polymorphicFunctionClosureDeclarations_;
   std::unordered_set<std::string> validatedInlineValueSymbols_;
   std::unordered_set<std::string> directZoneReceiverEscapes_;
   std::unordered_map<std::string, std::vector<AstExpression>> receiverMethodCallSites_;

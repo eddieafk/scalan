@@ -1344,9 +1344,9 @@ Current scaffold status:
   `SmokeTests17.cpp` covers repeated heterogeneous calls, mutable local captures,
   object/class values, implicit and effectful selected receivers, applied
   results, native output, storage/NIR erasure, and the new diagnostics;
-  `cpp-examples/StoredPolymorphicFunction.scala` is the public example. Passing or
-  returning polymorphic function values, general runtime closure objects, and
-  higher-kinded type-lambda application remain later milestones.
+  `cpp-examples/StoredPolymorphicFunction.scala` is the public example. Passing
+  or returning polymorphic function values is handled by the runtime closure
+  slice below; higher-kinded type-lambda application remains a later milestone.
   Declared unary Scala 3 polymorphic-function types such as
   `[A] => A => A` now parse without consuming a match or catch arrow and resolve
   to the demand-driven `scala.PolyFunction` runtime marker. Immutable identifier
@@ -1356,12 +1356,27 @@ Current scaffold status:
   each concrete element type specializes the original abstract body, class
   receivers are bound once after the tuple receiver, and an effectful selected
   receiver is still evaluated once for `EmptyTuple`. Mutable and selected-value
-  aliases remain runtime-storage boundaries, while declared polymorphic
-  parameters receive a focused closure-object-lowering diagnostic when invoked.
+  aliases remain runtime-storage boundaries.
   `SmokeTests18.cpp` provides a fresh compact partition for parsing, declared
   types, alias chains, precise mapped results, selected/implicit receiver order,
   empty behavior, diagnostics, and storage/NIR erasure;
   `cpp-examples/PolymorphicFunctionAliases.scala` is the public example.
+  Non-capturing polymorphic-function literals can now cross those declared
+  runtime boundaries. Typechecking synthesizes a closure class implementing the
+  demand-driven `scala.PolyFunction` marker, with one erased virtual method
+  `apply(PolyFunction, Object): Object`. Runtime values can be passed, returned,
+  forwarded, stored in ordinary locals, aliased, dynamically invoked with an
+  explicit type argument, and supplied to concrete or empty `Tuple.map` calls.
+  Lowering evaluates the function before its argument, the tuple before its
+  mapper, and empty-tuple mappers exactly once; call results are unboxed or cast
+  back to their specialized primitive, String, or reference types. Existing
+  compiler-known literals and aliases retain their zero-allocation lowering.
+  Capturing runtime closures are deliberately diagnosed until environment-field
+  synthesis is implemented. `SmokeTests19.cpp` is the new compact partition for
+  native behavior, runtime ABI and virtual dispatch, passing/returning/forwarding,
+  runtime aliases, direct factory invocation, precise tuple results, evaluation
+  order, empty behavior, and diagnostics;
+  `cpp-examples/RuntimePolymorphicFunctions.scala` is the public example.
   Compiler-owned `scala.compiletime.requireConst(value)` accepts Boolean, Byte,
   Short, Int, Long, Float, Double, Char, and String arguments through canonical,
   renamed, or qualified calls. It reuses inline substitution and constant

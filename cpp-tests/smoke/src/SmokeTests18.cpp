@@ -130,8 +130,6 @@ object Values {
   val selectedAlias = new Holder().identity
   val wrongParameter: [A] => Int => A = [A] => (value: A) => value
   val wrongResult: [A] => A => String = [A] => (value: A) => value
-
-  def invokeRuntime(function: [A] => A => A): Int = function[Int](1)
 }
 )";
 
@@ -212,10 +210,7 @@ object Values {
                "[A] => A => R") &&
       contains(invalid.diagnosticsText,
                "polymorphic function result type A does not conform to declared "
-               "result type String") &&
-      contains(invalid.diagnosticsText,
-               "runtime polymorphic function values require closure-object "
-               "lowering before invocation");
+               "result type String");
 
   if (status == 0 &&
       outputText == "42:x:true\n7:local\n5:invoke\nselected:9:selected:false:1\n1\n"

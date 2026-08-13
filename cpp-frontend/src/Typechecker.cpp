@@ -2201,6 +2201,8 @@ TypedModule Typechecker::typecheck(const AstModule& module) {
   inlineApplications_.clear();
   polymorphicFunctionApplications_.clear();
   polymorphicFunctionValueDeclarations_.clear();
+  polymorphicFunctionClosures_.clear();
+  polymorphicFunctionClosureDeclarations_.clear();
   validatedInlineValueSymbols_.clear();
   directZoneReceiverEscapes_.clear();
   receiverMethodCallSites_.clear();
@@ -2286,6 +2288,9 @@ TypedModule Typechecker::typecheck(const AstModule& module) {
   for (TypedDeclaration& declaration : localFactoryDeclarations_) {
     typed.declarations.push_back(std::move(declaration));
   }
+  for (TypedDeclaration& declaration : polymorphicFunctionClosureDeclarations_) {
+    typed.declarations.push_back(std::move(declaration));
+  }
   attachDerivedInstances(typed.declarations);
   propagateZoneReceiverEffects();
   for (const AstExpression& body : zoneBodiesToAnalyze_) {
@@ -2298,6 +2303,7 @@ TypedModule Typechecker::typecheck(const AstModule& module) {
   typed.inlineApplications = inlineApplications_;
   typed.polymorphicFunctionApplications = polymorphicFunctionApplications_;
   typed.polymorphicFunctionValueDeclarations = polymorphicFunctionValueDeclarations_;
+  typed.polymorphicFunctionClosures = polymorphicFunctionClosures_;
   return typed;
 }
 
@@ -2497,6 +2503,9 @@ TypedDeclaration Typechecker::typecheckDeclaration(const AstDeclaration& declara
                          ? TypeInfo{SimpleTypeKind::Object,
                                     std::string(support::StdNames::ScalaPolyFunction)}
                          : polyFunction->type;
+          if (declared.polymorphicFunctionType) {
+            inferred = declared;
+          }
         } else {
           inferred = inferExpressionType(
               declaration.initializer, expressionScope,
@@ -7374,6 +7383,153 @@ bool Typechecker::polymorphicFunctionMatchesDeclaredType(
   return typesMatchForOverride(declaredResult, functionResult);
 }
 
+TypeInfo Typechecker::typecheckRuntimePolymorphicFunctionLiteral(
+    const AstExpression& function, const TypeInfo& expectedType, Scope& scope) {
+  std::optional<TypedPolymorphicFunctionApplication> application =
+      typecheckPolymorphicFunctionLiteral(
+          function, {}, function.span, scope,
+          "runtime polymorphic function literal must have the form "
+          "[A] => (value: A) => body");
+  if (!application.has_value()) {
+    return expectedType;
+  }
+  if (!polymorphicFunctionMatchesDeclaredType(expectedType, *application)) {
+    const std::string expectedResult = expectedType.typeArguments.size() == 2
+                                           ? expectedType.typeArguments[1].name
+                                           : "Unknown";
+    diagnostics_.error(function.span, "polymorphic function result type " +
+                                          application->resultType.name +
+                                          " does not conform to declared result type " +
+                                          expectedResult);
+    return expectedType;
+  }
+
+  std::vector<std::string> captures;
+  std::unordered_set<std::string> capturedNames;
+  std::function<void(const AstExpression&, std::unordered_set<std::string>&)>
+      collectCaptures;
+  collectCaptures = [&](const AstExpression& expression,
+                        std::unordered_set<std::string>& boundNames) {
+    if (expression.kind == AstExpressionKind::Identifier &&
+        !boundNames.contains(expression.text)) {
+      auto symbol = scope.find(expression.text);
+      if (symbol != scope.end() &&
+          (symbol->second.isLexicalValue || symbol->second.isInstanceMember) &&
+          capturedNames.insert(expression.text).second) {
+        captures.push_back(expression.text);
+      }
+      return;
+    }
+    if ((expression.kind == AstExpressionKind::This ||
+         expression.kind == AstExpressionKind::Super) &&
+        capturedNames.insert("this").second) {
+      captures.push_back("this");
+      return;
+    }
+    if (expression.kind == AstExpressionKind::Block) {
+      std::unordered_set<std::string> blockNames = boundNames;
+      for (const AstExpression& child : expression.children) {
+        if (child.kind == AstExpressionKind::LocalDeclaration) {
+          for (const AstExpression& initializer : child.children) {
+            collectCaptures(initializer, blockNames);
+          }
+          if (!child.text.empty()) {
+            blockNames.insert(child.text);
+          }
+        } else {
+          collectCaptures(child, blockNames);
+        }
+      }
+      return;
+    }
+    for (const AstExpression& child : expression.children) {
+      collectCaptures(child, boundNames);
+    }
+  };
+  std::unordered_set<std::string> boundNames{application->parameterName};
+  collectCaptures(application->body, boundNames);
+  if (!captures.empty()) {
+    std::string names;
+    for (std::size_t index = 0; index < captures.size(); ++index) {
+      if (index != 0) {
+        names += ", ";
+      }
+      names += captures[index];
+    }
+    diagnostics_.error(
+        function.span,
+        "runtime polymorphic function closures cannot capture values in this "
+        "milestone: " +
+            names);
+    return expectedType;
+  }
+
+  const auto sameSpan = [&](const TypedPolymorphicFunctionClosure& closure) {
+    return closure.span.source == function.span.source &&
+           closure.span.start == function.span.start &&
+           closure.span.length == function.span.length;
+  };
+  if (std::none_of(polymorphicFunctionClosures_.begin(),
+                   polymorphicFunctionClosures_.end(), sameSpan)) {
+    const std::string simpleName = "$polyclosure$" +
+                                   std::to_string(function.span.source.value()) + "$" +
+                                   std::to_string(function.span.start);
+    const std::string className = qualify(currentPackageName_, simpleName);
+
+    TypedDeclaration closure;
+    closure.kind = AstDeclarationKind::Class;
+    closure.name = simpleName;
+    closure.symbolName = className;
+    closure.span = function.span;
+    closure.declaredType = std::string(support::StdNames::ScalaPolyFunction);
+    closure.parentTypes = {std::string(support::StdNames::ScalaPolyFunction)};
+    closure.parentTypeInfos = {TypeInfo{
+        SimpleTypeKind::Object, std::string(support::StdNames::ScalaPolyFunction)}};
+    closure.inferredType = TypeInfo{SimpleTypeKind::Object, className};
+    closure.inferredType.runtimeName = className;
+
+    TypeParameterInfo typeParameter;
+    typeParameter.name = application->parameterType.name;
+    typeParameter.symbolName = application->parameterType.typeParameterSymbolName;
+    typeParameter.lowerBound = TypeInfo{SimpleTypeKind::Nothing, "Nothing"};
+    typeParameter.upperBound = TypeInfo{SimpleTypeKind::Object, "Object"};
+
+    TypedDeclaration apply;
+    apply.kind = AstDeclarationKind::Def;
+    apply.name = std::string(support::StdNames::TupleApply);
+    apply.symbolName = className + "." + apply.name;
+    apply.span = function.span;
+    apply.typeParameters = {std::move(typeParameter)};
+    apply.parameters = {application->parameterName + ": " +
+                        application->parameterType.name};
+    apply.parameterTypes = {application->parameterType};
+    apply.contextualParameters = {false};
+    apply.inlineParameters = {false};
+    apply.parameterClauseSizes = {1};
+    apply.contextualParameterClauses = {false};
+    apply.declaredType = application->resultType.name;
+    apply.inferredType = application->resultType;
+    apply.inferredType.runtimeName = "Object";
+    apply.hasInitializer = true;
+    apply.initializer = application->body;
+    closure.members.push_back(std::move(apply));
+
+    expressionTypes_.insert(expressionTypes_.end(),
+                            application->expressionTypes.begin(),
+                            application->expressionTypes.end());
+    contextApplications_.insert(contextApplications_.end(),
+                                application->contextApplications.begin(),
+                                application->contextApplications.end());
+    inlineApplications_.insert(inlineApplications_.end(),
+                               application->inlineApplications.begin(),
+                               application->inlineApplications.end());
+    polymorphicFunctionClosures_.push_back(
+        TypedPolymorphicFunctionClosure{function.span, className});
+    polymorphicFunctionClosureDeclarations_.push_back(std::move(closure));
+  }
+  return expectedType;
+}
+
 void Typechecker::recordPolymorphicFunctionApplication(
     TypedPolymorphicFunctionApplication application) {
   const auto sameSpan = [&](const TypedPolymorphicFunctionApplication& candidate) {
@@ -7498,10 +7654,16 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
         .type;
   }
   case AstExpressionKind::PolymorphicFunction: {
+    if (expectedType != nullptr && expectedType->polymorphicFunctionType) {
+      return typecheckRuntimePolymorphicFunctionLiteral(expression, *expectedType,
+                                                        scope);
+    }
     diagnostics_.error(
         expression.span,
         "polymorphic function literals are currently supported only as direct "
-        "Tuple.map arguments, direct invocations, or immutable val initializers");
+        "Tuple.map arguments, direct invocations, or immutable val initializers; "
+        "they are also supported as runtime values with an explicit polymorphic "
+        "function type");
     const SymbolInfo* polyFunction = typeSymbolForDeclaredName(
         std::string(support::StdNames::ScalaPolyFunction), &scope);
     return polyFunction == nullptr
@@ -8177,22 +8339,98 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
       recordPolymorphicFunctionApplication(std::move(application));
       return result;
     }
-    if (polymorphicValueTypeApplication != nullptr &&
-        polymorphicValueTarget->kind == AstExpressionKind::Identifier) {
+    std::optional<TypeInfo> runtimePolymorphicFunctionType;
+    if (polymorphicValueTarget->kind == AstExpressionKind::Identifier) {
       auto target = scope.find(polymorphicValueTarget->text);
       if (target != scope.end() && target->second.polymorphicFunctionValue == nullptr &&
-          target->second.type.kind == SimpleTypeKind::Object &&
-          (target->second.type.name == support::StdNames::ScalaPolyFunction ||
-           target->second.type.runtimeName == support::StdNames::ScalaPolyFunction)) {
+          target->second.kind != AstDeclarationKind::Def &&
+          target->second.type.polymorphicFunctionType) {
+        runtimePolymorphicFunctionType = target->second.type;
+      }
+    } else if (polymorphicValueTypeApplication != nullptr &&
+               polymorphicValueTarget->kind == AstExpressionKind::Select &&
+               polymorphicValueTarget->children.size() == 1 &&
+               (polymorphicValueTarget->children.front().kind !=
+                    AstExpressionKind::Identifier ||
+                scope.contains(polymorphicValueTarget->children.front().text))) {
+      const TypeInfo receiver =
+          inferExpressionType(polymorphicValueTarget->children.front(), scope);
+      if (std::optional<SymbolInfo> member =
+              resolvedMemberForReceiverType(receiver, polymorphicValueTarget->text);
+          member.has_value() && member->kind != AstDeclarationKind::Def &&
+          member->polymorphicFunctionValue == nullptr &&
+          member->type.polymorphicFunctionType) {
+        runtimePolymorphicFunctionType = member->type;
+      }
+    } else if (polymorphicValueTypeApplication != nullptr &&
+               polymorphicValueTarget->kind == AstExpressionKind::Call) {
+      const TypeInfo targetType = inferExpressionType(*polymorphicValueTarget, scope);
+      if (targetType.polymorphicFunctionType) {
+        runtimePolymorphicFunctionType = targetType;
+      }
+    }
+    if (runtimePolymorphicFunctionType.has_value()) {
+      if (polymorphicValueTypeApplication == nullptr ||
+          polymorphicValueTypeApplication->typeArguments.size() != 1 ||
+          expression.children.size() != 2) {
         for (std::size_t index = 1; index < expression.children.size(); ++index) {
           (void)inferExpressionType(expression.children[index], scope);
         }
         diagnostics_.error(
             expression.span,
-            "runtime polymorphic function values require closure-object lowering "
-            "before invocation");
+            "runtime polymorphic function invocation requires exactly one "
+            "explicit type argument and one value argument");
         return TypeInfo{SimpleTypeKind::Unknown, "Unknown"};
       }
+
+      const std::string& typeArgumentName =
+          polymorphicValueTypeApplication->typeArguments.front();
+      const TypeInfo typeArgument = typeFromDeclaredName(
+          typeArgumentName, &scope, &polymorphicValueTypeApplication->span);
+      if (typeArgument.kind == SimpleTypeKind::Unknown) {
+        diagnostics_.error(polymorphicValueTypeApplication->span,
+                           "unresolved polymorphic function type argument: " +
+                               typeArgumentName);
+      }
+
+      const TypeInfo& runtimeType = *runtimePolymorphicFunctionType;
+      if (runtimeType.typeArguments.size() != 2 ||
+          !runtimeType.typeArguments.front().typeParameter) {
+        diagnostics_.error(expression.span,
+                           "malformed runtime polymorphic function type");
+        return TypeInfo{SimpleTypeKind::Unknown, "Unknown"};
+      }
+      std::unordered_map<std::string, TypeInfo> substitutions;
+      substitutions[runtimeType.typeArguments.front().typeParameterSymbolName] =
+          typeArgument;
+      const TypeInfo specializedParameter =
+          substituteTypeParameters(runtimeType.typeArguments.front(), substitutions);
+      const TypeInfo specializedResult =
+          substituteTypeParameters(runtimeType.typeArguments[1], substitutions);
+      const TypeInfo argument = inferExpressionType(
+          expression.children[1], scope,
+          typeArgument.kind == SimpleTypeKind::Unknown ? nullptr
+                                                       : &specializedParameter);
+      if (typeArgument.kind != SimpleTypeKind::Unknown &&
+          argument.kind != SimpleTypeKind::Unknown &&
+          !isAssignable(specializedParameter, argument)) {
+        diagnostics_.error(expression.children[1].span,
+                           "argument type " + argument.name +
+                               " does not conform to polymorphic function parameter " +
+                               specializedParameter.name);
+      }
+
+      TypedPolymorphicFunctionApplication application;
+      application.span = expression.span;
+      application.parameterType = runtimeType.typeArguments.front();
+      application.resultType = runtimeType.typeArguments[1];
+      application.typeArguments = {typeArgument};
+      application.mappedResultTypes = {specializedResult};
+      application.isRuntimeInvocation = true;
+      application.runtimeFunction = *polymorphicValueTarget;
+      application.runtimeFunctionType = runtimeType;
+      recordPolymorphicFunctionApplication(std::move(application));
+      return specializedResult;
     }
     if (callCallee.kind == AstExpressionKind::Select &&
         callCallee.children.size() == 1 &&
@@ -8313,40 +8551,66 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
             recordPolymorphicFunctionApplication(std::move(application));
           } else {
             const TypeInfo argumentType = inferExpressionType(function, scope);
-            const SymbolInfo* application = knownMemberForReceiverType(
-                argumentType, std::string(support::StdNames::TupleApply));
-            const SymbolInfo* polyFunction = typeSymbolForDeclaredName(
-                std::string(support::StdNames::ScalaPolyFunction), &scope);
-            const bool polymorphicUnaryApplication =
-                polyFunction != nullptr &&
-                isAssignable(polyFunction->type, argumentType) &&
-                application != nullptr &&
-                application->kind == AstDeclarationKind::Def &&
-                application->typeParameters.size() == 1 &&
-                application->parameterTypes.size() == 1 &&
-                application->parameterClauseSizes.size() == 1 &&
-                application->parameterClauseSizes.front() == 1 &&
-                application->contextualParameters.size() == 1 &&
-                !application->contextualParameters.front() &&
-                application->typeParameters.front().upperBound.kind ==
-                    SimpleTypeKind::Object &&
-                application->typeParameters.front().upperBound.name == "Object" &&
-                application->typeParameters.front().lowerBound.kind ==
-                    SimpleTypeKind::Nothing &&
-                application->parameterTypes.front().typeParameter &&
-                application->parameterTypes.front().typeParameterSymbolName ==
-                    application->typeParameters.front().symbolName;
-            if (!polymorphicUnaryApplication) {
-              diagnostics_.error(function.span,
-                                 "tuple map function must define apply[A](value: A)");
-              return TypeInfo{SimpleTypeKind::Unknown, "Unknown"};
-            }
-            mappedElements.reserve(receiver.typeArguments.size());
-            for (const TypeInfo& element : receiver.typeArguments) {
-              mappedElements.push_back(
-                  specializeResolvedTypeApplication(*application, {element},
-                                                    expression.span, true)
-                      .type);
+            if (argumentType.polymorphicFunctionType) {
+              if (argumentType.typeArguments.size() != 2 ||
+                  !argumentType.typeArguments.front().typeParameter) {
+                diagnostics_.error(function.span,
+                                   "malformed runtime polymorphic function type");
+                return TypeInfo{SimpleTypeKind::Unknown, "Unknown"};
+              }
+              TypedPolymorphicFunctionApplication application;
+              application.span = expression.span;
+              application.parameterType = argumentType.typeArguments.front();
+              application.resultType = argumentType.typeArguments[1];
+              application.typeArguments = receiver.typeArguments;
+              application.isRuntimeTupleMap = true;
+              application.runtimeFunction = function;
+              application.runtimeFunctionType = argumentType;
+              std::unordered_map<std::string, TypeInfo> substitutions;
+              for (const TypeInfo& element : receiver.typeArguments) {
+                substitutions[application.parameterType.typeParameterSymbolName] =
+                    element;
+                application.mappedResultTypes.push_back(
+                    substituteTypeParameters(application.resultType, substitutions));
+              }
+              mappedElements = application.mappedResultTypes;
+              recordPolymorphicFunctionApplication(std::move(application));
+            } else {
+              const SymbolInfo* application = knownMemberForReceiverType(
+                  argumentType, std::string(support::StdNames::TupleApply));
+              const SymbolInfo* polyFunction = typeSymbolForDeclaredName(
+                  std::string(support::StdNames::ScalaPolyFunction), &scope);
+              const bool polymorphicUnaryApplication =
+                  polyFunction != nullptr &&
+                  isAssignable(polyFunction->type, argumentType) &&
+                  application != nullptr &&
+                  application->kind == AstDeclarationKind::Def &&
+                  application->typeParameters.size() == 1 &&
+                  application->parameterTypes.size() == 1 &&
+                  application->parameterClauseSizes.size() == 1 &&
+                  application->parameterClauseSizes.front() == 1 &&
+                  application->contextualParameters.size() == 1 &&
+                  !application->contextualParameters.front() &&
+                  application->typeParameters.front().upperBound.kind ==
+                      SimpleTypeKind::Object &&
+                  application->typeParameters.front().upperBound.name == "Object" &&
+                  application->typeParameters.front().lowerBound.kind ==
+                      SimpleTypeKind::Nothing &&
+                  application->parameterTypes.front().typeParameter &&
+                  application->parameterTypes.front().typeParameterSymbolName ==
+                      application->typeParameters.front().symbolName;
+              if (!polymorphicUnaryApplication) {
+                diagnostics_.error(function.span,
+                                   "tuple map function must define apply[A](value: A)");
+                return TypeInfo{SimpleTypeKind::Unknown, "Unknown"};
+              }
+              mappedElements.reserve(receiver.typeArguments.size());
+              for (const TypeInfo& element : receiver.typeArguments) {
+                mappedElements.push_back(
+                    specializeResolvedTypeApplication(*application, {element},
+                                                      expression.span, true)
+                        .type);
+              }
             }
           }
         }
@@ -9565,7 +9829,15 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
 
     std::vector<TypeInfo> argumentTypes;
     for (std::size_t i = 1; i < expression.children.size(); ++i) {
-      argumentTypes.push_back(inferExpressionType(expression.children[i], scope));
+      const std::size_t parameterIndex = i - 1;
+      const TypeInfo* argumentExpectedType =
+          calleeSymbol != nullptr && calleeSymbol->typeParameters.empty() &&
+                  parameterIndex < calleeSymbol->parameterTypes.size() &&
+                  calleeSymbol->parameterTypes[parameterIndex].polymorphicFunctionType
+              ? &calleeSymbol->parameterTypes[parameterIndex]
+              : nullptr;
+      argumentTypes.push_back(
+          inferExpressionType(expression.children[i], scope, argumentExpectedType));
     }
     TypeInfo calleeType{SimpleTypeKind::Unknown, "Unknown"};
     if (calleeSymbol != nullptr && callee.kind != AstExpressionKind::TypeApply &&
@@ -9683,10 +9955,19 @@ TypeInfo Typechecker::inferExpressionTypeImpl(const AstExpression& expression,
               argumentSpan = expression.children[childIndex + 1].span;
             }
           }
-          diagnostics_.error(argumentSpan, "argument " + std::to_string(i) +
-                                               " of type " + argumentTypes[i].name +
-                                               " does not conform to parameter type " +
-                                               calleeSymbol->parameterTypes[i].name);
+          if (argumentTypes[i].polymorphicFunctionType &&
+              calleeSymbol->parameterTypes[i].polymorphicFunctionType) {
+            diagnostics_.error(
+                argumentSpan,
+                "polymorphic function argument signature does not conform to "
+                "parameter signature");
+          } else {
+            diagnostics_.error(argumentSpan,
+                               "argument " + std::to_string(i) + " of type " +
+                                   argumentTypes[i].name +
+                                   " does not conform to parameter type " +
+                                   calleeSymbol->parameterTypes[i].name);
+          }
         }
         if (!materializedContextArguments ||
             i >= calleeSymbol->contextualParameters.size() ||
@@ -14278,6 +14559,27 @@ bool Typechecker::isAssignable(const TypeInfo& expected, const TypeInfo& actual)
     }
     if (value.kind == SimpleTypeKind::Null && isReferenceType(target)) {
       return true;
+    }
+    if (target.polymorphicFunctionType) {
+      if (!value.polymorphicFunctionType || target.typeArguments.size() != 2 ||
+          value.typeArguments.size() != 2 ||
+          !target.typeArguments.front().typeParameter ||
+          !value.typeArguments.front().typeParameter) {
+        return false;
+      }
+      TypeInfo canonicalParameter{SimpleTypeKind::Object, "$polytype"};
+      canonicalParameter.runtimeName = "Object";
+      std::unordered_map<std::string, TypeInfo> targetSubstitution;
+      targetSubstitution[target.typeArguments.front().typeParameterSymbolName] =
+          canonicalParameter;
+      std::unordered_map<std::string, TypeInfo> valueSubstitution;
+      valueSubstitution[value.typeArguments.front().typeParameterSymbolName] =
+          canonicalParameter;
+      const TypeInfo targetResult =
+          substituteTypeParameters(target.typeArguments[1], targetSubstitution);
+      const TypeInfo valueResult =
+          substituteTypeParameters(value.typeArguments[1], valueSubstitution);
+      return typesMatchForOverride(targetResult, valueResult);
     }
 
     const std::string targetConstructor = target.typeConstructorName;
